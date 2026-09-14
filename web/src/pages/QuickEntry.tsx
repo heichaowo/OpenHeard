@@ -16,7 +16,7 @@ import { bandOf, isValidCallsign, normalizeCallsign } from '@core'
 import type { Mode, Qso } from '@core'
 import { CHANNELS } from '../mock/pending'
 import { useStore } from '../store'
-import { nowUtc } from '../time'
+import { nowUtc, unixFromDisplayedUtc } from '../time'
 
 type FormValues = Pick<
   Qso,
@@ -63,7 +63,12 @@ export default function QuickEntry() {
       message.error('这个频率不在本台能用的波段里')
       return
     }
-    addQso({ ...values, call: normalizeCallsign(values.call), startAt: at.unix(), band })
+    addQso({
+      ...values,
+      call: normalizeCallsign(values.call),
+      startAt: unixFromDisplayedUtc(at),
+      band,
+    })
     message.success(`${normalizeCallsign(values.call)} 已入库`)
     form.resetFields(['call', 'gridsquare', 'qth', 'note'])
     form.setFieldsValue({ at: nowUtc() })

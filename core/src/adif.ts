@@ -25,7 +25,10 @@ export function adifMode(mode: Mode): { mode: string; submode?: string } {
 function watts(power?: string): number | undefined {
   if (!power) return undefined;
   const m = /\d+(\.\d+)?/.exec(power);
-  return m ? Number(m[0]) : undefined;
+  if (!m) return undefined;
+  // TX_PWR 要正数。0 W 不是功率，宁可不写这个字段。
+  const w = Number(m[0]);
+  return w > 0 ? w : undefined;
 }
 
 function field(name: string, value: string | number | undefined): string {

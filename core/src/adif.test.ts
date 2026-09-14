@@ -66,6 +66,8 @@ describe('记录', () => {
     expect(adifRecord({ ...QSO, myPower: '5W' })).toContain('<TX_PWR:1>5 ');
     expect(adifRecord({ ...QSO, myPower: '0.5W' })).toContain('<TX_PWR:3>0.5 ');
     expect(adifRecord({ ...QSO, myPower: '不知道' })).not.toContain('TX_PWR');
+    // TX_PWR 要正数，0 W 不写
+    expect(adifRecord({ ...QSO, myPower: '0W' })).not.toContain('TX_PWR');
   });
 
   it('DMR 同时写 MODE 和 SUBMODE', () => {

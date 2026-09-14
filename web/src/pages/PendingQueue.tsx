@@ -53,6 +53,12 @@ const ORIGIN_LABELS: Record<Activity['origin'], string> = {
   'sdr-dmr': '数字接收机',
 }
 
+/** 聚类应当保证 activities 非空，但类型不保证，所以渲染不能假设。 */
+const originOf = (row: PendingRow) => {
+  const first = row.cluster.activities[0]
+  return first ? ORIGIN_LABELS[first.origin] : '—'
+}
+
 function ActivityTable({ activities }: { activities: Activity[] }) {
   const columns: TableColumnsType<Activity> = [
     { title: '时间', dataIndex: 'startAt', render: utcSec, width: 200 },
@@ -121,6 +127,11 @@ export default function PendingQueue() {
     })
   }
 
+  const straightIn = (row: PendingRow) => {
+    promote(row.cluster.id, row.draft)
+    message.success(`${row.draft.call} 已入库`)
+  }
+
   const submit = (values: FormValues) => {
     if (!editing) return
     const draft: QsoDraft = {
@@ -148,9 +159,7 @@ export default function PendingQueue() {
     {
       title: '信道',
       key: 'channel',
-      render: (_, row) =>
-        row.cluster.activities[0]?.channel ??
-        ORIGIN_LABELS[row.cluster.activities[0]!.origin],
+      render: (_, row) => row.cluster.activities[0]?.channel ?? originOf(row),
     },
     {
       title: '模式',
@@ -190,11 +199,16 @@ export default function PendingQueue() {
     {
       title: '操作',
       key: 'action',
-      width: 160,
+      width: 220,
       render: (_, row) => (
-        <Space>
+        <Space size={0}>
+          {row.missing.length === 0 && (
+            <Button type="link" onClick={() => straightIn(row)}>
+              直接入库
+            </Button>
+          )}
           <Button type="link" onClick={() => open(row)}>
-            确认
+            {row.missing.length === 0 ? '编辑' : '确认'}
           </Button>
           <Popconfirm title="不记这次对话？" onConfirm={() => ignore(row.cluster.id)}>
             <Button type="link" danger>
@@ -226,6 +240,7 @@ export default function PendingQueue() {
         title="确认入库"
         size={420}
         open={editing !== null}
+        maskClosable={false}
         onClose={() => setEditing(null)}
         extra={
           <Button type="primary" onClick={() => form.submit()}>
@@ -242,9 +257,7 @@ export default function PendingQueue() {
               <Descriptions.Item label="频率">{editing.draft.freqMhz} MHz</Descriptions.Item>
               <Descriptions.Item label="波段">{editing.draft.band}</Descriptions.Item>
               <Descriptions.Item label="模式">{editing.draft.mode}</Descriptions.Item>
-              <Descriptions.Item label="来源">
-                {ORIGIN_LABELS[editing.cluster.activities[0]!.origin]}
-              </Descriptions.Item>
+              <Descriptions.Item label="来源">{originOf(editing)}</Descriptions.Item>
             </Descriptions>
             <Form form={form} layout="vertical" onFinish={submit} style={{ marginTop: 24 }}>
               <Form.Item
@@ -302,6 +315,8 @@ export default function PendingQueue() {
               <Form.Item name="note" label="备注">
                 <Input.TextArea rows={2} />
               </Form.Item>
+              {/* 让输入框里按回车也能提交，抽屉标题栏那个按钮在表单外面 */}
+              <Button htmlType="submit" style={{ display: 'none' }} />
             </Form>
           </>
         )}
