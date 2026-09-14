@@ -34,7 +34,8 @@
 |---|---|
 | 模拟 FM 过中继 | 时间、时长、哪个信道，以及这次有没有我们 |
 | 模拟 FM 的对方呼号 | 无 |
-| DMR 过有公开 feed 的网络 | feed 带的全部内容 |
+| DMR 过有公开 feed 的网络 | 本台发射的全部字段 |
+| DMR 的对方呼号 | 另查话务组才有，而且可能为空 |
 | DMR 过没有 feed 的网络 | 无 |
 | HF，以后 | FT8 走 WSJT-X 的 UDP，SSB 无 |
 
@@ -73,6 +74,16 @@ recv  42["mqtt",{"payload":"<json 字符串>"}]
 
 **轮询优于订阅。** CONNECT 之后发 `42["searchHouse",{"query":<rules>,"amount":<n>}]` 可以取历史。2026-09-08 实测一次 `amount: 200` 返回 200 行，跨度 53 天，全部属于该操作者。所以一次查询就能回溯约两个月。
 
+**这条过滤规则同时挡住了对方。** SourceID 查询和 `src_` 房间都只给本台的发射。对方的呼号在他自己的行里。
+
+要拿对方呼号，必须再按 `DestinationID` 查目标话务组。2026-09-14 实测 `DestinationID` 等于 91 的一次查询返回 50 行，含 22 个不同 SourceID。
+
+`condition` 支持 `OR`，服务端按 OR 语义执行。所以一次查询能同时覆盖本台和话务组，两条 rule 写在一起即可。
+
+代价是回溯深度。amount 同为 200 时，src 查询跨 53 天。`DestinationID` 等于 460 跨 3.6 天，等于 91 只跨 51 分钟。话务组越热闹，同样行数覆盖的时间越短。所以轮询间隔必须按话务组定，不能用一个全局值。
+
+join `dst_<TG>` 会收到整个话务组的推送，2026-09-14 实测 91 组每分钟约 20 行。所以话务组一律查历史，不订阅。
+
 历史行和实时行形状不同，这一点坑过一次：
 
 | | 实时 | searchHouse |
@@ -88,6 +99,8 @@ recv  42["mqtt",{"payload":"<json 字符串>"}]
 取 `Session-Stop` 而不取 `Session-Start`。120 条样本里 Start 带呼号的占 40%，Stop 占 78%，而且只有 Stop 同时带起止时间戳。
 
 `SourceCall` 经常为空，`SourceID` 从不为空。DMR ID 是这个 feed 里唯一可靠的身份。
+
+`DestinationCall` 在话务组查询里恒为 null，不是呼号来源。SourceCall 为空时，`TalkerAlias` 不得用作后备。2026-09-14 实测 460 组，38 行缺 SourceCall，只有 3 行能靠 TalkerAlias 补出。
 
 ## 会话不等于通联
 

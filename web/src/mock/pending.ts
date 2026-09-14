@@ -65,8 +65,7 @@ export const MOCK_CLUSTERS: Cluster[] = [
     ],
   },
   {
-    // BrandMeister。这里假定守护进程除了 src_<DMRID> 还订阅了 dst_<TG>，
-    // 否则 feed 只推本台自己的会话，对方呼号同样拿不到。这条还没定。
+    // BrandMeister。对方呼号来自话务组查询，只查 src_<DMRID> 是拿不到的。
     id: 'c-20260913-2102',
     startAt: t('2026-09-13T21:02:10+08:00'),
     endAt: t('2026-09-13T21:03:41+08:00'),
