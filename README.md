@@ -37,7 +37,9 @@
 
 ## 许可证
 
-未定。候选是 MIT 和 Apache-2.0。
+**AGPL-3.0**，见 `LICENSE`。
+
+选它是因为这个项目最可能的形态是俱乐部拿去跑成公开网站。在这个形态下，MIT、MPL 和 GPL 的义务都不触发，因为它们由分发触发而自己部署不算分发。AGPL 第 13 条专门覆盖这一点，所以把它部署成公开服务的人必须向使用者提供源码。
 
 ---
 
@@ -94,4 +96,10 @@ without closing it, which is why it stays optional.
 
 ## Licence
 
-Undecided. MIT and Apache-2.0 are the candidates.
+**AGPL-3.0**. See `LICENSE`.
+
+The likely deployment is a club running this as a public website. Under MIT,
+MPL or GPL that triggers nothing, because their obligations follow
+distribution and self-hosting is not distribution. Section 13 of the AGPL
+covers exactly this case, so anyone who runs a modified copy as a public
+service must offer the source to its users.
