@@ -84,6 +84,14 @@ recv  42["mqtt",{"payload":"<json 字符串>"}]
 
 join `dst_<TG>` 会收到整个话务组的推送，2026-09-14 实测 91 组每分钟约 20 行。所以话务组一律查历史，不订阅。
 
+`searchHouseComplete` 会触发，在历史行发完之后到达。按行数上限提前退出就收不到它。它标记历史结束，不标记行流结束。已 join 的房间还会继续推实时行。
+
+**`searchHouse` 的 `operator` 支持不完整，失败一律静默。** 2026-09-14 实测只有 `equal`、`not_equal` 和字符串字段上的 `contains` 被真正执行。`in`、`greater`、`less`、`begins_with`、`is_not_null` 都返回空集，不报错也不断连。字段名或 `condition` 写错同样静默返回空集。
+
+数值字段的 value 必须是 JSON number。`DestinationID` 传 `"91"` 返回 0 行，传 `91` 返回 200 行。
+
+`rules` 传空数组不报错，返回的是全网最新记录。所以过滤条件为空时必须自己拦住，不能把查询发出去。
+
 历史行和实时行形状不同，这一点坑过一次：
 
 | | 实时 | searchHouse |
