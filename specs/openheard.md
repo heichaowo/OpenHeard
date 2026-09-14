@@ -1,136 +1,152 @@
-# OpenHeard — Spec
+# OpenHeard 设计规范
 
-Only what constrains the code. Anything that would still be true if the code
-changed belongs elsewhere: site data in configuration, evaluation and operator
-context in the author's notes, procedures in the README.
+本文只写约束代码的内容。代码改了不会过时的东西不在这里。场地数据属于部署配置，评估过程和操作者处境属于调研笔记，操作步骤属于 README。
 
-## What this is
+## 这是什么
 
-A QSO logbook fed by machine-readable sources rather than by typing. Digital
-networks publish per-session feeds. Analog repeaters publish nothing, so a
-receive-only receiver turns squelch openings into events. A human supplies only
-what no machine can know.
+一本由机器可读来源填写的通联日志，不靠人打字。
 
-## The requirement
+数字网络发布逐次会话的 feed。模拟中继什么都不发，所以用只收不发的接收机把静噪开启变成事件。人只补机器无法知道的那部分。
 
-Log every contact automatically, analog and digital, across whatever repeater
-or network carried it.
+## 需求
 
-One property drives everything else. Automation comes from whoever kept a
-record, never from the radio.
+自动记录每一次通联，模拟和数字都要，不论经过哪个中继或哪个网络。
 
-## Fixed decisions
+一条性质推导出其余全部：**自动化来自记账的那一方，从不来自电台。**
 
-Settled before any code, because changing them later is the expensive case.
+## 已定死的决定
 
-**The data model carries every field LoTW requires, from the first migration.**
-Frequency, mode, band, both RST directions, and the grid square. A schema that
-already holds contacts is the worst thing to retrofit, and that flaw is what
-ruled out building on an existing net-logging tool.
+这些在写代码前定死，因为事后改代价最高。
 
-**It also carries QTH, device, antenna, power and height.** These cost nothing
-to store and cannot be recovered after the contact.
+**数据模型从第一次迁移就带齐 LoTW 要求的字段。** 包括频率、模式、波段、双向 RST 和网格。已经装了真实通联的 schema 最难改，而这一点正是排除在现成点名工具上开发的原因。
 
-**The web UI is React 19 with Ant Design 6.**
+**在此之上还存 QTH、设备、天线、功率和高度。** 存它们不花什么代价，通联结束后却再也拿不回来。
 
-**There is no native client.** The capture daemon runs headless and nobody
-types during a contact, so a browser suffices. Revisit only for a concrete
-offline-in-the-field need, and try a PWA first.
+**Web 界面用 React 19 加 Ant Design 6。**
 
-**Nothing gets reinvented.** TQSL signs LoTW uploads through its command line.
-DXCC resolution uses an existing cty.dat library. The web layer uses a standard
-framework. What we write is the capture pipeline, the clustering, and the ADIF
-assembly, because nobody has written those.
+**不做原生客户端。** 采集守护进程无头运行，通联过程中没人打字，浏览器够用。只有出现明确的野外离线需求才重新考虑，而且先试 PWA。
 
-## What the system can promise
+**不重复造轮子。** LoTW 签名调 TQSL 命令行。DXCC 实体判定用现成的 cty.dat 库。Web 层用标准框架。自己写的只有采集管道、聚类和 ADIF 组装，因为没人写过这三样。
 
-| How the contact was carried | What the machine can know |
+## 系统能承诺什么
+
+| 通联怎么走 | 机器能知道什么 |
 |---|---|
-| Analog FM through a repeater | when, how long, which channel, and whether we were in it |
-| Analog FM, the far station's callsign | nothing |
-| DMR through a network with a public feed | everything the feed carries |
-| DMR on a network without a feed | nothing |
-| HF, later | FT8 through the WSJT-X UDP feed, nothing for SSB |
+| 模拟 FM 过中继 | 时间、时长、哪个信道，以及这次有没有我们 |
+| 模拟 FM 的对方呼号 | 无 |
+| DMR 过有公开 feed 的网络 | feed 带的全部内容 |
+| DMR 过没有 feed 的网络 | 无 |
+| HF，以后 | FT8 走 WSJT-X 的 UDP，SSB 无 |
 
-The analog gap is permanent, not a missing feature. Analog FM carries no
-identity, so no receiver and no software can name the far station. Speech
-recognition narrows the gap and never closes it, which is why the system must
-stay fully usable with it switched off.
+模拟侧那个缺口是永久的，不是还没做完。模拟 FM 空中不带身份信息，任何接收机和任何软件都叫不出对方呼号。语音识别只能缩小缺口，所以系统必须在它关闭时依然完全可用。
 
-## Shape
+## 形态
 
-One always-on daemon captures and posts to the API. A browser talks to the
-API. There is no third executable.
+一个常驻守护进程负责采集并推给 API。浏览器和 API 对话。没有第三个可执行体。
 
-Analog capture treats a squelch opening as the transmission event. The receiver
-covers a configured span of spectrum; how wide that span is and which channels
-fall inside it are deployment configuration, not design.
+模拟采集把一次静噪开启当作发射事件。接收机覆盖一段配置好的频谱，那段有多宽、里面有哪些信道，都属于部署配置而非设计。
 
-Digital capture polls rather than subscribes wherever the feed supports a
-history query, because a missed poll then heals itself while a dropped
-subscription loses events permanently.
+数字采集在 feed 支持历史查询时一律轮询而不订阅。轮询漏一次会自愈，订阅断开则永久丢事件。
 
-## Grouping transmissions into contacts
+## BrandMeister 接入协议
 
-Gap-based clustering splits the event stream into conversations. The threshold
-comes from measurement against real traffic, never from a guess.
+2026-09-02 对线上服务实测确认。公开 wiki 没有这些内容，而且已发布的示例全都是错的，所以写在这里。
 
-Deciding which conversations were ours needs a marker the radio transmits.
-MDC-1200 carries a unit ID in one short burst and does not collide with
-repeater control codes. DTMF is rejected: its tones sound on every over, and a
-badly chosen string transmits repeater commands.
+端点是 `wss://api.brandmeister.network/lh/?EIO=4&transport=websocket`。
 
-Repeater hang time merges fast exchanges into a single long event, and it
-merges worst exactly when the channel is busiest. Clustering therefore degrades
-precisely where the marker is needed most, so the two are not alternatives.
+**路径是 `/lh`，不是 `/lh/socket.io`。** 后者今天仍然能完成 engine.io 握手和 socket.io CONNECT，然后永远不推任何数据，也不报错。这个静默的成功是最难查的陷阱。
 
-Durations run long by roughly the hang time. Very short events come from weak
-signals briefly opening squelch, which is a threshold question.
+帧序列手工实现，不需要 socket.io 客户端库：
 
-## Speech recognition, optional
+```
+recv  0{"sid":...}               engine.io OPEN
+send  40                         socket.io CONNECT，默认 namespace
+recv  40{"sid":...}              CONNECT 确认
+send  42["join","src_<DMRID>"]   必须发，不 join 就没有任何推送
+recv  2       -> send 3          PING/PONG，约 25 秒，不回就被断开
+recv  42["mqtt",{"payload":"<json 字符串>"}]
+```
 
-Two stages that can be enabled separately. A provider transcribes one already
-segmented transmission. A text model then extracts candidate fields.
+`payload` 是嵌在事件对象里的 JSON 字符串，需要二次解析。
 
-The extraction contract: return one JSON object, omit any field not clearly
-spoken, never infer, return an empty object for noise, decode NATO phonetics
-into an uppercase callsign, and normalise spoken power to digits plus W.
+房间由服务端过滤。前缀映射是 `{DestinationID: dst, ContextID: con, SourceID: src}`，只有这三个字段，且只支持相等。所以 `src_<DMRID>` 只推我们自己的会话，全球流量不会到达。
 
-Every candidate needs human confirmation before it reaches the log. The model
-is configuration and is never a hard-coded name.
+**轮询优于订阅。** CONNECT 之后发 `42["searchHouse",{"query":<rules>,"amount":<n>}]` 可以取历史。2026-09-08 实测一次 `amount: 200` 返回 200 行，跨度 53 天，全部属于该操作者。所以一次查询就能回溯约两个月。
+
+历史行和实时行形状不同，这一点坑过一次：
+
+| | 实时 | searchHouse |
+|---|---|---|
+| `Event` | `Session-Start` / `Session-Stop` | 没有 |
+| `Start`、`Stop` | 数字 | 字符串 |
+| 未知呼号时的 `SourceCall` | `""` | `null` |
+| `Master` | 字符串 | 数字 |
+| 链路类型字段 | `LinkType` | `LinkKind` |
+
+所以解析器必须归一化，且不能假设 `Event` 存在。`SessionID` 是 uuid，用作幂等键。
+
+取 `Session-Stop` 而不取 `Session-Start`。120 条样本里 Start 带呼号的占 40%，Stop 占 78%，而且只有 Stop 同时带起止时间戳。
+
+`SourceCall` 经常为空，`SourceID` 从不为空。DMR ID 是这个 feed 里唯一可靠的身份。
+
+## 会话不等于通联
+
+feed 每按一次 PTT 就产生一条会话。一条群组会话没有明确的对方，你喊一声可能没人应，也可能六个人接话。任何自动把会话变成通联的规则都会错得足够频繁，足以污染日志。
+
+所以分两张表：
+
+- `activity` 装观测到的每一次发射，自动写入，只追加，不手改
+- `qso` 是正式日志，每一行都由人的判断产生
+
+实测依据：抽样 67 次已完成会话，**超过一半时长在 0 到 3 秒**，属于误触 PTT、试机和短按。会话数远不等于通联数。
+
+从 `activity` 提升到 `qso` 只需一次点击。自动化消灭的是打字，不是判断。手工录入的模拟记录直接写 `qso`，不带 `activity` 行，因为没有任何东西观测到它们。
+
+## 把发射事件聚成通联
+
+按间隔阈值聚类，把事件流切成一次次对话。阈值必须来自对真实流量的实测，不能拍定。
+
+判断哪次对话有我们，需要电台主动发一个标记。MDC-1200 用一次短突发携带 unit ID，且不会撞中继控制码。DTMF 已否决，因为它每一次过话都响，而且串码撞上控制码会向中继发指令。
+
+中继挂起时间会把快速往返合并成一条长事件，而且**越热闹合并越严重**。聚类恰好在最需要它的时候失效，所以聚类和标记不是二选一。
+
+事件时长普遍偏长，多出来的大约是挂起时间。极短事件来自弱信号短暂顶开静噪，那是门限问题。
+
+## 语音识别，可选
+
+两段可分别开关。识别方负责转写一段**已经切好片**的发射。文字模型再从转写里提取候选字段。
+
+提取约定如下：
+
+- 只返回一个 JSON 对象
+- 没有明确说出口的字段一律省略
+- 不推断不编造
+- 转写里只有噪声就返回空对象
+- NATO 字母解码成大写无空格的呼号
+- 口播功率归一成数字加 W
+
+每个候选都必须经人确认才能进日志。模型名是配置项，不写死。
 
 ## RST
 
-Do not derive signal strength for a repeater contact. The receiver hears the
-repeater's downlink, and a repeater retransmits at constant power, so the
-measured level describes the repeater and our own antenna. It is identical for
-every station on that repeater.
+**中继通联不要推导信号强度。** 接收机听的是中继下行，而中继以固定功率转发。所以测到的电平只描述中继本身，以及我们这边的天线。同一个中继上每个人都一样。
 
-Readability inverts this. A repeater passes the far station's uplink noise
-through, so a weak station sounds noisy at full RF power. Audio SNR therefore
-carries the correspondent's path quality when RF level does not.
+**辨识度正好相反。** 中继把对方上行的噪声原样转发出去，所以弱台会在满功率下听起来很噪。音频信噪比因此携带对方的路径质量，而射频电平不携带。
 
-Derive both on simplex. On a repeater derive R from audio SNR if it proves
-stable, otherwise default to 59.
+直频两项都推导。中继上若音频信噪比稳定就用它推 R，否则默认 59。
 
-## Rejected
+## 已否决
 
-**Building on a net-logging tool.** Its model is built for roll-call: no
-frequency, mode or band, no ADIF, and a main-control callsign with no
-counterpart here. Its licence also reaches a publicly deployed service.
+**在点名工具上开发。** 它的模型为点名而建，没有频率、模式、波段，没有 ADIF，还有一个在这里无对应物的主控呼号。许可证也会波及公开部署的服务。
 
-**Building on an existing web logbook.** Nothing would need changing, so a fork
-would add merge burden and nothing else. It stays a reference and a fallback.
+**在现成 Web 日志本上开发。** 它一行都不用改，fork 只会增加合并负担。它保留为参考和后备。
 
-**Desktop loggers as a base.** They centre on CAT control of a transceiver and
-expose no external write API, so nothing can push captured records in.
+**以桌面日志软件为基座。** 它们的重心是电台的 CAT 控制，没有对外写入接口，脚本灌不进去。
 
-**Speech recognition as a requirement.** It is an accelerator. The system must
-work with it off.
+**把语音识别当必需项。** 它是加速器。系统必须在它关闭时可用。
 
-## Open
+## 待定
 
-- Licence. MIT or Apache-2.0. AGPL is ruled out because it deters adoption by a
-  club, which is a goal.
-- Backend language and framework.
-- Whether the ASR stage runs inside the daemon or as its own service.
+- 许可证，MIT 或 Apache-2.0。AGPL 已排除，因为它会劝退俱乐部采用，而采用是目标之一
+- 后端语言和框架
+- 语音识别跑在守护进程内还是独立服务
