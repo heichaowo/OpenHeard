@@ -1,29 +1,29 @@
 # OpenHeard
 
-会自己填写的业余无线电通联日志。
+自动记录每一次通联的业余无线电日志。
 
 ## 这是什么
 
-通联记录从两个来源自动进来，不用人打字。BrandMeister 有逐次会话的 feed，轮询它的历史查询就能取全。模拟中继什么都不发，所以用只收不发的 SDR 守住它的下行，把静噪开启变成事件。机器拿不到的部分由人补，模拟侧要补的只有对方呼号。
+通联记录不用人打字，来源有两个。BrandMeister 发布逐次会话的 feed，我们轮询它的历史查询，不订阅。模拟中继不发布任何数据，所以用一台只收不发的 SDR 听中继下行，把每一次静噪开启变成事件。机器不知道的那部分由人填，模拟侧要填的只有对方呼号。
 
-名字来自圈里现成的说法。BrandMeister 把它的 feed 叫 Last Heard，中继的「听到列表」是同一个意思。这套系统就是一本由「听到什么」驱动的日志。
+名字取自 Last Heard。BrandMeister 这样称呼它的 feed，中继的「听到列表」也是这个意思。
 
 ## 现状
 
-Web 界面跑在假数据上，四个页面都在：待确认队列、带 ADIF 导出的日志列表、快速补录表单和公开展示页。`core/` 放它们共用的纯逻辑，不依赖框架、数据库和 HTTP。后端和采集守护进程都还没有。
+Web 界面跑在假数据上，四个页面都有了：待确认队列、带 ADIF 导出的日志列表、快速补录表单和公开展示页。`core/` 放它们共用的纯逻辑，不依赖框架、数据库和 HTTP。后端和采集守护进程还没写。
 
-设计文档在 `specs/openheard.md`，只写约束代码的部分。站点数据、验证步骤和调研过程不在仓库里。
+设计规范在 `specs/openheard.md`，只写约束代码的内容。场地数据、验证步骤和调研过程不放在仓库里。
 
-采集侧要先通过三步验证才动手写守护进程。三步分别检查驱动、USB 和天线，每一步失败指向不同的层。
+采集侧要先跑通三步验证才动手写守护进程。三步分别检查驱动、USB 和天线，哪一步失败就指向哪一层。
 
 ## 已定的设计决定
 
 这几条在写代码前定死，因为事后改代价最高。
 
-- 数据模型从第一天就带齐 LoTW 需要的字段，包括频率、模式、波段、双向 RST 和网格
+- 数据模型从第一天就带齐 LoTW 要的字段，包括频率、模式、波段、双向 RST 和网格
 - 在此之上还存 QTH、设备、天线、功率和高度
 - Web 界面用 React 19 加 Ant Design 6
-- 不做原生客户端，浏览器够用
+- 现在不做原生客户端，浏览器够用
 - 不重复造轮子，TQSL 签名调命令行，DXCC 判定用现成库
 
 ## 能自动到什么程度
@@ -31,7 +31,7 @@ Web 界面跑在假数据上，四个页面都在：待确认队列、带 ADIF �
 | 通联怎么走 | 机器能知道什么 |
 |---|---|
 | 模拟 FM 过中继 | 时间、时长、哪个信道，以及这次有没有你 |
-| 模拟 FM 的对方呼号 | 无，由人补 |
+| 模拟 FM 的对方呼号 | 无，由人填 |
 | DMR 过 BrandMeister | 本台发射的全部字段，对方呼号要另查话务组 |
 | HF，以后 | FT8 走 WSJT-X 的 UDP，SSB 无 |
 
@@ -49,9 +49,7 @@ npm run dev
 
 ## 许可证
 
-**AGPL-3.0**，见 `LICENSE`。
-
-选它是因为这个项目最可能的形态是俱乐部拿去跑成公开网站。在这个形态下，MIT、MPL 和 GPL 的义务都不触发，因为它们由分发触发而自己部署不算分发。AGPL 第 13 条专门覆盖这一点，所以把它部署成公开服务的人必须向使用者提供源码。
+**AGPL-3.0**，见 `LICENSE`。把修改过的副本跑成网络服务，就必须向使用者提供它的源码。
 
 ---
 
@@ -61,29 +59,29 @@ An amateur radio logbook that fills itself in.
 
 ## What this is
 
-Contacts arrive from two places without anyone typing them. BrandMeister
-publishes a per-session feed, which we poll rather than subscribe to. Analog repeaters publish nothing,
-so a receive-only SDR listens to their downlinks and turns squelch openings
-into events. A human supplies what the machine cannot know, which for analog is
-the other station's callsign and nothing else.
+Contacts arrive without anyone typing them, from two sources. BrandMeister
+publishes a per-session feed, which we poll rather than subscribe to. Analog
+repeaters publish nothing, so a receive-only SDR listens to the downlink and
+turns each squelch opening into an event. A human fills in what the machine
+cannot know, which on the analog side is the other station's callsign and
+nothing else.
 
-The name comes from the term the hobby already uses. BrandMeister calls its
-feed Last Heard, and a repeater's heard list is the same idea. This is a
-logbook driven by what was heard.
+The name is taken from Last Heard. That is what BrandMeister calls its feed,
+and a repeater's heard list means the same thing.
 
 ## Status
 
 The web UI runs against mock data, with all four pages in place: the
 pending-confirmation queue, a log list with ADIF export, a quick-entry form
 and a public station page. `core/` holds the framework-free logic they share.
-There is no backend and no capture daemon yet.
+The backend and the capture daemon are not written yet.
 
 The spec is in `specs/openheard.md` and covers only what constrains the code.
 Site data, procedures and research are kept outside this repository.
 
 The capture side must pass three verification steps before the daemon gets
-written. Each step checks a different layer, so each failure means something
-different.
+written. They check the driver, the USB path and the antenna, so each failure
+points at a different layer.
 
 ## Settled design decisions
 
@@ -93,7 +91,7 @@ These were fixed before any code, because changing them later costs the most.
   frequency, mode, band, both RST directions and the grid square
 - On top of that it stores QTH, device, antenna, power and height
 - The web UI is React 19 with Ant Design 6
-- There is no native client. A browser is enough
+- No native client for now. A browser is enough
 - Nothing gets reinvented. TQSL signs through its command line, and DXCC
   resolution uses an existing library
 
@@ -122,10 +120,5 @@ npm run dev
 
 ## Licence
 
-**AGPL-3.0**. See `LICENSE`.
-
-The likely deployment is a club running this as a public website. Under MIT,
-MPL or GPL that triggers nothing, because their obligations follow
-distribution and self-hosting is not distribution. Section 13 of the AGPL
-covers exactly this case, so anyone who runs a modified copy as a public
-service must offer the source to its users.
+**AGPL-3.0**. See `LICENSE`. Running a modified copy as a network service
+obliges you to offer its source to the people using it.
