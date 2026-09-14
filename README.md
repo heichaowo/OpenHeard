@@ -10,7 +10,7 @@
 
 ## 现状
 
-**设计阶段，还没有代码。** 设计文档不在本仓库，由作者私人保存。
+**设计阶段，还没有代码。** 设计文档在 `specs/openheard.md`，只写约束代码的部分。站点数据、验证步骤和调研过程不在仓库里。
 
 采集侧要先通过三步验证才动手写守护进程。三步分别检查驱动、USB 和天线，每一步失败指向不同的层。
 
@@ -59,8 +59,9 @@ logbook driven by what was heard.
 
 ## Status
 
-**Design stage. There is no code yet.** The design document is kept
-privately by the author and is not in this repository.
+**Design stage. There is no code yet.** The spec is in `specs/openheard.md`
+and covers only what constrains the code. Site data, procedures and research
+are kept outside this repository.
 
 The capture side must pass three verification steps before the daemon gets
 written. Each step checks a different layer, so each failure means something
