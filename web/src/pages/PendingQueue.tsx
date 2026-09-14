@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import {
   App,
   Button,
@@ -15,17 +15,11 @@ import {
   Typography,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
-import dayjs from 'dayjs'
-import {
-  draftFromCluster,
-  isValidCallsign,
-  missingFields,
-  normalizeCallsign,
-} from '@core'
-import type { Activity, PendingItem, Qso, QsoDraft, QsoField } from '@core'
-import { MOCK_CLUSTERS, STATION } from '../mock/pending'
-
-type Row = PendingItem & { missing: QsoField[] }
+import { isValidCallsign, missingFields, normalizeCallsign } from '@core'
+import type { Activity, Qso, QsoDraft, QsoField } from '@core'
+import { useStore } from '../store'
+import type { PendingRow } from '../store'
+import { utcSec } from '../time'
 
 /** 人可以编辑的字段。机器填的那些在抽屉上半部只读显示。 */
 type FormValues = Pick<
@@ -59,11 +53,9 @@ const ORIGIN_LABELS: Record<Activity['origin'], string> = {
   'sdr-dmr': '数字接收机',
 }
 
-const time = (unix: number) => dayjs.unix(unix).format('YYYY-MM-DD HH:mm:ss')
-
 function ActivityTable({ activities }: { activities: Activity[] }) {
   const columns: TableColumnsType<Activity> = [
-    { title: '时间', dataIndex: 'startAt', render: time, width: 200 },
+    { title: '时间', dataIndex: 'startAt', render: utcSec, width: 200 },
     {
       title: '时长',
       dataIndex: 'durationS',
@@ -109,22 +101,10 @@ function ActivityTable({ activities }: { activities: Activity[] }) {
 export default function PendingQueue() {
   const { message } = App.useApp()
   const [form] = Form.useForm<FormValues>()
-  const [clusters, setClusters] = useState(MOCK_CLUSTERS)
-  const [editing, setEditing] = useState<Row | null>(null)
+  const { pending, promote, ignore } = useStore()
+  const [editing, setEditing] = useState<PendingRow | null>(null)
 
-  const rows = useMemo<Row[]>(
-    () =>
-      clusters.map((cluster) => {
-        const draft = draftFromCluster(cluster, STATION)
-        return { cluster, draft, missing: missingFields(draft) }
-      }),
-    [clusters],
-  )
-
-  const drop = (id: string) =>
-    setClusters((prev) => prev.filter((c) => c.id !== id))
-
-  const open = (row: Row) => {
+  const open = (row: PendingRow) => {
     setEditing(row)
     form.setFieldsValue({
       call: row.draft.call ?? '',
@@ -143,28 +123,26 @@ export default function PendingQueue() {
 
   const submit = (values: FormValues) => {
     if (!editing) return
-    const qso: QsoDraft = {
+    const draft: QsoDraft = {
       ...editing.draft,
       ...values,
       call: normalizeCallsign(values.call),
     }
-    const still = missingFields(qso)
+    const still = missingFields(draft)
     if (still.length > 0) {
       message.error(`还缺 ${still.map((k) => LABELS[k] ?? k).join('、')}`)
       return
     }
-    // 后端接上之前先记在控制台，提升逻辑在 API 那边。
-    console.log('promote', qso)
-    drop(editing.cluster.id)
+    promote(editing.cluster.id, draft)
     setEditing(null)
-    message.success(`${qso.call} 已入库`)
+    message.success(`${draft.call} 已入库`)
   }
 
-  const columns: TableColumnsType<Row> = [
+  const columns: TableColumnsType<PendingRow> = [
     {
-      title: '时间',
+      title: '时间 UTC',
       key: 'startAt',
-      render: (_, row) => time(row.cluster.startAt),
+      render: (_, row) => utcSec(row.cluster.startAt),
       width: 200,
     },
     {
@@ -190,8 +168,7 @@ export default function PendingQueue() {
     {
       title: '对方呼号',
       key: 'call',
-      render: (_, row) =>
-        row.draft.call ?? <Tag color="orange">待补</Tag>,
+      render: (_, row) => row.draft.call ?? <Tag color="orange">待补</Tag>,
       width: 120,
     },
     {
@@ -219,10 +196,7 @@ export default function PendingQueue() {
           <Button type="link" onClick={() => open(row)}>
             确认
           </Button>
-          <Popconfirm
-            title="不记这次对话？"
-            onConfirm={() => drop(row.cluster.id)}
-          >
+          <Popconfirm title="不记这次对话？" onConfirm={() => ignore(row.cluster.id)}>
             <Button type="link" danger>
               忽略
             </Button>
@@ -240,12 +214,12 @@ export default function PendingQueue() {
       <Table
         rowKey={(row) => row.cluster.id}
         columns={columns}
-        dataSource={rows}
+        dataSource={pending}
         pagination={false}
+        scroll={{ x: 900 }}
+        locale={{ emptyText: '队列空了' }}
         expandable={{
-          expandedRowRender: (row) => (
-            <ActivityTable activities={row.cluster.activities} />
-          ),
+          expandedRowRender: (row) => <ActivityTable activities={row.cluster.activities} />,
         }}
       />
       <Drawer
@@ -262,28 +236,17 @@ export default function PendingQueue() {
         {editing && (
           <>
             <Descriptions size="small" column={1} bordered>
-              <Descriptions.Item label="时间">
-                {time(editing.cluster.startAt)}
+              <Descriptions.Item label="时间 UTC">
+                {utcSec(editing.cluster.startAt)}
               </Descriptions.Item>
-              <Descriptions.Item label="频率">
-                {editing.draft.freqMhz} MHz
-              </Descriptions.Item>
-              <Descriptions.Item label="波段">
-                {editing.draft.band}
-              </Descriptions.Item>
-              <Descriptions.Item label="模式">
-                {editing.draft.mode}
-              </Descriptions.Item>
+              <Descriptions.Item label="频率">{editing.draft.freqMhz} MHz</Descriptions.Item>
+              <Descriptions.Item label="波段">{editing.draft.band}</Descriptions.Item>
+              <Descriptions.Item label="模式">{editing.draft.mode}</Descriptions.Item>
               <Descriptions.Item label="来源">
                 {ORIGIN_LABELS[editing.cluster.activities[0]!.origin]}
               </Descriptions.Item>
             </Descriptions>
-            <Form
-              form={form}
-              layout="vertical"
-              onFinish={submit}
-              style={{ marginTop: 24 }}
-            >
+            <Form form={form} layout="vertical" onFinish={submit} style={{ marginTop: 24 }}>
               <Form.Item
                 name="call"
                 label="对方呼号"

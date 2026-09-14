@@ -1,7 +1,7 @@
 // 假数据，等后端接上就整个删掉。
 // 队列只装含有本台的对话，过滤在上游做，这里的每条都已经含本台。
 
-import type { Cluster, StationDefaults } from '@core'
+import type { Cluster, Mode, Qso, StationDefaults } from '@core'
 
 const t = (iso: string) => Math.floor(Date.parse(iso) / 1000)
 
@@ -135,4 +135,64 @@ export const MOCK_CLUSTERS: Cluster[] = [
       },
     ],
   },
+]
+
+/** 部署配置里的频谱表，现在先写死几条。 */
+export const CHANNELS: { name: string; freqMhz: number; mode: Mode }[] = [
+  { name: '439.525 中继', freqMhz: 439.525, mode: 'FM' },
+  { name: '145.500 直频', freqMhz: 145.5, mode: 'FM' },
+  { name: 'BrandMeister TG 46001', freqMhz: 439.525, mode: 'DMR' },
+]
+
+const qso = (
+  id: string,
+  call: string,
+  iso: string,
+  freqMhz: number,
+  band: string,
+  mode: Mode,
+  over: Partial<Qso> = {},
+): Qso => ({
+  id,
+  call,
+  startAt: t(iso),
+  freqMhz,
+  band,
+  mode,
+  rstSent: '59',
+  rstRcvd: '59',
+  myGridsquare: STATION.myGridsquare,
+  myQth: STATION.myQth,
+  myDevice: STATION.myDevice,
+  myAntenna: STATION.myAntenna,
+  myPower: STATION.myPower,
+  myHeightM: STATION.myHeightM,
+  createdAt: t(iso),
+  ...over,
+})
+
+export const MOCK_QSOS: Qso[] = [
+  qso('q1', 'BG8FBC', '2026-09-12T11:04:00Z', 439.525, '70cm', 'FM', {
+    clusterId: 'c-20260912-1104',
+    qth: '成都',
+    rstRcvd: '57',
+  }),
+  qso('q2', 'BD7KLO', '2026-09-11T13:22:00Z', 439.525, '70cm', 'DMR', {
+    clusterId: 'c-20260911-1322',
+    gridsquare: 'OL72',
+    qth: '深圳',
+  }),
+  qso('q3', 'BA1AA', '2026-09-10T02:15:00Z', 145.5, '2m', 'FM', {
+    rstSent: '55',
+    rstRcvd: '53',
+    note: '手工补录，当时没开采集',
+  }),
+  qso('q4', 'JA1XYZ', '2026-09-09T09:41:00Z', 439.525, '70cm', 'DMR', {
+    clusterId: 'c-20260909-0941',
+    gridsquare: 'PM95',
+  }),
+  qso('q5', 'BG0CG/P', '2026-09-08T23:58:00Z', 145.5, '2m', 'FM', {
+    note: '龙泉山顶便携',
+    myHeightM: 1051,
+  }),
 ]

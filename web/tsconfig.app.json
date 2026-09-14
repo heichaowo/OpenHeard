@@ -18,7 +18,8 @@
 
     "paths": {
       "@core": ["../core/src/index.ts"],
-      "@core/*": ["../core/src/*"]
+      "@core/*": ["../core/src/*"],
+      "vitest": ["./node_modules/vitest"]
     },
 
     /* Linting */
