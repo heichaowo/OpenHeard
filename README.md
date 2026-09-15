@@ -10,11 +10,13 @@
 
 ## 现状
 
-Web 界面跑在假数据上，四个页面都有了：待确认队列、带 ADIF 导出的日志列表、快速补录表单和公开展示页。`core/` 放它们共用的纯逻辑，不依赖框架、数据库和 HTTP。后端和采集守护进程还没写。
+四个页面、后端和采集守护进程都在跑。`web/` 是待确认队列、带 ADIF 导出的日志、快速补录和公开展示页，直接连 `api/`。`api/` 用 Hono 加内置的 `node:sqlite`，只监听回环地址。`daemon/` 轮询 BrandMeister，也守一个模拟信道。`core/` 放三边共用的纯逻辑，不依赖框架、数据库和 HTTP。
+
+两条采集线都在真信号上验过。BrandMeister 那条一次取回 200 行入库并聚成对话。模拟那条在 438.700 上把每次按下 PTT 切成事件，并靠 MDC-1200 认出本台。
+
+还差两样。聚类的间隔阈值要用真实流量实测，现在是占位数。公开展示页对外怎么落地没有方案，主机在国内而 `bg0cg.ampr.org` 无法备案。
 
 设计规范在 `specs/openheard.md`，只写约束代码的内容。场地数据、验证步骤和调研过程不放在仓库里。
-
-采集侧要先跑通三步验证才动手写守护进程。三步分别检查驱动、USB 和天线，哪一步失败就指向哪一层。
 
 ## 已定的设计决定
 
@@ -80,17 +82,25 @@ and a repeater's heard list means the same thing.
 
 ## Status
 
-The web UI runs against mock data, with all four pages in place: the
-pending-confirmation queue, a log list with ADIF export, a quick-entry form
-and a public station page. `core/` holds the framework-free logic they share.
-The backend and the capture daemon are not written yet.
+The pages, the backend and the capture daemon all run. `web/` is the
+pending-confirmation queue, a log with ADIF export, a quick-entry form and a
+public station page, talking to `api/`. `api/` is Hono over the built-in
+`node:sqlite`, bound to loopback only. `daemon/` polls BrandMeister and
+watches one analog channel. `core/` holds the framework-free logic the three
+of them share.
+
+Both capture paths have been verified on live signals. The BrandMeister one
+pulls 200 rows into the database and clusters them into conversations; the
+analog one turns each key-up on 438.700 into an event and recognises our own
+station from its MDC-1200 burst.
+
+Two things are still open. The clustering gap threshold needs measuring
+against real traffic and is a placeholder today. And there is no plan yet for
+where the public page is served from, since the host is in China and
+`bg0cg.ampr.org` cannot get an ICP filing.
 
 The spec is in `specs/openheard.md` and covers only what constrains the code.
 Site data, procedures and research are kept outside this repository.
-
-The capture side must pass three verification steps before the daemon gets
-written. They check the driver, the USB path and the antenna, so each failure
-points at a different layer.
 
 ## Settled design decisions
 
