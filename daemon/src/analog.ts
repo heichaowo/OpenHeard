@@ -70,6 +70,7 @@ function wav(pcm: Int16Array, sampleRate: number): Buffer {
 export function watchAnalog(
   cfg: AnalogConfig,
   onEvent: (activity: Activity, audio: Buffer) => void,
+  onExit?: () => void,
 ): () => void {
   const blockN = Math.round(cfg.sampleRate * cfg.blockS);
   const child = spawn(cfg.rtlFmPath, [
@@ -179,9 +180,14 @@ export function watchAnalog(
     }
   });
 
-  child.on('exit', (code) => console.error(`rtl_fm 退出，code ${code}`));
+  let stopped = false;
+  child.on('exit', (code) => {
+    console.error(`rtl_fm 退出，code ${code}`);
+    if (!stopped) onExit?.();
+  });
 
   return () => {
+    stopped = true;
     const last = detector?.flush();
     if (last) console.error(`收尾时还有一次未闭合的发射，时长 ${last.durationS.toFixed(2)} 秒`);
     child.kill();

@@ -31,7 +31,36 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T
 }
 
+export interface PollRow {
+  queryKey: string
+  at: number
+  fetched: number
+  parsed: number
+  written: number
+  ok: boolean
+  ms: number
+  errorMsg?: string
+}
+
+export interface Ops {
+  health: {
+    ok: boolean
+    problems: string[]
+    lastPollAt?: number
+    activityCount: number
+    qsoCount: number
+    freeBytes?: number
+  }
+  polls: PollRow[]
+  activities: { origin: string; n: number; latest: number }[]
+  queries: { key: string; intervalS: number; amount: number }[]
+  clusterGapS: number
+  retentionDays: number
+  now: number
+}
+
 export const api = {
+  ops: () => call<Ops>('/ops'),
   station: () => call<{ station: StationDefaults; channels: Channel[] }>('/station'),
   pending: () => call<PendingItem[]>('/pending'),
   qsos: () => call<Qso[]>('/qsos'),

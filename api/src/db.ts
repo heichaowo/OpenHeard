@@ -191,6 +191,30 @@ export function insertPollLog(db: DatabaseSync, p: PollLog): void {
   `).run(p.queryKey, p.at, p.fetched, p.parsed, p.written, p.ok ? 1 : 0, p.ms, nul(p.errorMsg));
 }
 
+/** 运维页要看的：最近若干次轮询。 */
+export function selectPollLog(db: DatabaseSync, limit: number): PollLog[] {
+  const rows = db
+    .prepare('SELECT * FROM poll_log ORDER BY at DESC LIMIT ?')
+    .all(limit) as Record<string, unknown>[];
+  return rows.map((r) => ({
+    queryKey: String(r.query_key),
+    at: Number(r.at),
+    fetched: Number(r.fetched),
+    parsed: Number(r.parsed),
+    written: Number(r.written),
+    ok: r.ok === 1,
+    ms: Number(r.ms),
+    errorMsg: str(r.error_msg),
+  }));
+}
+
+/** 采集来的发射，按来源分组数一数。 */
+export function activityCounts(db: DatabaseSync): { origin: string; n: number; latest: number }[] {
+  return db
+    .prepare('SELECT origin, COUNT(*) AS n, MAX(start_at) AS latest FROM activity GROUP BY origin')
+    .all() as { origin: string; n: number; latest: number }[];
+}
+
 /** activity 有保留期，qso 没有。已经被提升或忽略引用的行不裁。 */
 export function pruneActivities(db: DatabaseSync, olderThan: number): number {
   const r = db

@@ -11,6 +11,7 @@ import {
 } from './core.ts';
 import type { Channel, Cluster, PendingItem, Qso, QsoDraft, StationDefaults } from './core.ts';
 import {
+  activityCounts,
   deleteQso,
   insertActivities,
   insertPollLog,
@@ -18,6 +19,7 @@ import {
   pruneActivities,
   prunePollLog,
   resolveActivities,
+  selectPollLog,
   selectQsos,
   selectUnresolvedActivities,
   withTx,
@@ -123,6 +125,17 @@ export function createStore(db: DatabaseSync, config: Config) {
     },
 
     health: (): Health => checkHealth(db, config, nowS()),
+
+    // 运维页一次拿齐，免得开三个请求各自过期。
+    ops: () => ({
+      health: checkHealth(db, config, nowS()),
+      polls: selectPollLog(db, 40),
+      activities: activityCounts(db),
+      queries: config.queries.map((q) => ({ key: q.key, intervalS: q.intervalS, amount: q.amount })),
+      clusterGapS: config.clusterGapS,
+      retentionDays: config.activityRetentionDays,
+      now: nowS(),
+    }),
   };
 }
 

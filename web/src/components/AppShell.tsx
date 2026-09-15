@@ -2,13 +2,13 @@ import {
   BulbOutlined,
   DatabaseOutlined,
   EditOutlined,
-  GlobalOutlined,
   InboxOutlined,
   MenuFoldOutlined,
   MenuOutlined,
   MenuUnfoldOutlined,
+  MonitorOutlined,
 } from '@ant-design/icons'
-import { Badge, Button, Drawer, Dropdown, Layout, Menu, Tooltip } from 'antd'
+import { Badge, Button, Drawer, Dropdown, Layout, Menu } from 'antd'
 import type { MenuProps } from 'antd'
 import { useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
@@ -72,6 +72,7 @@ export function AppShell() {
     },
     { key: '/log', icon: <DatabaseOutlined />, label: '日志' },
     { key: '/new', icon: <EditOutlined />, label: '快速补录' },
+    { key: '/ops', icon: <MonitorOutlined />, label: '运维' },
   ]
 
   const go: MenuProps['onClick'] = ({ key }) => {
@@ -123,9 +124,6 @@ export function AppShell() {
             aria-label="菜单"
           />
           <div className="header-actions">
-            <Tooltip title="公开展示页">
-              <Button type="text" icon={<GlobalOutlined />} onClick={() => navigate('/p')} />
-            </Tooltip>
             <ThemeMenu />
           </div>
         </Layout.Header>

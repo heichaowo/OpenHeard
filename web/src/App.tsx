@@ -3,8 +3,8 @@ import zhCN from 'antd/locale/zh_CN'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import LogList from './pages/LogList'
+import OpsPage from './pages/OpsPage'
 import PendingQueue from './pages/PendingQueue'
-import PublicPage from './pages/PublicPage'
 import QuickEntry from './pages/QuickEntry'
 import { Preferences } from './Preferences'
 import { StoreProvider } from './StoreProvider'
@@ -36,8 +36,8 @@ function Themed() {
               <Route path="pending" element={<PendingQueue />} />
               <Route path="log" element={<LogList />} />
               <Route path="new" element={<QuickEntry />} />
+              <Route path="ops" element={<OpsPage />} />
             </Route>
-            <Route path="/p" element={<PublicPage />} />
             <Route path="*" element={<Navigate to="/pending" replace />} />
           </Routes>
         </StoreProvider>

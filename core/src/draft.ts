@@ -3,6 +3,8 @@ import type { Cluster, Qso, QsoDraft } from './types.ts';
 
 /** 本台的固定信息。属于部署配置，不是设计。 */
 export interface StationDefaults {
+  /** 本台呼号。ADIF 里的 STATION_CALLSIGN，也是公开页的标题。 */
+  myCallsign?: string;
   myGridsquare?: string;
   myQth?: string;
   myDevice?: string;

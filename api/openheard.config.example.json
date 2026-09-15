@@ -13,6 +13,7 @@
   "ingestToken": "换成你自己的随机串换成你自己的随机串",
 
   "station": {
+    "myCallsign": "BG0CG",
     "myGridsquare": "OM24",
     "myQth": "成都",
     "myDevice": "Quansheng UV-K6",

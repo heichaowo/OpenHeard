@@ -7,7 +7,7 @@ import { decodeMdc } from './mdc.ts';
 import { loadConfig } from './config.ts';
 import { Ingest } from './ingest.ts';
 import { normalise } from './normalise.ts';
-import { start } from './runner.ts';
+import { start, startAnalog } from './runner.ts';
 
 const { values } = parseArgs({
   options: {
@@ -128,7 +128,12 @@ if (values['mdc-probe']) {
     for (const p of result.problems) console.error(`配置: ${p}`);
     process.exit(2);
   }
-  const { dmrId, queries, apiUrl, ingestToken, spoolDir } = result.config;
-  console.log(`openheard-daemon 起来了，${queries.length} 条查询，推给 ${apiUrl}`);
-  start(queries, dmrId, new Ingest(apiUrl, ingestToken, spoolDir));
+  const { dmrId, queries, apiUrl, ingestToken, spoolDir, analog } = result.config;
+  const ingest = new Ingest(apiUrl, ingestToken, spoolDir);
+  console.log(
+    `openheard-daemon 起来了，${queries.length} 条查询` +
+      `${analog ? `，守听 ${analog.freqMhz} MHz` : '，没配模拟守听'}，推给 ${apiUrl}`,
+  );
+  start(queries, dmrId, ingest);
+  if (analog) startAnalog(analog, ingest);
 }

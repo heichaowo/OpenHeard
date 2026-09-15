@@ -33,6 +33,7 @@ export function createApp(store: Store, ingestToken: string) {
       const h = store.health();
       return c.json(h, h.ok ? 200 : 503);
     })
+    .get('/ops', (c) => c.json(store.ops()))
     .get('/station', (c) => c.json(store.station()))
     .get('/pending', (c) => c.json(store.pending()))
     .get('/qsos', (c) => c.json(store.qsos()))

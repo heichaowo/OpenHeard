@@ -11,5 +11,39 @@ import type { PublicSource } from './store.ts';
 export function publicRoutes(source: PublicSource) {
   return new Hono()
     .get('/station', (c) => c.json(source.station()))
-    .get('/qsos', (c) => c.json(source.qsos()));
+    .get('/qsos', (c) => c.json(source.qsos()))
+    // 一个请求拿齐整页。将来导出成静态文件时，形状也是这一个。
+    .get('/summary', (c) => c.json(summarise(source)));
+}
+
+const tally = <T extends string | number>(items: T[]) => {
+  const m = new Map<T, number>();
+  for (const v of items) m.set(v, (m.get(v) ?? 0) + 1);
+  return [...m.entries()]
+    .map(([key, n]) => ({ key: String(key), n }))
+    .sort((a, b) => b.n - a.n);
+};
+
+function summarise(source: PublicSource) {
+  const qsos = source.qsos();
+  const starts = qsos.map((q) => q.startAt);
+  return {
+    station: source.station(),
+    total: qsos.length,
+    distinctCalls: new Set(qsos.map((q) => q.call)).size,
+    firstAt: starts.length ? Math.min(...starts) : undefined,
+    lastAt: starts.length ? Math.max(...starts) : undefined,
+    byBand: tally(qsos.map((q) => q.band)),
+    byMode: tally(qsos.map((q) => q.mode)),
+    recent: qsos.slice(0, 30).map((q) => ({
+      id: q.id,
+      call: q.call,
+      startAt: q.startAt,
+      band: q.band,
+      mode: q.mode,
+      qth: q.qth,
+      gridsquare: q.gridsquare,
+    })),
+    generatedAt: Math.floor(Date.now() / 1000),
+  };
 }

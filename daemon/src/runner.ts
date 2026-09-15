@@ -1,5 +1,6 @@
+import { watchAnalog } from './analog.ts';
 import { fetchHistory } from './brandmeister.ts';
-import type { Query } from './config.ts';
+import type { AnalogConfig, Query } from './config.ts';
 import { Ingest } from './ingest.ts';
 import type { IngestRow } from './ingest.ts';
 import { normalise } from './normalise.ts';
@@ -49,6 +50,56 @@ async function runOnce(q: Query, dmrId: number, ingest: Ingest): Promise<void> {
     });
     console.error(`${q.key} 轮询失败：${(e as Error).message}`);
   }
+}
+
+/** rtl_fm 掉了就重开。无人值守时守听停了没人会发现。 */
+const RESTART_MS = 5000;
+
+/**
+ * 模拟守听。每次静噪开启推一条 activity，顺带记一行 poll_log，
+ * 这样运维页上看得出模拟侧还活着。
+ */
+export function startAnalog(cfg: AnalogConfig, ingest: Ingest): void {
+  const spawn = () => {
+    const stop = watchAnalog(
+      {
+        freqHz: Math.round(cfg.freqMhz * 1e6),
+        channel: cfg.channel,
+        gainDb: cfg.gainDb,
+        sampleRate: 24000,
+        blockS: 0.05,
+        calibrateS: 5,
+        openMarginDb: 12,
+        closeMarginDb: 7,
+        minDurationS: 0.3,
+        prerollS: 0.6,
+        myUnitId: cfg.unitId === undefined ? undefined : parseInt(cfg.unitId, 16),
+        recordingsDir: cfg.recordingsDir,
+        rtlFmPath: 'rtl_fm',
+      },
+      (activity) => {
+        const at = nowS();
+        void ingest.push(
+          [{ activity, raw: JSON.stringify({ source: 'sdr-fm', channel: cfg.channel, at }) }],
+          {
+            queryKey: `analog:${cfg.channel}`,
+            at,
+            fetched: 1,
+            parsed: 1,
+            written: 0,
+            ok: true,
+            ms: Math.round(activity.durationS * 1000),
+          },
+        );
+      },
+      () => {
+        console.error(`rtl_fm 停了，${RESTART_MS / 1000} 秒后重开`);
+        setTimeout(spawn, RESTART_MS);
+      },
+    );
+    process.on('SIGTERM', stop);
+  };
+  spawn();
 }
 
 /** 每条查询一个计时器。间隔和 amount 按话务组各给各的，没有全局值。 */

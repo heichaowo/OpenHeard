@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": [
+      "vite/client"
+    ],
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@core": [
+        "../core/src/index.ts"
+      ],
+      "@core/*": [
+        "../core/src/*"
+      ]
+    }
+  },
+  "include": [
+    "src",
+    "../core/src"
+  ],
+  "exclude": [
+    "../core/src/**/*.test.ts"
+  ]
+}
