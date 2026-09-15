@@ -13,6 +13,7 @@ export default defineConfig({
   server: {
     // core 在 web/ 之外
     fs: { allow: ['..'] },
+    proxy: { '/api': 'http://127.0.0.1:3000' },
   },
   test: {
     include: ['../core/src/**/*.test.ts'],
