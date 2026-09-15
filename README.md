@@ -10,7 +10,7 @@
 
 ## 现状
 
-四个页面、后端和采集守护进程都在跑。`web/` 是待确认队列、带 ADIF 导出的日志、快速补录和公开展示页，直接连 `api/`。`api/` 用 Hono 加内置的 `node:sqlite`，只监听回环地址。`daemon/` 轮询 BrandMeister，也守一个模拟信道。`core/` 放三边共用的纯逻辑，不依赖框架、数据库和 HTTP。
+五个目录都在跑。`web/` 是管理端，四个页面：待确认队列、带 ADIF 导出的日志、快速补录和运维。`public/` 是公开展示页，独立应用，除 react 外零依赖，一个请求拿齐整页。`api/` 用 Hono 加内置的 `node:sqlite`，只监听回环地址。`daemon/` 同时轮询 BrandMeister 和守听一个模拟信道。`core/` 放它们共用的纯逻辑，不依赖框架、数据库和 HTTP。
 
 两条采集线都在真信号上验过。BrandMeister 那条一次取回 200 行入库并聚成对话。模拟那条在 438.700 上把每次按下 PTT 切成事件，并靠 MDC-1200 认出本台。
 
@@ -41,13 +41,16 @@
 
 ## 怎么跑
 
+后端和采集守护进程各跑一个进程，配置抄 `api/openheard.config.example.json`。
+
 ```
-cd web
-npm install
-npm run dev
+cd api && npm install && OPENHEARD_CONFIG=../openheard.config.json npm start
+cd daemon && npm install && npm start -- --config ../openheard.config.json
+cd web && npm install && npm run dev
+cd public && npm install && npm run dev
 ```
 
-`npm test` 跑 `core/` 的测试，`npm run build` 做类型检查并构建。
+`npm test` 在 `api/`、`daemon/` 和 `web/` 下各自可跑，`web/` 那个跑的是 `core/` 的测试。
 
 ## 许可证
 
@@ -73,12 +76,13 @@ and a repeater's heard list means the same thing.
 
 ## Status
 
-The pages, the backend and the capture daemon all run. `web/` is the
-pending-confirmation queue, a log with ADIF export, a quick-entry form and a
-public station page, talking to `api/`. `api/` is Hono over the built-in
-`node:sqlite`, bound to loopback only. `daemon/` polls BrandMeister and
-watches one analog channel. `core/` holds the framework-free logic the three
-of them share.
+All five directories run. `web/` is the admin side: the pending-confirmation
+queue, a log with ADIF export, a quick-entry form and an operations page.
+`public/` is the public station page, a separate app with no dependencies
+beyond react, fetching the whole page in one request. `api/` is Hono over the
+built-in `node:sqlite`, bound to loopback only. `daemon/` polls BrandMeister
+and watches one analog channel at the same time. `core/` holds the
+framework-free logic they share.
 
 Both capture paths have been verified on live signals. The BrandMeister one
 pulls 200 rows into the database and clusters them into conversations; the
@@ -120,13 +124,18 @@ without closing it, which is why it stays optional.
 
 ## Running it
 
+The backend and the capture daemon are separate processes. Copy
+`api/openheard.config.example.json` for the config.
+
 ```
-cd web
-npm install
-npm run dev
+cd api && npm install && OPENHEARD_CONFIG=../openheard.config.json npm start
+cd daemon && npm install && npm start -- --config ../openheard.config.json
+cd web && npm install && npm run dev
+cd public && npm install && npm run dev
 ```
 
-`npm test` runs the `core/` tests. `npm run build` type-checks and builds.
+`npm test` works in `api/`, `daemon/` and `web/`; the one in `web/` runs the
+`core/` tests.
 
 ## Licence
 
