@@ -98,16 +98,16 @@ export default function LogList() {
     <>
       <PageHeader
         title="日志"
-        description="正式记录。每一行都由人的判断产生，导出的 ADIF 以它为准。"
+        note="正式记录。每一行都由人的判断产生，导出的 ADIF 以它为准。"
         actions={<Button onClick={exportAdif}>导出 ADIF</Button>}
       />
       <Card
-        className="surface table-card"
+        className="flush-card"
         title={
-          <div className="table-toolbar">
+          <div className="card-toolbar">
             <Input.Search
               allowClear
-              className="table-toolbar-search"
+              className="card-toolbar-search"
               placeholder="按呼号筛选"
               onChange={(e) => setSearch(e.target.value)}
             />

@@ -41,14 +41,14 @@ export default function PublicPage() {
           {[station.myQth, station.myGridsquare].filter(Boolean).join(' · ')}
         </Typography.Paragraph>
 
-        <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
-          <Card className="surface" size="small">
+        <div className="stat-row">
+          <Card  size="small">
             <Statistic title="通联总数" value={qsos.length} />
           </Card>
-          <Card className="surface" size="small">
+          <Card  size="small">
             <Statistic title="不同呼号" value={calls} />
           </Card>
-          <Card className="surface" size="small">
+          <Card  size="small">
             <Statistic
               title="最近一次"
               value={recent[0] ? utcMin(recent[0].startAt) : '—'}
@@ -58,7 +58,7 @@ export default function PublicPage() {
         </div>
 
         <Typography.Title level={5}>最近通联</Typography.Title>
-        <Card className="surface table-card">
+        <Card className="flush-card">
         <Table
           rowKey="id"
           size="small"

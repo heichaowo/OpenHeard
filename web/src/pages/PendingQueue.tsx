@@ -249,9 +249,9 @@ export default function PendingQueue() {
     <>
       <PageHeader
         title="待确认队列"
-        description="机器能填的已经填好。模拟信号不带身份信息，所以对方呼号只能人补。"
+        note="机器能填的已经填好。模拟信号不带身份信息，所以对方呼号只能人补。"
       />
-      <Card className="surface table-card">
+      <Card className="flush-card">
         <AsyncContent
           loading={loading}
           error={error}

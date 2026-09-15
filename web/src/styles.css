@@ -1,121 +1,288 @@
 /*
- * 布局与外观取自 OpenLogTool Server 的 web 前端。
- * Copyright © 2026 Mazha0309 与贡献者，AGPL-3.0-only。
- * 来源 https://github.com/Mazha0309/OpenLogToolServer （web/src/styles.css）
- * 本文件是它的删减改写版：去掉了登录页、会话详情、Excel 设置等本项目没有的部分，
- * 保留变量、外壳、页头、卡片和响应式断点。
+ * 版面样式。
+ *
+ * 颜色一律取 antd 自己导出的 --ant-* 变量，不另建一套调色板。
+ * 这样亮暗两套配色由 antd 的算法给出，这里一条都不用重复声明。
+ * 这些变量挂在 ConfigProvider 的包裹元素上，所以只能在它内部用，
+ * html 和 body 够不着，背景由铺满视口的 .app-shell 和 .public-page 来画。
  */
 
-:root {
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  --app-bg: #f4f6f8;
-  --app-elevated: #ffffff;
-  --app-border: #e5e8eb;
-  --app-muted: #667085;
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  min-width: 320px;
 }
 
-:root[data-theme='dark'] {
-  --app-bg: #0f1115;
-  --app-elevated: #171a21;
-  --app-border: #292d36;
-  --app-muted: #98a2b3;
+/* antd 的算法切换亮暗时，浏览器的默认控件和滚动条跟着走。 */
+html {
+  color-scheme: light dark;
 }
 
-* { box-sizing: border-box; }
-html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
-body { background: var(--app-bg); }
-button, input, textarea, select { font: inherit; }
+* {
+  box-sizing: border-box;
+}
 
-.app-shell { min-height: 100vh; background: var(--app-bg); }
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+/* ---- 外壳 ---- */
+
+.app-shell,
+.public-page {
+  min-height: 100vh;
+  background: var(--ant-color-bg-layout);
+}
 
 .app-sider {
   position: fixed !important;
   inset-block: 0;
   inset-inline-start: 0;
   z-index: 30;
-  border-inline-end: 1px solid var(--app-border);
   overflow: hidden;
-  transition: width 160ms cubic-bezier(.2, 0, 0, 1) !important;
+  border-inline-end: 1px solid var(--ant-color-border-secondary);
 }
-.app-sider .ant-layout-sider-children { display: flex; flex-direction: column; }
 
-.brand { height: 64px; display: flex; align-items: center; gap: 11px; padding: 0 18px; overflow: hidden; white-space: nowrap; }
-.brand-mark {
-  width: 30px; height: 30px; flex: none; border-radius: 9px;
-  display: grid; place-items: center;
-  background: linear-gradient(145deg, #1677ff, #0050b3);
-  color: #fff; font-size: 15px; font-weight: 700;
+.app-sider .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
 }
-.brand-copy { line-height: 1.15; overflow: hidden; }
-.brand-title { font-weight: 700; font-size: 15px; }
-.brand-subtitle { color: var(--app-muted); font-size: 11px; margin-top: 3px; }
 
-.sidebar-menu { flex: 1; border-inline-end: 0 !important; padding: 8px; }
-.sidebar-footer { padding: 10px; border-top: 1px solid var(--app-border); }
+.shell-main {
+  min-width: 0;
+}
 
-.shell-main { min-width: 0; transition: margin-inline-start 160ms cubic-bezier(.2, 0, 0, 1); }
 .shell-header {
-  position: sticky; top: 0; z-index: 20; height: 64px; padding: 0 22px !important;
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  background: color-mix(in srgb, var(--app-elevated) 92%, transparent) !important;
-  border-bottom: 1px solid var(--app-border);
-  backdrop-filter: blur(12px);
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 64px;
+  padding-inline: 20px !important;
+  border-block-end: 1px solid var(--ant-color-border-secondary);
+  /* 半透明加模糊，内容滚到下面时还能看出层次 */
+  background: color-mix(in srgb, var(--ant-color-bg-container) 88%, transparent) !important;
+  backdrop-filter: blur(10px);
 }
-.shell-content { padding: 24px; width: 100%; max-width: 1540px; margin: 0 auto; }
-.header-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
-.page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
-.page-header > :first-child { min-width: 0; }
-.page-header h1 { margin: 0 !important; font-size: 24px !important; }
-.page-header-description { max-width: 920px; color: var(--app-muted); margin-top: 6px; overflow-wrap: anywhere; }
-.page-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.shell-content {
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding: 24px;
+}
 
-.stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
-.surface { border-color: var(--app-border) !important; box-shadow: 0 1px 2px rgb(0 0 0 / 3%); }
-.table-card .ant-card-body { padding: 0; }
-.table-card .ant-table-wrapper { overflow: hidden; }
-.table-card .ant-table-cell { white-space: nowrap; }
-.table-card > .ant-card-head .ant-card-head-wrapper { gap: 12px; }
-.table-card > .ant-card-body > .ant-table-wrapper .ant-pagination { padding-inline: 20px; }
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: auto;
+}
 
-.table-toolbar { display: flex; align-items: center; gap: 8px; max-width: 100%; flex-wrap: wrap; }
-.table-toolbar-search { width: 280px; max-width: 100%; }
-.empty-state { min-height: 220px; display: grid; place-items: center; padding: 32px; }
+/* ---- 侧栏 ---- */
 
-/* 采集来的一次发射，等着人补呼号。 */
-.mine-row > .ant-table-cell { background: color-mix(in srgb, #1677ff 6%, transparent); }
-.muted { color: var(--app-muted); }
-.identifier-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 64px;
+  padding-inline: 16px;
+  overflow: hidden;
+  white-space: nowrap;
+}
 
-.public-page { min-height: 100vh; background: var(--app-bg); }
-.public-inner { max-width: 900px; margin: 0 auto; padding: 40px 24px; }
+.brand-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--ant-border-radius);
+  background: var(--ant-color-primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .5px;
+}
 
-.mobile-only { display: none !important; }
-.ant-drawer-content-wrapper { max-width: 100vw; }
+.brand-name {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.brand-call {
+  margin-block-start: 2px;
+  color: var(--ant-color-text-secondary);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.sidebar-menu {
+  flex: 1;
+  padding: 8px;
+  border-inline-end: 0 !important;
+}
+
+.sidebar-foot {
+  padding: 8px;
+  border-block-start: 1px solid var(--ant-color-border-secondary);
+}
+
+/* ---- 页头 ---- */
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-block-end: 20px;
+}
+
+.page-head > :first-child {
+  min-width: 0;
+}
+
+.page-head h1 {
+  margin: 0 !important;
+  font-size: 24px !important;
+}
+
+.page-note {
+  margin-block-start: 6px;
+  max-width: 68ch;
+  color: var(--ant-color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.page-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ---- 卡片与表格 ---- */
+
+/* 表格贴着卡片内壁，分页留出和卡片头一致的内边距 */
+.flush-card .ant-card-body {
+  padding: 0;
+}
+
+.flush-card .ant-table-wrapper {
+  overflow: hidden;
+}
+
+.flush-card .ant-table-cell {
+  white-space: nowrap;
+}
+
+.flush-card .ant-pagination {
+  padding-inline: 16px;
+}
+
+.card-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.card-toolbar-search {
+  width: 260px;
+  max-width: 100%;
+}
+
+.state-box {
+  display: grid;
+  place-items: center;
+  min-height: 200px;
+  padding: 32px;
+}
+
+/* ---- 公开页 ---- */
+
+.public-inner {
+  max-width: 880px;
+  margin-inline: auto;
+  padding: 40px 24px;
+}
+
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-block-end: 20px;
+}
+
+/* ---- 杂项 ---- */
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
+.only-narrow {
+  display: none !important;
+}
 
 @media (max-width: 900px) {
-  .app-sider { display: none; }
-  .shell-main { margin-inline-start: 0 !important; }
-  .mobile-only { display: inline-flex !important; }
-  .desktop-only { display: none !important; }
-  .shell-header { padding: 0 14px !important; }
-  .shell-content { padding: 16px; }
-  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .page-header { align-items: stretch; flex-direction: column; }
-  .page-actions { justify-content: flex-start; }
+  .app-sider {
+    display: none;
+  }
+  .shell-main {
+    margin-inline-start: 0 !important;
+  }
+  .only-narrow {
+    display: inline-flex !important;
+  }
+  .shell-header {
+    padding-inline: 12px !important;
+  }
+  .shell-content {
+    padding: 16px;
+  }
+  .page-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 @media (max-width: 560px) {
-  .stat-grid { grid-template-columns: 1fr; }
-  .shell-content { padding: 12px; }
-  .page-header h1 { font-size: 22px !important; }
-  .table-toolbar { align-items: stretch; display: grid; grid-template-columns: 1fr; width: 100%; }
-  .table-toolbar-search { width: 100% !important; }
-  .public-inner { padding: 24px 16px; }
+  .shell-content {
+    padding: 12px;
+  }
+  .page-head h1 {
+    font-size: 21px !important;
+  }
+  .stat-row {
+    grid-template-columns: 1fr;
+  }
+  .card-toolbar {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+  .card-toolbar-search {
+    width: 100% !important;
+  }
+  .public-inner {
+    padding: 24px 16px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
 }

@@ -1,6 +1,3 @@
-// 外壳结构取自 OpenLogTool Server，Copyright © 2026 Mazha0309 与贡献者，AGPL-3.0-only。
-// 来源 https://github.com/Mazha0309/OpenLogToolServer （web/src/components/AppShell.tsx）
-// 改动：去掉认证、i18n 和管理员分支，导航换成本项目的三页，外观偏好只留亮暗。
 import {
   BulbOutlined,
   DatabaseOutlined,
@@ -25,9 +22,9 @@ function Brand({ collapsed = false }: { collapsed?: boolean }) {
     <div className="brand">
       <div className="brand-mark">OH</div>
       {!collapsed && (
-        <div className="brand-copy">
-          <div className="brand-title">OpenHeard</div>
-          <div className="brand-subtitle">BG0CG</div>
+        <div>
+          <div className="brand-name">OpenHeard</div>
+          <div className="brand-call">BG0CG</div>
         </div>
       )}
     </div>
@@ -104,7 +101,7 @@ export function AppShell() {
       <Layout.Sider className="app-sider" width={width} collapsedWidth={72} collapsed={collapsed}>
         <Brand collapsed={collapsed} />
         {menu}
-        <div className="sidebar-footer">
+        <div className="sidebar-foot">
           <Button
             type="text"
             block
@@ -119,13 +116,13 @@ export function AppShell() {
       <Layout className="shell-main" style={{ marginInlineStart: width }}>
         <Layout.Header className="shell-header">
           <Button
-            className="mobile-only"
+            className="only-narrow"
             type="text"
             icon={<MenuOutlined />}
             onClick={() => setDrawerOpen(true)}
             aria-label="菜单"
           />
-          <div className="header-actions" style={{ marginInlineStart: 'auto' }}>
+          <div className="header-actions">
             <Tooltip title="公开展示页">
               <Button type="text" icon={<GlobalOutlined />} onClick={() => navigate('/p')} />
             </Tooltip>

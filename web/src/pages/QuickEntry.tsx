@@ -77,9 +77,9 @@ export default function QuickEntry() {
     <>
       <PageHeader
         title="快速补录"
-        description="给没有任何观测的通联用。经过采集的走待确认队列，不在这里录。"
+        note="给没有任何观测的通联用。经过采集的走待确认队列，不在这里录。"
       />
-      <Card className="surface" style={{ maxWidth: 560 }}>
+      <Card style={{ maxWidth: 560 }}>
       <Form form={form} layout="vertical" initialValues={initial} onFinish={submit}>
         <Form.Item
           name="call"

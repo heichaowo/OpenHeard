@@ -10,8 +10,6 @@ import { Preferences } from './Preferences'
 import { StoreProvider } from './StoreProvider'
 import { usePreferences } from './theme'
 
-// 主题取值取自 OpenLogTool Server，Copyright © 2026 Mazha0309 与贡献者，AGPL-3.0-only。
-// 来源 https://github.com/Mazha0309/OpenLogToolServer （web/src/App.tsx 的 ThemedApp）
 function Themed() {
   const { dark } = usePreferences()
   return (

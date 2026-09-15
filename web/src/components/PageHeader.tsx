@@ -1,24 +1,27 @@
-// 取自 OpenLogTool Server，Copyright © 2026 Mazha0309 与贡献者，AGPL-3.0-only。
-// 来源 https://github.com/Mazha0309/OpenLogToolServer （web/src/components/PageHeader.tsx）
-import { Typography } from 'antd'
+import { Flex, Typography } from 'antd'
 import type { ReactNode } from 'react'
 
+/** 每页顶上的标题、一句说明和右侧动作。 */
 export function PageHeader({
   title,
-  description,
+  note,
   actions,
 }: {
   title: ReactNode
-  description?: ReactNode
+  note?: ReactNode
   actions?: ReactNode
 }) {
   return (
-    <div className="page-header">
+    <div className="page-head">
       <div>
         <Typography.Title level={1}>{title}</Typography.Title>
-        {description && <div className="page-header-description">{description}</div>}
+        {note && <div className="page-note">{note}</div>}
       </div>
-      {actions && <div className="page-actions">{actions}</div>}
+      {actions && (
+        <Flex className="page-head-actions" align="center">
+          {actions}
+        </Flex>
+      )}
     </div>
   )
 }
