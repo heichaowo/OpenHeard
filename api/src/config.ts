@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { checkQueries } from './core.ts';
 import type { Channel, StationDefaults } from './core.ts';
 
 /** searchHouse 的一条查询。每条规则单独发一次，不用 OR 合并。 */
@@ -83,23 +84,7 @@ export function loadConfig(path: string): ConfigResult {
   if (!Array.isArray(raw.channels)) problems.push('channels 必填，可以是空数组');
 
   const queries = raw.queries;
-  if (!Array.isArray(queries) || queries.length === 0) {
-    problems.push('queries 必填，至少一条');
-  } else {
-    queries.forEach((q, i) => {
-      if (!isObject(q)) return problems.push(`queries[${i}] 不是对象`);
-      if (typeof q.key !== 'string' || q.key === '') problems.push(`queries[${i}].key 必填`);
-      if (!posNumber(q.amount)) problems.push(`queries[${i}].amount 必填`);
-      if (!posNumber(q.intervalS)) problems.push(`queries[${i}].intervalS 必填`);
-      if (!isObject(q.rule)) return problems.push(`queries[${i}].rule 必填`);
-      if (typeof q.rule.id !== 'string') problems.push(`queries[${i}].rule.id 必填`);
-      if (typeof q.rule.operator !== 'string') problems.push(`queries[${i}].rule.operator 必填`);
-      // 数值字段传字符串会静默返回 0 行，所以在这里就拦住。
-      if (/ID$/.test(String(q.rule.id)) && typeof q.rule.value !== 'number') {
-        problems.push(`queries[${i}].rule.value 必须是 JSON 数字，传字符串会静默返回空集`);
-      }
-    });
-  }
+  problems.push(...checkQueries(queries));
 
   if (problems.length > 0) return { ok: false, problems };
   return {

@@ -38,7 +38,7 @@ export class Ingest {
     mkdirSync(spoolDir, { recursive: true });
   }
 
-  async #post(path: string, body: unknown): Promise<void> {
+  async #post(path: string, body: unknown): Promise<unknown> {
     // 没有超时的 fetch 加上防重叠标志就是一个永久卡死的配方：
     // API 收下连接却不回，这条查询从此再也不轮询，而进程还活着。
     const res = await fetch(`${this.#apiUrl}${path}`, {
@@ -48,10 +48,23 @@ export class Ingest {
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`${path} 回了 ${res.status}`);
+    if (res.status === 204) return undefined;
+    return await res.json();
   }
 
+  /**
+   * 先推行，再记这一次的账。
+   *
+   * 真正新增几行只有写入端知道（判重在那边做），所以从写入端的回应里取，
+   * 填进这一批的 poll_log。取不到就留 0，但那时 ok 也会是 false。
+   */
   async #send(batch: Batch): Promise<void> {
-    if (batch.rows.length > 0) await this.#post('/api/ingest/activity', batch.rows);
+    if (batch.rows.length > 0) {
+      const body = (await this.#post('/api/ingest/activity', batch.rows)) as
+        | { written?: number }
+        | undefined;
+      if (typeof body?.written === 'number') batch.log.written = body.written;
+    }
     await this.#post('/api/ingest/poll-log', batch.log);
   }
 

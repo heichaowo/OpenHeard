@@ -67,7 +67,7 @@ openssl rand -hex 32                            # sessionSecret 和 ingestToken
 |---|---|---|
 | `freqMhz`、`channel` | 是 | 守哪个频率，以及进 `Activity` 的信道名 |
 | `gainDb` | 否 | 调谐器增益，缺省 32.8 |
-| `unitId` | 否 | 本台的 MDC-1200 unit ID，**十六进制字符串**。缺了就判不出哪次发射是本台，队列会一直是空的 |
+| `myUnitId` | 否 | 本台的 MDC-1200 unit ID，**十六进制字符串**。缺了就判不出哪次发射是本台，队列会一直是空的。旧名 `unitId` 仍然认 |
 | `recordingsDir` | 否 | 每次发射的音频往这里写，缺省 `./recordings` |
 
 一次只守一个频率。一支接收机同时只能调谐一处，跳频期间漏掉的发射无法补回。
@@ -163,7 +163,7 @@ src query reaches back 53 days, talkgroup 460 reaches 3.6 days, and 91 reaches
 |---|---|---|
 | `freqMhz`, `channel` | yes | Which frequency to watch, and the channel name that goes into `Activity` |
 | `gainDb` | no | Tuner gain, default 32.8 |
-| `unitId` | no | Our MDC-1200 unit ID, **as a hex string**. Without it nothing is ever marked as ours and the queue stays empty |
+| `myUnitId` | no | Our MDC-1200 unit ID, **as a hex string**. Without it nothing is ever marked as ours and the queue stays empty. The old name `unitId` is still accepted |
 | `recordingsDir` | no | Where each transmission's audio is written, default `./recordings` |
 
 One frequency at a time. A single receiver tunes one place, and transmissions

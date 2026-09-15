@@ -13,13 +13,13 @@
   "host": "127.0.0.1",
 
   "//ingestToken": "openssl rand -hex 32",
-  "ingestToken": "换成你自己的随机串换成你自己的随机串",
+  "ingestToken": "换成真的",
 
   "//adminPasswordHash": "node src/hash-password.ts '你的口令'",
-  "adminPasswordHash": "scrypt$16384$换成真的$换成真的",
+  "adminPasswordHash": "换成真的",
 
   "//sessionSecret": "openssl rand -hex 32。换掉它，已登录的会话立刻失效。",
-  "sessionSecret": "换成你自己的随机串换成你自己的随机串换成你自己的",
+  "sessionSecret": "换成真的",
 
   "station": {
     "myCallsign": "BG0CG",
@@ -36,6 +36,22 @@
     { "name": "439.525 中继", "freqMhz": 439.525, "mode": "FM" },
     { "name": "145.500 直频", "freqMhz": 145.5, "mode": "FM" }
   ],
+
+  "//apiUrl": "守护进程往哪推。缺省就是这个，本机跑不用写。",
+  "apiUrl": "http://127.0.0.1:3000",
+
+  "//spoolDir": "推不上去时先落盘的目录，下一轮开始前补发。",
+  "spoolDir": "./spool",
+
+  "//analog": "模拟守听。整段去掉就只跑数字侧。一支接收机同时只能守一个频率。",
+  "analog": {
+    "freqMhz": 438.7,
+    "channel": "438.700 直频",
+    "gainDb": 32.8,
+    "//myUnitId": "本台的 MDC-1200 unit ID，十六进制字符串。缺了就判不出哪次是本台，队列会一直空着。",
+    "myUnitId": "6460",
+    "recordingsDir": "./recordings"
+  },
 
   "//queries": "每条规则单独一次查询。OR 合并时 amount 是全局上限，热闹的组会把安静的组饿死。",
   "queries": [

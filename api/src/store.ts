@@ -172,7 +172,8 @@ export function createStore(db: DatabaseSync, config: Config) {
       activities: activityCounts(db),
       queries: config.queries.map((q) => ({ key: q.key, intervalS: q.intervalS, amount: q.amount })),
       clusterGapS: config.clusterGapS,
-      retentionDays: config.activityRetentionDays,
+      activityRetentionDays: config.activityRetentionDays,
+      pendingWindowDays: config.pendingWindowDays,
       now: nowS(),
     }),
   };

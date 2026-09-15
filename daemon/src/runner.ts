@@ -73,12 +73,13 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): void {
         closeMarginDb: 7,
         minDurationS: 0.3,
         prerollS: 0.6,
-        myUnitId: cfg.unitId === undefined ? undefined : parseInt(cfg.unitId, 16),
+        myUnitId: cfg.myUnitId === undefined ? undefined : parseInt(cfg.myUnitId, 16),
         recordingsDir: cfg.recordingsDir,
         rtlFmPath: 'rtl_fm',
       },
       (activity) => {
         const at = nowS();
+        const started = Date.now();
         void ingest.push(
           [{ activity, raw: JSON.stringify({ source: 'sdr-fm', channel: cfg.channel, at }) }],
           {
@@ -88,7 +89,9 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): void {
             parsed: 1,
             written: 0,
             ok: true,
-            ms: Math.round(activity.durationS * 1000),
+            // 和数字侧一个意思：处理这一批花了多久。这次发射多长在
+            // Activity.durationS 里，把它塞进 ms 会让运维页同一列有两种含义。
+            ms: Date.now() - started,
           },
         );
       },

@@ -5,6 +5,7 @@
 
 export {
   adifFile,
+  checkQueries,
   bandOf,
   clusterActivities,
   draftFromCluster,

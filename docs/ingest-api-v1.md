@@ -44,8 +44,10 @@ token 不对回 `401`。
 | `at` | Unix 秒 UTC |
 | `fetched` | 来源返回多少行 |
 | `parsed` | 归一化成功多少行 |
-| `written` | 由写入端填，推送方填 0 |
-| `ok`、`ms`、`errorMsg` | 这次成没成、耗时、失败原因 |
+| `written` | 真正新增多少行。推送方先填 0，拿到 `/api/ingest/activity` 的回应之后填上真数，再发这一条 |
+| `ok`、`ms`、`errorMsg` | 这次成没成、处理这一批花了多久、失败原因 |
+
+`ms` 一律是处理耗时，模拟侧也一样。那次发射本身多长在 `Activity.durationS` 里，塞进 `ms` 会让运维页同一列有两种含义。
 
 `fetched` 和 `parsed` 必须分开。来源改字段名时 `parsed` 掉到 0 而 `fetched` 不变，那和稳态下全是重复行的计数长得一样。
 
@@ -111,8 +113,10 @@ analog side `mine` comes from MDC-1200, cannot be recomputed, and is stored.
 | `at` | Unix seconds UTC |
 | `fetched` | How many rows the source returned |
 | `parsed` | How many normalised successfully |
-| `written` | Filled by the writer; the caller sends zero |
-| `ok`, `ms`, `errorMsg` | Whether it worked, how long, and why not |
+| `written` | How many rows were actually new. The caller sends zero, then fills in the real count from the `/api/ingest/activity` response before sending this |
+| `ok`, `ms`, `errorMsg` | Whether it worked, how long the batch took to handle, and why not |
+
+`ms` is always handling time, on the analog side too. How long the transmission itself lasted is `Activity.durationS`; putting it in `ms` would give one column on the ops page two meanings.
 
 `fetched` and `parsed` have to stay apart. When a source renames a field,
 `parsed` falls to zero while `fetched` does not, and that reads exactly like a

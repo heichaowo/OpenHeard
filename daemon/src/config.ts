@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { Rule } from './brandmeister.ts';
+import { checkQueries } from '../../core/src/queries.ts';
 
 export interface Query {
   key: string;
@@ -15,7 +16,7 @@ export interface AnalogConfig {
   channel: string;
   gainDb: number;
   /** 本台的 MDC-1200 unit ID，十六进制字符串。没有就判不出哪次是本台。 */
-  unitId?: string;
+  myUnitId?: string;
   recordingsDir: string;
 }
 
@@ -57,7 +58,7 @@ export function loadConfig(path: string): ConfigResult {
     problems.push('dmrId 必填。没有它就判不出哪次发射是本台的，队列会一直是空的');
   }
   if (typeof token !== 'string' || token.length < 16) problems.push('ingestToken 必填');
-  if (!Array.isArray(queries) || queries.length === 0) problems.push('queries 必填，至少一条');
+  problems.push(...checkQueries(queries));
 
   if (problems.length > 0) return { ok: false, problems };
 
@@ -74,7 +75,13 @@ export function loadConfig(path: string): ConfigResult {
         freqMhz: a.freqMhz,
         channel: a.channel,
         gainDb: typeof a.gainDb === 'number' ? a.gainDb : 32.8,
-        unitId: typeof a.unitId === 'string' ? a.unitId : undefined,
+        // 本台自己的东西一律带 my 前缀，和 myGridsquare、myQth 那些一致。
+        // unitId 是改名之前的写法，已经装出去的配置还在用，所以一起认。
+        myUnitId: typeof a.myUnitId === 'string'
+          ? a.myUnitId
+          : typeof a.unitId === 'string'
+            ? a.unitId
+            : undefined,
         recordingsDir: near(typeof a.recordingsDir === 'string' ? a.recordingsDir : './recordings'),
       };
     }

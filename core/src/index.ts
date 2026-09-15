@@ -4,5 +4,6 @@ export * from './callsign.ts';
 export * from './cluster.ts';
 export * from './draft.ts';
 export * from './recall.ts';
+export * from './queries.ts';
 export * from './zone.ts';
 export * from './adif.ts';

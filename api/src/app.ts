@@ -25,7 +25,7 @@ export function createApp(
   const ingest = new Hono()
     .use('*', async (c, next) => {
       if (c.req.header('authorization') !== `Bearer ${ingestToken}`) {
-        return c.json({ error: 'unauthorized' }, 401);
+        return c.json({ error: '采集 token 不对' }, 401);
       }
       await next();
     })
