@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { missingFields } from '@core'
 import type { Channel, PendingItem, Qso, StationDefaults } from '@core'
-import { ApiError, api } from './api'
+import { api, errorText } from './api'
 import { StoreContext } from './store'
 import type { PendingRow, Store } from './store'
 
@@ -26,7 +26,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setQsos(q)
       setError(undefined)
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setError(errorText(e))
     } finally {
       setLoading(false)
     }

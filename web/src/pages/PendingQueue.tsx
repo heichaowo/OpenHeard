@@ -7,8 +7,10 @@ import { PageHeader } from '../components/PageHeader'
 import { QsoFields } from '../components/QsoFields'
 import type { QsoFormValues } from '../components/QsoFields'
 import { missingFields, normalizeCallsign } from '@core'
-import { ApiError } from '../api'
+import { ApiError, errorText } from '../api'
+import { confirmDiscard } from '../discard'
 import type { Activity, QsoDraft, QsoField } from '@core'
+import { useRecall } from '../recall'
 import { useStore } from '../store'
 import type { PendingRow } from '../store'
 import { utcSec } from '../time'
@@ -83,15 +85,17 @@ function ActivityTable({ activities }: { activities: Activity[] }) {
 export default function PendingQueue() {
   const { message, modal } = App.useApp()
   const [form] = Form.useForm<QsoFormValues>()
-  const { pending, promote, ignore, loading, error, refresh } = useStore()
+  const { pending, promote, ignore, qsos, loading, error, refresh } = useStore()
   const wide = Grid.useBreakpoint().md ?? true
   const [editing, setEditing] = useState<PendingRow | null>(null)
   // 哪一行正在入库。楼下用手机弱网确认时，慢一点就会想再点一下。
   const [busyId, setBusyId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const { recalledAt, onValuesChange, reset: resetRecall } = useRecall(form, qsos)
 
   const open = (row: PendingRow) => {
     setEditing(row)
+    resetRecall()
     form.setFieldsValue({
       call: row.draft.call ?? '',
       rstSent: row.draft.rstSent,
@@ -111,7 +115,7 @@ export default function PendingQueue() {
     if (e instanceof ApiError && e.missing?.length) {
       message.error(`还缺 ${e.missing.map((k) => LABELS[k as QsoField] ?? k).join('、')}`)
     } else {
-      message.error(e instanceof Error ? e.message : String(e))
+      message.error(errorText(e))
     }
   }
 
@@ -127,22 +131,7 @@ export default function PendingQueue() {
     }
   }
 
-  // 抽屉里填好的东西只在表单里，关掉就没了。setFieldsValue 不算 touched，
-  // 所以这里问的是「你手敲过没有」，不是「有没有预填」。
-  const close = () => {
-    if (!form.isFieldsTouched()) {
-      setEditing(null)
-      return
-    }
-    modal.confirm({
-      title: '丢掉刚填的内容？',
-      content: '关掉之后这些字要重填一遍。',
-      okText: '丢掉',
-      okButtonProps: { danger: true },
-      cancelText: '继续填',
-      onOk: () => setEditing(null),
-    })
-  }
+  const close = () => confirmDiscard(modal, form, '填', () => setEditing(null))
 
   const submit = async (values: QsoFormValues) => {
     if (!editing) return
@@ -297,8 +286,14 @@ export default function PendingQueue() {
               <Descriptions.Item label="模式">{editing.draft.mode}</Descriptions.Item>
               <Descriptions.Item label="来源">{originOf(editing)}</Descriptions.Item>
             </Descriptions>
-            <Form form={form} layout="vertical" onFinish={submit} style={{ marginTop: 24 }}>
-              <QsoFields />
+            <Form
+              form={form}
+              layout="vertical"
+              onFinish={submit}
+              onValuesChange={onValuesChange}
+              style={{ marginTop: 24 }}
+            >
+              <QsoFields recalledAt={recalledAt} />
               {/* 让输入框里按回车也能提交，抽屉标题栏那个按钮在表单外面 */}
               <Button htmlType="submit" style={{ display: 'none' }} />
             </Form>

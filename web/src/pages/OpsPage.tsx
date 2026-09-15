@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Card, Descriptions, Statistic, Table, Tag, Typography } from 'antd'
 import type { TableColumnsType } from 'antd'
-import { ApiError, api } from '../api'
+import { api, errorText } from '../api'
 import type { Ops, PollRow } from '../api'
 import { AsyncContent } from '../components/AsyncContent'
 import { PageHeader } from '../components/PageHeader'
@@ -18,6 +18,14 @@ const ORIGINS: Record<string, string> = {
 
 const bytes = (n?: number) =>
   n === undefined ? '—' : `${(n / 1e9).toFixed(1)} GB`
+
+const mb = (n: number) => `${Math.round(n / 1e6)} MB`
+
+const duration = (s: number) => {
+  if (s < 3600) return `${Math.round(s / 60)} 分钟`
+  if (s < 86400) return `${(s / 3600).toFixed(1)} 小时`
+  return `${(s / 86400).toFixed(1)} 天`
+}
 
 const ago = (now: number, at?: number) =>
   at === undefined ? '还没有' : `${now - at} 秒前`
@@ -37,7 +45,7 @@ export default function OpsPage() {
       setOps(await api.ops())
       setError(undefined)
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setError(errorText(e))
     } finally {
       inFlight.current = false
       setLoading(false)
@@ -155,6 +163,27 @@ export default function OpsPage() {
                 />
               </Card>
             </div>
+
+            {/* 这台机器没人看着，跑飞的轮询和内存泄漏只看磁盘看不出来。 */}
+            <Card size="small" title="机器" style={{ marginBottom: 16 }}>
+              <Descriptions size="small" column={1} bordered>
+                <Descriptions.Item label="负载">
+                  {ops.machine.load1.toFixed(2)}
+                  <Typography.Text type="secondary">
+                    {' '}
+                    （已除以 {ops.machine.cores} 个核，超过 1 说明排队了）
+                  </Typography.Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="本进程内存">{mb(ops.machine.rssBytes)}</Descriptions.Item>
+                <Descriptions.Item label="系统内存">
+                  空闲 {bytes(ops.machine.memFreeBytes)} / 共 {bytes(ops.machine.memTotalBytes)}
+                  <Typography.Text type="secondary"> （macOS 的空闲值偏小，看趋势）</Typography.Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="已经跑了">
+                  {duration(ops.machine.uptimeS)}
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
 
             <Card size="small" title="采集来源" style={{ marginBottom: 16 }}>
               <Descriptions size="small" column={1} bordered>

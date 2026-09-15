@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { LockOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Form, Input, Spin, Typography } from 'antd'
-import { ApiError, api, setUnauthorizedHandler } from './api'
+import { api, errorText, setUnauthorizedHandler } from './api'
 import { SessionContext } from './session'
 
 /**
@@ -60,7 +60,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
         setExpired(false)
         setSignedIn(true)
       } catch (e) {
-        setError(e instanceof ApiError ? e.message : String(e))
+        setError(errorText(e))
       } finally {
         setBusy(false)
       }

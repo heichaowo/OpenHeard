@@ -14,6 +14,8 @@ import {
   Tag,
   Typography,
 } from 'antd'
+import { errorText } from '../api'
+import { confirmDiscard } from '../discard'
 import { AsyncContent } from '../components/AsyncContent'
 import { PageHeader } from '../components/PageHeader'
 import { QsoFields } from '../components/QsoFields'
@@ -21,6 +23,7 @@ import type { QsoFormValues } from '../components/QsoFields'
 import type { TableColumnsType } from 'antd'
 import { adifFile, missingFields, normalizeCallsign } from '@core'
 import type { Qso, QsoDraft } from '@core'
+import { useRecall } from '../recall'
 import { useStore } from '../store'
 import { utcSec } from '../time'
 
@@ -41,6 +44,7 @@ export default function LogList() {
   const [form] = Form.useForm<QsoFormValues>()
   const [editing, setEditing] = useState<Qso | null>(null)
   const [saving, setSaving] = useState(false)
+  const { recalledAt, onValuesChange, reset: resetRecall } = useRecall(form, qsos)
 
   const rows = useMemo(() => {
     const needle = normalizeCallsign(search)
@@ -52,6 +56,7 @@ export default function LogList() {
   // 一并丢掉和当初那几次发射的联系。
   const open = (q: Qso) => {
     setEditing(q)
+    resetRecall()
     form.setFieldsValue({
       call: q.call,
       rstSent: q.rstSent,
@@ -67,20 +72,7 @@ export default function LogList() {
     })
   }
 
-  const close = () => {
-    if (!form.isFieldsTouched()) {
-      setEditing(null)
-      return
-    }
-    modal.confirm({
-      title: '丢掉刚改的内容？',
-      content: '关掉之后这些改动不保留。',
-      okText: '丢掉',
-      okButtonProps: { danger: true },
-      cancelText: '继续改',
-      onOk: () => setEditing(null),
-    })
-  }
+  const close = () => confirmDiscard(modal, form, '改', () => setEditing(null))
 
   const save = async (values: QsoFormValues) => {
     if (!editing) return
@@ -96,7 +88,7 @@ export default function LogList() {
       setEditing(null)
       message.success(`${draft.call} 已更新`)
     } catch (e) {
-      message.error(e instanceof Error ? e.message : String(e))
+      message.error(errorText(e))
     } finally {
       setSaving(false)
     }
@@ -249,8 +241,14 @@ export default function LogList() {
             <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
               时间、频率、波段和模式改不了。要改它们就删掉重录。
             </Typography.Paragraph>
-            <Form form={form} layout="vertical" onFinish={save} style={{ marginTop: 16 }}>
-              <QsoFields />
+            <Form
+              form={form}
+              layout="vertical"
+              onFinish={save}
+              onValuesChange={onValuesChange}
+              style={{ marginTop: 16 }}
+            >
+              <QsoFields recalledAt={recalledAt} />
               {/* 让输入框里按回车也能提交，抽屉标题栏那个按钮在表单外面 */}
               <Button htmlType="submit" style={{ display: 'none' }} />
             </Form>

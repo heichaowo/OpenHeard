@@ -1,6 +1,7 @@
-import { Divider, Form, Input, InputNumber, Space } from 'antd'
+import { Divider, Form, Input, InputNumber, Space, Typography } from 'antd'
 import { isValidCallsign, normalizeCallsign } from '@core'
 import type { Qso } from '@core'
+import { utcSec } from '../time'
 
 /**
  * 人可以编辑的字段。待确认队列和日志里的编辑用同一份，两处填的是同一件事。
@@ -23,7 +24,14 @@ export type QsoFormValues = Pick<
   | 'note'
 >
 
-export function QsoFields({ autoFocus = true }: { autoFocus?: boolean }) {
+export function QsoFields({
+  autoFocus = true,
+  recalledAt,
+}: {
+  autoFocus?: boolean
+  /** 对方 QTH 和网格是从这个时刻的那次通联补来的。 */
+  recalledAt?: number
+}) {
   return (
     <>
       <Form.Item
@@ -58,6 +66,11 @@ export function QsoFields({ autoFocus = true }: { autoFocus?: boolean }) {
           <Input style={{ width: 140 }} />
         </Form.Item>
       </Space>
+      {recalledAt !== undefined && (
+        <Typography.Paragraph type="secondary" style={{ marginTop: -12 }}>
+          QTH 和网格来自 {utcSec(recalledAt)} 那次通联，改掉就是。
+        </Typography.Paragraph>
+      )}
       <Divider titlePlacement="left" plain>
         本台
       </Divider>

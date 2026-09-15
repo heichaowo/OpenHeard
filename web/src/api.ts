@@ -57,6 +57,27 @@ export interface PollRow {
   errorMsg?: string
 }
 
+/**
+ * 任何异常都变成一句能显示的话。
+ *
+ * 同一段三元式原来在 StoreProvider、SessionGate 和 OpsPage 各写了一遍。
+ */
+export function errorText(e: unknown): string {
+  if (e instanceof ApiError) return e.message
+  if (e instanceof Error) return e.message
+  return String(e)
+}
+
+export interface Machine {
+  rssBytes: number
+  uptimeS: number
+  cores: number
+  memFreeBytes: number
+  memTotalBytes: number
+  /** 一分钟平均负载除以核数，和 1.0 比。 */
+  load1: number
+}
+
 export interface Ops {
   health: {
     ok: boolean
@@ -66,6 +87,7 @@ export interface Ops {
     qsoCount: number
     freeBytes?: number
   }
+  machine: Machine
   polls: PollRow[]
   activities: { origin: string; n: number; latest: number }[]
   queries: { key: string; intervalS: number; amount: number }[]

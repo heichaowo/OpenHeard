@@ -10,14 +10,17 @@ import {
   InputNumber,
   Select,
   Space,
+  Typography,
 } from 'antd'
+import { errorText } from '../api'
 import { PageHeader } from '../components/PageHeader'
 import type { Dayjs } from 'dayjs'
 import { Grid, TimePicker } from 'antd'
 import { bandOf, isValidCallsign, normalizeCallsign } from '@core'
 import type { Mode, Qso } from '@core'
+import { useRecall } from '../recall'
 import { useStore } from '../store'
-import { mergeDateTime, nowUtc, unixFromDisplayedUtc } from '../time'
+import { mergeDateTime, nowUtc, unixFromDisplayedUtc, utcSec } from '../time'
 
 type FormValues = Pick<
   Qso,
@@ -73,9 +76,10 @@ function UtcDateTime({ value, onChange }: { value?: Dayjs; onChange?: (v: Dayjs 
 
 export default function QuickEntry() {
   const { message } = App.useApp()
-  const { station, channels, addQso } = useStore()
+  const { station, channels, qsos, addQso } = useStore()
   const [form] = Form.useForm<FormValues>()
   const [busy, setBusy] = useState(false)
+  const { recalledAt, onValuesChange, reset: resetRecall } = useRecall(form, qsos)
 
   const initial: Partial<FormValues> = {
     at: nowUtc(),
@@ -107,8 +111,9 @@ export default function QuickEntry() {
       message.success(`${call} 已入库`)
       form.resetFields(['call', 'gridsquare', 'qth', 'note'])
       form.setFieldsValue({ at: nowUtc() })
+      resetRecall()
     } catch (e) {
-      message.error(e instanceof Error ? e.message : String(e))
+      message.error(errorText(e))
     } finally {
       setBusy(false)
     }
@@ -121,7 +126,13 @@ export default function QuickEntry() {
         note="给没有任何观测的通联用。经过采集的走待确认队列，不在这里录。"
       />
       <Card style={{ maxWidth: 560 }}>
-      <Form form={form} layout="vertical" initialValues={initial} onFinish={submit}>
+      <Form
+        form={form}
+        layout="vertical"
+        initialValues={initial}
+        onFinish={submit}
+        onValuesChange={onValuesChange}
+      >
         <Form.Item
           name="call"
           label="对方呼号"
@@ -188,6 +199,11 @@ export default function QuickEntry() {
             <Input style={{ width: 180 }} />
           </Form.Item>
         </Space>
+        {recalledAt !== undefined && (
+          <Typography.Paragraph type="secondary" style={{ marginTop: -12 }}>
+            QTH 和网格来自 {utcSec(recalledAt)} 那次通联，改掉就是。
+          </Typography.Paragraph>
+        )}
 
         <Divider titlePlacement="left" plain>
           本台
