@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import { COOKIE, SESSION_DAYS, signSession, verifyPassword, verifySession } from './auth.ts';
 import type { QsoDraft } from './core.ts';
 import type { IngestRow, PollLog } from './db.ts';
 import { publicRoutes } from './public.ts';
@@ -12,7 +14,13 @@ const fail = (e: unknown) => {
   throw e;
 };
 
-export function createApp(store: Store, ingestToken: string) {
+export function createApp(
+  store: Store,
+  ingestToken: string,
+  auth: { passwordHash: string; sessionSecret: string },
+) {
+  const nowS = () => Math.floor(Date.now() / 1000);
+
   // 采集入口是唯一的写入口，而且将来 SDR 那侧可能从另一个进程推过来。
   const ingest = new Hono()
     .use('*', async (c, next) => {
@@ -27,11 +35,36 @@ export function createApp(store: Store, ingestToken: string) {
       return c.body(null, 204);
     });
 
-  const api = new Hono()
-    .route('/ingest', ingest)
-    .get('/health', (c) => {
-      const h = store.health();
-      return c.json(h, h.ok ? 200 : 503);
+  // 登录本身不能要求已登录，采集入口走自己的 bearer token。
+  const session = new Hono()
+    .get('/', (c) =>
+      c.json({ signedIn: verifySession(auth.sessionSecret, getCookie(c, COOKIE), nowS()) }),
+    )
+    .post('/', async (c) => {
+      const { password } = (await c.req.json()) as { password?: string };
+      if (typeof password !== 'string' || !verifyPassword(password, auth.passwordHash)) {
+        return c.json({ error: '口令不对' }, 401);
+      }
+      const exp = nowS() + SESSION_DAYS * 86400;
+      setCookie(c, COOKIE, signSession(auth.sessionSecret, exp), {
+        httpOnly: true,
+        sameSite: 'Lax',
+        path: '/',
+        maxAge: SESSION_DAYS * 86400,
+      });
+      return c.json({ signedIn: true });
+    })
+    .delete('/', (c) => {
+      deleteCookie(c, COOKIE, { path: '/' });
+      return c.json({ signedIn: false });
+    });
+
+  const guarded = new Hono()
+    .use('*', async (c, next) => {
+      if (!verifySession(auth.sessionSecret, getCookie(c, COOKIE), nowS())) {
+        return c.json({ error: '没登录' }, 401);
+      }
+      await next();
     })
     .get('/ops', (c) => c.json(store.ops()))
     .get('/station', (c) => c.json(store.station()))
@@ -78,7 +111,15 @@ export function createApp(store: Store, ingestToken: string) {
       }
     });
 
+  const api = new Hono().route('/ingest', ingest).route('/session', session).route('/', guarded);
+
   return new Hono()
+    // 健康检查不要会话，否则一行 curl 的外部监控就用不上它。
+    // 只回 ok 和原因，计数、路径和磁盘留在 /api/ops 后面。
+    .get('/health', (c) => {
+      const h = store.health();
+      return c.json({ ok: h.ok, problems: h.problems }, h.ok ? 200 : 503);
+    })
     .route('/api', api)
     .route(
       '/public',

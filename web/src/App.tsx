@@ -7,6 +7,7 @@ import OpsPage from './pages/OpsPage'
 import PendingQueue from './pages/PendingQueue'
 import QuickEntry from './pages/QuickEntry'
 import { Preferences } from './Preferences'
+import { SessionGate } from './SessionGate'
 import { StoreProvider } from './StoreProvider'
 import { usePreferences } from './theme'
 
@@ -29,7 +30,8 @@ function Themed() {
       }}
     >
       <AntApp>
-        <StoreProvider>
+        <SessionGate>
+          <StoreProvider>
           <Routes>
             <Route element={<AppShell />}>
               <Route index element={<Navigate to="/pending" replace />} />
@@ -40,7 +42,8 @@ function Themed() {
             </Route>
             <Route path="*" element={<Navigate to="/pending" replace />} />
           </Routes>
-        </StoreProvider>
+          </StoreProvider>
+        </SessionGate>
       </AntApp>
     </ConfigProvider>
   )

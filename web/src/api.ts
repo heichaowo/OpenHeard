@@ -60,6 +60,11 @@ export interface Ops {
 }
 
 export const api = {
+  session: () => call<{ signedIn: boolean }>('/session'),
+  login: (password: string) =>
+    call<{ signedIn: boolean }>('/session', { method: 'POST', body: JSON.stringify({ password }) }),
+  logout: () => call<{ signedIn: boolean }>('/session', { method: 'DELETE' }),
+
   ops: () => call<Ops>('/ops'),
   station: () => call<{ station: StationDefaults; channels: Channel[] }>('/station'),
   pending: () => call<PendingItem[]>('/pending'),

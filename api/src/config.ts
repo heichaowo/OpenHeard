@@ -12,6 +12,12 @@ export interface Query {
 
 export interface Config {
   dbPath: string;
+  /** 监听地址。默认只在本机，要从手机用就改成 0.0.0.0。 */
+  host: string;
+  /** 管理端口令的 scrypt 哈希，用 `node src/hash-password.ts` 生成。 */
+  adminPasswordHash: string;
+  /** 会话签名密钥，换掉它会让已登录的会话立刻失效。 */
+  sessionSecret: string;
   /** 本台 DMR ID。数字侧靠它判断一条发射是不是自己。 */
   dmrId: number;
   /** 聚类间隔阈值，秒。要来自实测，所以没有默认值。 */
@@ -64,6 +70,14 @@ export function loadConfig(path: string): ConfigResult {
   if (typeof raw.ingestToken !== 'string' || raw.ingestToken.length < 16) {
     problems.push('ingestToken 必填，至少 16 个字符');
   }
+  if (typeof raw.adminPasswordHash !== 'string' || !raw.adminPasswordHash.startsWith('scrypt$')) {
+    problems.push("adminPasswordHash 必填，用 node src/hash-password.ts '你的口令' 生成");
+  }
+  if (typeof raw.sessionSecret !== 'string' || raw.sessionSecret.length < 32) {
+    problems.push('sessionSecret 必填，至少 32 个字符，openssl rand -hex 32');
+  }
+  // 监听地址不填就只在本机。默认开到全网等于升级之后悄悄把管理端暴露出去。
+  if (raw.host !== undefined && typeof raw.host !== 'string') problems.push('host 要是字符串');
   if (!isObject(raw.station)) problems.push('station 必填');
   if (!Array.isArray(raw.channels)) problems.push('channels 必填，可以是空数组');
 
@@ -87,5 +101,11 @@ export function loadConfig(path: string): ConfigResult {
   }
 
   if (problems.length > 0) return { ok: false, problems };
-  return { ok: true, config: raw as unknown as Config };
+  return {
+    ok: true,
+    config: {
+      ...(raw as unknown as Config),
+      host: typeof raw.host === 'string' ? raw.host : '127.0.0.1',
+    },
+  };
 }

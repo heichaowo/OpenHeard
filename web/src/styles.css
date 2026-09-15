@@ -292,3 +292,17 @@ select {
     transition-duration: .01ms !important;
   }
 }
+
+/* ---- 登录 ---- */
+
+.gate {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 20px;
+  background: var(--ant-color-bg-layout);
+}
+
+.gate-card {
+  inline-size: min(380px, 100%);
+}

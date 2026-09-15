@@ -9,8 +9,17 @@
   "pendingWindowDays": 7,
   "activityRetentionDays": 90,
 
+  "//host": "默认只在本机。要从手机用就改成 0.0.0.0，那时管理端靠下面的口令挡着。",
+  "host": "127.0.0.1",
+
   "//ingestToken": "openssl rand -hex 32",
   "ingestToken": "换成你自己的随机串换成你自己的随机串",
+
+  "//adminPasswordHash": "node src/hash-password.ts '你的口令'",
+  "adminPasswordHash": "scrypt$16384$换成真的$换成真的",
+
+  "//sessionSecret": "openssl rand -hex 32。换掉它，已登录的会话立刻失效。",
+  "sessionSecret": "换成你自己的随机串换成你自己的随机串换成你自己的",
 
   "station": {
     "myCallsign": "BG0CG",

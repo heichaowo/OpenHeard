@@ -7,11 +7,13 @@ import {
   MenuOutlined,
   MenuUnfoldOutlined,
   MonitorOutlined,
+  PoweroffOutlined,
 } from '@ant-design/icons'
 import { Badge, Button, Drawer, Dropdown, Layout, Menu } from 'antd'
 import type { MenuProps } from 'antd'
 import { useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useSession } from '../session'
 import { usePreferences } from '../theme'
 import { useStore } from '../store'
 
@@ -51,6 +53,7 @@ function ThemeMenu() {
 
 export function AppShell() {
   const { pending } = useStore()
+  const { signOut } = useSession()
   const location = useLocation()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(
@@ -125,6 +128,12 @@ export function AppShell() {
           />
           <div className="header-actions">
             <ThemeMenu />
+            <Button
+              type="text"
+              icon={<PoweroffOutlined />}
+              aria-label="退出"
+              onClick={() => void signOut()}
+            />
           </div>
         </Layout.Header>
         <Layout.Content className="shell-content">

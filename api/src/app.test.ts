@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createApp, createBrokenApp } from './app.ts';
+import { COOKIE, SESSION_DAYS, hashPassword, signSession } from './auth.ts';
 import type { Config } from './config.ts';
 import type { Activity, Qso } from './core.ts';
 import { insertActivities, openDb } from './db.ts';
@@ -10,6 +11,9 @@ const MY_ID = 4600123;
 
 const config: Config = {
   dbPath: ':memory:',
+  host: '127.0.0.1',
+  adminPasswordHash: hashPassword('secret'),
+  sessionSecret: 's'.repeat(40),
   dmrId: MY_ID,
   clusterGapS: 120,
   pendingWindowDays: 3650,
@@ -34,17 +38,27 @@ function setup(activities: Activity[] = []) {
   if (activities.length > 0) {
     insertActivities(db, activities.map((a) => ({ activity: a, raw: '{}' })), 1);
   }
-  return createApp(createStore(db, config), config.ingestToken);
+  return createApp(createStore(db, config), config.ingestToken, {
+    passwordHash: config.adminPasswordHash,
+    sessionSecret: config.sessionSecret,
+  });
 }
 
+/** 管理端每条路由都要会话，测试里统一带一个有效的。 */
+const cookie = () =>
+  `${COOKIE}=${signSession(config.sessionSecret, Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400)}`;
+
 const get = (app: ReturnType<typeof setup>, path: string) =>
-  app.fetch(new Request(`http://local${path}`));
+  app.fetch(new Request(`http://local${path}`, { headers: { cookie: cookie() } }));
 
 const send = (app: ReturnType<typeof setup>, method: string, path: string, body?: unknown) =>
   app.fetch(
     new Request(`http://local${path}`, {
       method,
-      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+      headers: {
+        cookie: cookie(),
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
   );
@@ -229,12 +243,18 @@ describe('采集入口', () => {
 });
 
 describe('健康检查', () => {
-  it('没有查询配置时是健康的', async () => {
-    const res = await get(setup(), '/api/health');
+  it('没有查询配置时是健康的，而且不要会话', async () => {
+    const res = await setup().fetch(new Request('http://local/health'));
     assert.equal(res.status, 200);
-    const h = (await res.json()) as { ok: boolean; activityCount: number };
+    const h = (await res.json()) as { ok: boolean; problems: string[] };
     assert.equal(h.ok, true);
-    assert.equal(h.activityCount, 0);
+    assert.deepEqual(h.problems, []);
+  });
+
+  it('健康检查不泄漏计数和磁盘', async () => {
+    const res = await setup().fetch(new Request('http://local/health'));
+    const h = (await res.json()) as Record<string, unknown>;
+    assert.deepEqual(Object.keys(h).sort(), ['ok', 'problems']);
   });
 
   it('不健康时回 503，让一行 curl 就能当外部检查', async () => {
@@ -243,11 +263,93 @@ describe('健康检查', () => {
       ...config,
       queries: [{ key: 'dst:91', rule: { id: 'DestinationID', operator: 'equal', value: 91 }, amount: 200, intervalS: 60 }],
     };
-    const app = createApp(createStore(db, withQuery), config.ingestToken);
-    const res = await app.fetch(new Request('http://local/api/health'));
+    const app = createApp(createStore(db, withQuery), config.ingestToken, {
+      passwordHash: config.adminPasswordHash,
+      sessionSecret: config.sessionSecret,
+    });
+    const res = await app.fetch(new Request('http://local/health'));
     assert.equal(res.status, 503);
     const h = (await res.json()) as { problems: string[] };
     assert.ok(h.problems.some((p) => p.includes('还没有过一次轮询')));
+  });
+});
+
+describe('会话', () => {
+  const bare = (app: ReturnType<typeof setup>, path: string) =>
+    app.fetch(new Request(`http://local${path}`));
+
+  it('没有会话时管理端一律 401', async () => {
+    const app = setup();
+    for (const path of ['/api/pending', '/api/qsos', '/api/station', '/api/ops']) {
+      assert.equal((await bare(app, path)).status, 401, path);
+    }
+  });
+
+  it('公开路由和健康检查不要会话', async () => {
+    const app = setup();
+    assert.equal((await bare(app, '/public/qsos')).status, 200);
+    assert.equal((await bare(app, '/public/summary')).status, 200);
+    assert.equal((await bare(app, '/health')).status, 200);
+  });
+
+  it('口令对就发 HttpOnly cookie，错就 401 且不发', async () => {
+    const app = setup();
+    const login = (password: string) =>
+      app.fetch(
+        new Request('http://local/api/session', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ password }),
+        }),
+      );
+
+    const bad = await login('nope');
+    assert.equal(bad.status, 401);
+    assert.equal(bad.headers.get('set-cookie'), null);
+
+    const good = await login('secret');
+    assert.equal(good.status, 200);
+    const setCookie = good.headers.get('set-cookie') ?? '';
+    assert.ok(setCookie.includes(COOKIE));
+    assert.ok(/HttpOnly/i.test(setCookie), '会话 cookie 必须是 HttpOnly');
+  });
+
+  it('伪造的会话过不了', async () => {
+    const forged = `${COOKIE}=${Math.floor(Date.now() / 1000) + 9999}.deadbeef`;
+    const res = await setup().fetch(
+      new Request('http://local/api/pending', { headers: { cookie: forged } }),
+    );
+    assert.equal(res.status, 401);
+  });
+
+  it('过期的会话过不了', async () => {
+    const expired = `${COOKIE}=${signSession(config.sessionSecret, Math.floor(Date.now() / 1000) - 10)}`;
+    const res = await setup().fetch(
+      new Request('http://local/api/pending', { headers: { cookie: expired } }),
+    );
+    assert.equal(res.status, 401);
+  });
+
+  it('换了密钥之后旧会话失效', async () => {
+    const other = signSession('别的密钥'.repeat(10), Math.floor(Date.now() / 1000) + 9999);
+    const res = await setup().fetch(
+      new Request('http://local/api/pending', { headers: { cookie: `${COOKIE}=${other}` } }),
+    );
+    assert.equal(res.status, 401);
+  });
+
+  it('采集入口只认 bearer token，不看会话', async () => {
+    const res = await setup().fetch(
+      new Request('http://local/api/ingest/activity', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${config.ingestToken}`,
+        },
+        body: '[]',
+      }),
+    );
+    assert.equal(res.status, 200);
   });
 });
 
