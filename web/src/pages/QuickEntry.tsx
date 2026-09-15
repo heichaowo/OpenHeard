@@ -14,7 +14,6 @@ import {
 import type { Dayjs } from 'dayjs'
 import { bandOf, isValidCallsign, normalizeCallsign } from '@core'
 import type { Mode, Qso } from '@core'
-import { CHANNELS } from '../mock/pending'
 import { useStore } from '../store'
 import { nowUtc, unixFromDisplayedUtc } from '../time'
 
@@ -37,7 +36,7 @@ type FormValues = Pick<
 
 export default function QuickEntry() {
   const { message } = App.useApp()
-  const { station, addQso } = useStore()
+  const { station, channels, addQso } = useStore()
   const [form] = Form.useForm<FormValues>()
 
   const initial: Partial<FormValues> = {
@@ -53,25 +52,25 @@ export default function QuickEntry() {
   }
 
   const pickChannel = (name: string) => {
-    const ch = CHANNELS.find((c) => c.name === name)
+    const ch = channels.find((c) => c.name === name)
     if (ch) form.setFieldsValue({ freqMhz: ch.freqMhz, mode: ch.mode })
   }
 
-  const submit = ({ at, ...values }: FormValues) => {
+  const submit = async ({ at, ...values }: FormValues) => {
     const band = bandOf(values.freqMhz)
     if (!band) {
       message.error('这个频率不在本台能用的波段里')
       return
     }
-    addQso({
-      ...values,
-      call: normalizeCallsign(values.call),
-      startAt: unixFromDisplayedUtc(at),
-      band,
-    })
-    message.success(`${normalizeCallsign(values.call)} 已入库`)
-    form.resetFields(['call', 'gridsquare', 'qth', 'note'])
-    form.setFieldsValue({ at: nowUtc() })
+    const call = normalizeCallsign(values.call)
+    try {
+      await addQso({ ...values, call, startAt: unixFromDisplayedUtc(at), band })
+      message.success(`${call} 已入库`)
+      form.resetFields(['call', 'gridsquare', 'qth', 'note'])
+      form.setFieldsValue({ at: nowUtc() })
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : String(e))
+    }
   }
 
   return (
@@ -106,7 +105,7 @@ export default function QuickEntry() {
             allowClear
             placeholder="从频谱表里挑，会带出频率和模式"
             onChange={pickChannel}
-            options={CHANNELS.map((c) => ({ value: c.name, label: c.name }))}
+            options={channels.map((c) => ({ value: c.name, label: c.name }))}
           />
         </Form.Item>
 

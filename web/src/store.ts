@@ -1,17 +1,24 @@
 import { createContext, use } from 'react'
-import type { PendingItem, Qso, QsoDraft, QsoField, StationDefaults } from '@core'
+import type { Channel, PendingItem, Qso, QsoDraft, QsoField, StationDefaults } from '@core'
 
 export type PendingRow = PendingItem & { missing: QsoField[] }
 
 export interface Store {
   station: StationDefaults
+  channels: Channel[]
   pending: PendingRow[]
   qsos: Qso[]
-  /** 把一次对话提升成通联。草稿必须已经补齐。 */
-  promote: (clusterId: string, draft: QsoDraft) => void
-  ignore: (clusterId: string) => void
-  addQso: (draft: QsoDraft) => void
-  removeQso: (id: string) => void
+  /** 首次加载还没回来。 */
+  loading: boolean
+  /** 连不上后端或后端报错时的说明，正常是 undefined。 */
+  error?: string
+
+  /** 下面这些都会打到后端，失败时抛 ApiError，调用方负责显示。 */
+  promote: (clusterId: string, draft: QsoDraft) => Promise<void>
+  ignore: (clusterId: string) => Promise<void>
+  addQso: (draft: QsoDraft) => Promise<void>
+  removeQso: (id: string) => Promise<void>
+  refresh: () => Promise<void>
 }
 
 export const StoreContext = createContext<Store | null>(null)

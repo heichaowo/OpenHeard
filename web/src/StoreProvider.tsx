@@ -1,53 +1,75 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { draftFromCluster, missingFields } from '@core'
-import type { Qso, QsoDraft } from '@core'
-import { MOCK_CLUSTERS, MOCK_QSOS, STATION } from './mock/pending'
+import { missingFields } from '@core'
+import type { Channel, PendingItem, Qso, StationDefaults } from '@core'
+import { ApiError, api } from './api'
 import { StoreContext } from './store'
 import type { PendingRow, Store } from './store'
 
-/** 后端接上之前，全部状态放在内存里。这里就是将来放 fetch 的地方。 */
+/** 待确认队列每 15 秒拉一次。采集是后台在跑的，页面开着就该看见新的。 */
+const POLL_MS = 15000
+
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [clusters, setClusters] = useState(MOCK_CLUSTERS)
-  const [qsos, setQsos] = useState(MOCK_QSOS)
+  const [station, setStation] = useState<StationDefaults>({})
+  const [channels, setChannels] = useState<Channel[]>([])
+  const [pending, setPending] = useState<PendingItem[]>([])
+  const [qsos, setQsos] = useState<Qso[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | undefined>()
 
-  const pending = useMemo<PendingRow[]>(
-    () =>
-      clusters.map((cluster) => {
-        const draft = draftFromCluster(cluster, STATION)
-        return { cluster, draft, missing: missingFields(draft) }
-      }),
-    [clusters],
-  )
-
-  const append = useCallback((draft: QsoDraft) => {
-    const qso = {
-      ...draft,
-      id: crypto.randomUUID(),
-      createdAt: Math.floor(Date.now() / 1000),
-    } as Qso
-    setQsos((prev) => [qso, ...prev])
+  const refresh = useCallback(async () => {
+    try {
+      const [s, p, q] = await Promise.all([api.station(), api.pending(), api.qsos()])
+      setStation(s.station)
+      setChannels(s.channels)
+      setPending(p)
+      setQsos(q)
+      setError(undefined)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
-  const ignore = useCallback(
-    (clusterId: string) => setClusters((prev) => prev.filter((c) => c.id !== clusterId)),
-    [],
+  useEffect(() => {
+    void refresh()
+    const t = setInterval(() => void refresh(), POLL_MS)
+    return () => clearInterval(t)
+  }, [refresh])
+
+  const rows = useMemo<PendingRow[]>(
+    () => pending.map((item) => ({ ...item, missing: missingFields(item.draft) })),
+    [pending],
   )
 
   const value = useMemo<Store>(
     () => ({
-      station: STATION,
-      pending,
+      station,
+      channels,
+      pending: rows,
       qsos,
-      promote: (clusterId, draft) => {
-        append(draft)
-        ignore(clusterId)
+      loading,
+      error,
+      refresh,
+      promote: async (clusterId, draft) => {
+        await api.promote(clusterId, draft)
+        await refresh()
       },
-      ignore,
-      addQso: append,
-      removeQso: (id) => setQsos((prev) => prev.filter((q) => q.id !== id)),
+      ignore: async (clusterId) => {
+        await api.ignore(clusterId)
+        await refresh()
+      },
+      addQso: async (draft) => {
+        await api.addQso(draft)
+        await refresh()
+      },
+      removeQso: async (id) => {
+        await api.removeQso(id)
+        await refresh()
+      },
     }),
-    [pending, qsos, append, ignore],
+    [station, channels, rows, qsos, loading, error, refresh],
   )
 
   return <StoreContext value={value}>{children}</StoreContext>

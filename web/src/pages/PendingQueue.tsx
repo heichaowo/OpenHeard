@@ -16,6 +16,7 @@ import {
 } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { isValidCallsign, missingFields, normalizeCallsign } from '@core'
+import { ApiError } from '../api'
 import type { Activity, Qso, QsoDraft, QsoField } from '@core'
 import { useStore } from '../store'
 import type { PendingRow } from '../store'
@@ -107,7 +108,7 @@ function ActivityTable({ activities }: { activities: Activity[] }) {
 export default function PendingQueue() {
   const { message } = App.useApp()
   const [form] = Form.useForm<FormValues>()
-  const { pending, promote, ignore } = useStore()
+  const { pending, promote, ignore, loading, error } = useStore()
   const [editing, setEditing] = useState<PendingRow | null>(null)
 
   const open = (row: PendingRow) => {
@@ -127,12 +128,24 @@ export default function PendingQueue() {
     })
   }
 
-  const straightIn = (row: PendingRow) => {
-    promote(row.cluster.id, row.draft)
-    message.success(`${row.draft.call} 已入库`)
+  const fail = (e: unknown) => {
+    if (e instanceof ApiError && e.missing?.length) {
+      message.error(`还缺 ${e.missing.map((k) => LABELS[k as QsoField] ?? k).join('、')}`)
+    } else {
+      message.error(e instanceof Error ? e.message : String(e))
+    }
   }
 
-  const submit = (values: FormValues) => {
+  const straightIn = async (row: PendingRow) => {
+    try {
+      await promote(row.cluster.id, row.draft)
+      message.success(`${row.draft.call} 已入库`)
+    } catch (e) {
+      fail(e)
+    }
+  }
+
+  const submit = async (values: FormValues) => {
     if (!editing) return
     const draft: QsoDraft = {
       ...editing.draft,
@@ -144,9 +157,13 @@ export default function PendingQueue() {
       message.error(`还缺 ${still.map((k) => LABELS[k] ?? k).join('、')}`)
       return
     }
-    promote(editing.cluster.id, draft)
-    setEditing(null)
-    message.success(`${draft.call} 已入库`)
+    try {
+      await promote(editing.cluster.id, draft)
+      setEditing(null)
+      message.success(`${draft.call} 已入库`)
+    } catch (e) {
+      fail(e)
+    }
   }
 
   const columns: TableColumnsType<PendingRow> = [
@@ -171,7 +188,7 @@ export default function PendingQueue() {
       title: '发射',
       key: 'activities',
       render: (_, row) =>
-        `${row.cluster.activities.length} 次 / ${row.cluster.endAt - row.cluster.startAt} 秒`,
+        `${row.cluster.activities.length} 次 / ${Math.round(row.cluster.endAt - row.cluster.startAt)} 秒`,
       width: 140,
     },
     {
@@ -210,7 +227,10 @@ export default function PendingQueue() {
           <Button type="link" onClick={() => open(row)}>
             {row.missing.length === 0 ? '编辑' : '确认'}
           </Button>
-          <Popconfirm title="不记这次对话？" onConfirm={() => ignore(row.cluster.id)}>
+          <Popconfirm
+            title="不记这次对话？"
+            onConfirm={() => ignore(row.cluster.id).catch(fail)}
+          >
             <Button type="link" danger>
               忽略
             </Button>
@@ -229,9 +249,10 @@ export default function PendingQueue() {
         rowKey={(row) => row.cluster.id}
         columns={columns}
         dataSource={pending}
+        loading={loading}
         pagination={false}
         scroll={{ x: 900 }}
-        locale={{ emptyText: '队列空了' }}
+        locale={{ emptyText: error ?? '队列空了' }}
         expandable={{
           expandedRowRender: (row) => <ActivityTable activities={row.cluster.activities} />,
         }}

@@ -17,7 +17,7 @@ function download(name: string, text: string) {
 
 export default function LogList() {
   const { message } = App.useApp()
-  const { qsos, removeQso } = useStore()
+  const { qsos, removeQso, loading, error } = useStore()
   const [search, setSearch] = useState('')
 
   const rows = useMemo(() => {
@@ -79,7 +79,9 @@ export default function LogList() {
       key: 'action',
       width: 90,
       render: (_, q) => (
-        <Popconfirm title={`删除与 ${q.call} 的通联？`} onConfirm={() => removeQso(q.id)}>
+        <Popconfirm title={`删除与 ${q.call} 的通联？`} onConfirm={() =>
+            removeQso(q.id).catch((e: Error) => message.error(e.message))
+          }>
           <Button type="link" danger>
             删除
           </Button>
@@ -106,9 +108,10 @@ export default function LogList() {
         rowKey="id"
         columns={columns}
         dataSource={rows}
+        loading={loading}
         scroll={{ x: 1000 }}
         pagination={{ pageSize: 20, hideOnSinglePage: true }}
-        locale={{ emptyText: '还没有通联' }}
+        locale={{ emptyText: error ?? '还没有通联' }}
         expandable={{
           rowExpandable: (q) => Boolean(q.note || q.myDevice),
           expandedRowRender: (q) => (
