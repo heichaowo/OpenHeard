@@ -194,6 +194,70 @@ describe('手工补录', () => {
   });
 });
 
+describe('改一条已入库的通联', () => {
+  it('改得动，id 和 createdAt 不变', async () => {
+    const app = setup();
+    const before = (await (await send(app, 'POST', '/api/qsos', complete)).json()) as Qso;
+
+    const res = await send(app, 'PUT', `/api/qsos/${before.id}`, {
+      ...before,
+      rstSent: '41',
+      qth: '重庆',
+    });
+
+    assert.equal(res.status, 200);
+    const after = (await res.json()) as Qso;
+    assert.equal(after.id, before.id);
+    assert.equal(after.createdAt, before.createdAt);
+    assert.equal(after.rstSent, '41');
+    assert.equal(after.qth, '重庆');
+
+    const all = (await (await get(app, '/api/qsos')).json()) as Qso[];
+    assert.equal(all.length, 1);
+    assert.equal(all[0].rstSent, '41');
+  });
+
+  // clusterId 是这条记录和当初那几次发射的唯一联系。改 RST 不该把来源丢掉，
+  // 而请求体是前端整份发回来的，里面的 clusterId 不能作数。
+  it('clusterId 保持原样，请求体里的假值不作数', async () => {
+    const start = Math.floor(Date.now() / 1000) - 600;
+    const app = setup([
+      act('s1', { dmrId: MY_ID, startAt: start, talkgroup: 46001 }),
+      act('s2', { dmrId: 4600999, startAt: start + 10, talkgroup: 46001 }),
+    ]);
+    const pending = (await (await get(app, '/api/pending')).json()) as { cluster: { id: string } }[];
+    const promoted = (await (
+      await send(app, 'POST', `/api/pending/${pending[0].cluster.id}/promote`, {
+        ...complete,
+        startAt: start,
+      })
+    ).json()) as Qso;
+    assert.equal(promoted.clusterId, pending[0].cluster.id);
+
+    const after = (await (
+      await send(app, 'PUT', `/api/qsos/${promoted.id}`, {
+        ...promoted,
+        call: 'BA1AA',
+        clusterId: '假的',
+      })
+    ).json()) as Qso;
+
+    assert.equal(after.call, 'BA1AA');
+    assert.equal(after.clusterId, pending[0].cluster.id);
+  });
+
+  it('改不存在的回 404，改到缺字段回 422', async () => {
+    const app = setup();
+    const qso = (await (await send(app, 'POST', '/api/qsos', complete)).json()) as Qso;
+
+    assert.equal((await send(app, 'PUT', '/api/qsos/没这条', complete)).status, 404);
+    assert.equal(
+      (await send(app, 'PUT', `/api/qsos/${qso.id}`, { ...qso, call: undefined })).status,
+      422,
+    );
+  });
+});
+
 describe('公开路由', () => {
   it('只读，没有写接口', async () => {
     const app = setup();
@@ -208,6 +272,20 @@ describe('公开路由', () => {
       const body = method === 'GET' ? undefined : {};
       assert.equal((await send(app, method, path, body)).status, 404, `${method} ${path}`);
     }
+  });
+
+  // RST 是别的业余电台核对这次通联时要看的，本台字段和备注不往外发。
+  it('summary 带 RST，不带本台字段和备注', async () => {
+    const app = setup();
+    await send(app, 'POST', '/api/qsos', { ...complete, note: '不该出现', myDevice: '也不该' });
+    const body = (await (await get(app, '/public/summary')).json()) as {
+      recent: Record<string, unknown>[];
+    };
+
+    assert.equal(body.recent[0].rstSent, complete.rstSent);
+    assert.equal(body.recent[0].rstRcvd, complete.rstRcvd);
+    assert.equal(body.recent[0].note, undefined);
+    assert.equal(body.recent[0].myDevice, undefined);
   });
 
   it('公开的本台信息不带频谱表', async () => {

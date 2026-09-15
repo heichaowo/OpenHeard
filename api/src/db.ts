@@ -152,11 +152,8 @@ export function insertQso(db: DatabaseSync, q: Qso): void {
   );
 }
 
-export function selectQsos(db: DatabaseSync): Qso[] {
-  const rows = db
-    .prepare('SELECT * FROM qso ORDER BY start_at DESC')
-    .all() as Record<string, unknown>[];
-  return rows.map((r) => ({
+export function rowToQso(r: Record<string, unknown>): Qso {
+  return {
     id: String(r.id),
     call: String(r.call),
     startAt: Number(r.start_at),
@@ -176,7 +173,44 @@ export function selectQsos(db: DatabaseSync): Qso[] {
     note: str(r.note),
     clusterId: str(r.cluster_id),
     createdAt: Number(r.created_at),
-  }));
+  };
+}
+
+export function selectQsos(db: DatabaseSync): Qso[] {
+  const rows = db
+    .prepare('SELECT * FROM qso ORDER BY start_at DESC')
+    .all() as Record<string, unknown>[];
+  return rows.map(rowToQso);
+}
+
+export function selectQso(db: DatabaseSync, id: string): Qso | undefined {
+  const row = db.prepare('SELECT * FROM qso WHERE id = ?').get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return row === undefined ? undefined : rowToQso(row);
+}
+
+/**
+ * 改一条已经入库的通联。
+ *
+ * id、created_at 和 cluster_id 不动。cluster_id 是这条记录和当初那几次发射的
+ * 唯一联系，删了重录就断了，而改一个打错的 RST 不该把来源也一起丢掉。
+ */
+export function updateQso(db: DatabaseSync, q: Qso): boolean {
+  const r = db.prepare(`
+    UPDATE qso SET
+      call = ?, start_at = ?, freq_mhz = ?, band = ?, mode = ?,
+      rst_sent = ?, rst_rcvd = ?, gridsquare = ?, qth = ?,
+      my_gridsquare = ?, my_qth = ?, my_device = ?, my_antenna = ?,
+      my_power = ?, my_height_m = ?, note = ?
+    WHERE id = ?
+  `).run(
+    q.call, q.startAt, q.freqMhz, q.band, q.mode, q.rstSent, q.rstRcvd,
+    nul(q.gridsquare), nul(q.qth), nul(q.myGridsquare), nul(q.myQth), nul(q.myDevice),
+    nul(q.myAntenna), nul(q.myPower), nul(q.myHeightM), nul(q.note),
+    q.id,
+  );
+  return Number(r.changes) > 0;
 }
 
 /** 删掉一条通联，并把它占住的 activity 放回待确认队列。 */

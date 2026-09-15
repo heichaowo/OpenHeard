@@ -20,8 +20,10 @@ import {
   prunePollLog,
   resolveActivities,
   selectPollLog,
+  selectQso,
   selectQsos,
   selectUnresolvedActivities,
+  updateQso,
   withTx,
 } from './db.ts';
 import type { IngestRow, PollLog } from './db.ts';
@@ -105,6 +107,20 @@ export function createStore(db: DatabaseSync, config: Config) {
     addQso: (draft: QsoDraft): Qso => {
       const qso = build(draft);
       insertQso(db, qso);
+      return qso;
+    },
+
+    // 改一条已经入库的。id、createdAt 和 clusterId 保持原样，因为 clusterId 是
+    // 这条记录和当初那几次发射的唯一联系，删了重录就断了。
+    editQso: (id: string, draft: QsoDraft): Qso => {
+      const existing = selectQso(db, id);
+      if (!existing) throw new StoreError(404, '没有这条通联');
+      const qso = {
+        ...build(draft, existing.clusterId),
+        id: existing.id,
+        createdAt: existing.createdAt,
+      };
+      updateQso(db, qso);
       return qso;
     },
 

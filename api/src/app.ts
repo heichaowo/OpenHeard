@@ -101,6 +101,16 @@ export function createApp(
       }
     })
 
+    .put('/qsos/:id', async (c) => {
+      try {
+        const draft = (await c.req.json()) as QsoDraft;
+        return c.json(store.editQso(c.req.param('id'), draft));
+      } catch (e) {
+        const { status, body } = fail(e);
+        return c.json(body, status);
+      }
+    })
+
     .delete('/qsos/:id', (c) => {
       try {
         store.removeQso(c.req.param('id'));

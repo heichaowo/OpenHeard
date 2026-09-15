@@ -35,12 +35,16 @@ function summarise(source: PublicSource) {
     lastAt: starts.length ? Math.max(...starts) : undefined,
     byBand: tally(qsos.map((q) => q.band)),
     byMode: tally(qsos.map((q) => q.mode)),
+    // 不带本台字段和备注。RST 带上，它是别的业余电台核对这次通联时要看的，
+    // 而且已经存在库里了。
     recent: qsos.slice(0, 30).map((q) => ({
       id: q.id,
       call: q.call,
       startAt: q.startAt,
       band: q.band,
       mode: q.mode,
+      rstSent: q.rstSent,
+      rstRcvd: q.rstRcvd,
       qth: q.qth,
       gridsquare: q.gridsquare,
     })),
