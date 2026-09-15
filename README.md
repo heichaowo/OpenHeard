@@ -50,7 +50,7 @@ cd web && npm install && npm run dev
 cd public && npm install && npm run dev
 ```
 
-`npm test` 在 `api/`、`daemon/` 和 `web/` 下各自可跑，`web/` 那个跑的是 `core/` 的测试。根目录的 `npm run verify` 把类型检查、测试、lint 和构建全跑一遍，CI 跑的就是这一条。
+`npm test` 在 `api/`、`daemon/` 和 `web/` 下各自可跑，`web/` 那个连 `core/` 的测试一起跑，界面部分用 vitest 加 jsdom。根目录的 `npm run verify` 把类型检查、测试、lint 和构建全跑一遍，CI 跑的就是这一条。
 
 装到常驻的机器上走 `infra/install.sh`，它把 `api` 和 `daemon` 做成两个 LaunchAgent，步骤见 [docs/deployment.md](docs/deployment.md)。
 
@@ -139,8 +139,9 @@ cd public && npm install && npm run dev
 ```
 
 `npm test` works in `api/`, `daemon/` and `web/`; the one in `web/` runs the
-`core/` tests. `npm run verify` at the root runs typecheck, tests, lint and
-both builds, and is the same command CI runs.
+`core/` tests too, and the UI ones under vitest with jsdom. `npm run verify` at
+the root runs typecheck, tests, lint and both builds, and is the same command
+CI runs.
 
 To install on the machine it lives on, `infra/install.sh` sets `api` and
 `daemon` up as two LaunchAgents. The steps are in

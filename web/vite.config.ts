@@ -16,6 +16,9 @@ export default defineConfig({
     proxy: { '/api': 'http://127.0.0.1:3000' },
   },
   test: {
-    include: ['../core/src/**/*.test.ts'],
+    // core/ 没有自己的 package.json，它的测试挂在这里跑。
+    include: ['../core/src/**/*.test.ts', 'src/**/*.test.{ts,tsx}'],
+    environment: 'jsdom',
+    setupFiles: ['./src/testSetup.ts'],
   },
 })
