@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from './config.ts';
+import { checkHealth } from './health.ts';
+import type { Health } from './health.ts';
 import {
   clusterActivities,
   draftFromCluster,
@@ -10,12 +12,17 @@ import {
 import type { Channel, Cluster, PendingItem, Qso, QsoDraft, StationDefaults } from './core.ts';
 import {
   deleteQso,
+  insertActivities,
+  insertPollLog,
   insertQso,
+  pruneActivities,
+  prunePollLog,
   resolveActivities,
   selectQsos,
   selectUnresolvedActivities,
   withTx,
 } from './db.ts';
+import type { IngestRow, PollLog } from './db.ts';
 
 const nowS = () => Math.floor(Date.now() / 1000);
 
@@ -102,6 +109,20 @@ export function createStore(db: DatabaseSync, config: Config) {
     removeQso: (id: string): void => {
       if (!deleteQso(db, id)) throw new StoreError(404, '没有这条通联');
     },
+
+    // 采集端推过来的。判重在这里做，所以重复推送没有副作用。
+    ingest: (rows: IngestRow[]): { received: number; written: number } => {
+      const written = insertActivities(db, rows, nowS());
+      return { received: rows.length, written };
+    },
+
+    logPoll: (p: PollLog): void => {
+      insertPollLog(db, p);
+      prunePollLog(db, nowS() - 30 * 86400);
+      pruneActivities(db, nowS() - config.activityRetentionDays * 86400);
+    },
+
+    health: (): Health => checkHealth(db, config, nowS()),
   };
 }
 

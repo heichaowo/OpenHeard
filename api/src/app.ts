@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { QsoDraft } from './core.ts';
+import type { IngestRow, PollLog } from './db.ts';
 import { publicRoutes } from './public.ts';
 import { StoreError } from './store.ts';
 import type { Store } from './store.ts';
@@ -11,8 +12,27 @@ const fail = (e: unknown) => {
   throw e;
 };
 
-export function createApp(store: Store) {
+export function createApp(store: Store, ingestToken: string) {
+  // 采集入口是唯一的写入口，而且将来 SDR 那侧可能从另一个进程推过来。
+  const ingest = new Hono()
+    .use('*', async (c, next) => {
+      if (c.req.header('authorization') !== `Bearer ${ingestToken}`) {
+        return c.json({ error: 'unauthorized' }, 401);
+      }
+      await next();
+    })
+    .post('/activity', async (c) => c.json(store.ingest((await c.req.json()) as IngestRow[])))
+    .post('/poll-log', async (c) => {
+      store.logPoll((await c.req.json()) as PollLog);
+      return c.body(null, 204);
+    });
+
   const api = new Hono()
+    .route('/ingest', ingest)
+    .get('/health', (c) => {
+      const h = store.health();
+      return c.json(h, h.ok ? 200 : 503);
+    })
     .get('/station', (c) => c.json(store.station()))
     .get('/pending', (c) => c.json(store.pending()))
     .get('/qsos', (c) => c.json(store.qsos()))

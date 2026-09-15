@@ -34,7 +34,7 @@ function setup(activities: Activity[] = []) {
   if (activities.length > 0) {
     insertActivities(db, activities.map((a) => ({ activity: a, raw: '{}' })), 1);
   }
-  return createApp(createStore(db, config));
+  return createApp(createStore(db, config), config.ingestToken);
 }
 
 const get = (app: ReturnType<typeof setup>, path: string) =>
@@ -200,6 +200,54 @@ describe('公开路由', () => {
     const body = (await (await get(setup(), '/public/station')).json()) as Record<string, unknown>;
     assert.equal(body.myQth, '成都');
     assert.equal(body.channels, undefined);
+  });
+});
+
+describe('采集入口', () => {
+  const token = config.ingestToken;
+  const post = (app: ReturnType<typeof setup>, body: unknown, auth = `Bearer ${token}`) =>
+    app.fetch(
+      new Request('http://local/api/ingest/activity', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: auth },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  it('没有 token 进不来', async () => {
+    assert.equal((await post(setup(), [], 'Bearer nope')).status, 401);
+    assert.equal((await post(setup(), [], '')).status, 401);
+  });
+
+  it('重复推送没有副作用', async () => {
+    const app = setup();
+    const rows = [{ activity: act('a', { dmrId: MY_ID }), raw: '{}' }];
+    assert.deepEqual(await (await post(app, rows)).json(), { received: 1, written: 1 });
+    assert.deepEqual(await (await post(app, rows)).json(), { received: 1, written: 0 });
+    assert.equal(((await (await get(app, '/api/pending')).json()) as unknown[]).length, 1);
+  });
+});
+
+describe('健康检查', () => {
+  it('没有查询配置时是健康的', async () => {
+    const res = await get(setup(), '/api/health');
+    assert.equal(res.status, 200);
+    const h = (await res.json()) as { ok: boolean; activityCount: number };
+    assert.equal(h.ok, true);
+    assert.equal(h.activityCount, 0);
+  });
+
+  it('不健康时回 503，让一行 curl 就能当外部检查', async () => {
+    const db = openDb(':memory:');
+    const withQuery = {
+      ...config,
+      queries: [{ key: 'dst:91', rule: { id: 'DestinationID', operator: 'equal', value: 91 }, amount: 200, intervalS: 60 }],
+    };
+    const app = createApp(createStore(db, withQuery), config.ingestToken);
+    const res = await app.fetch(new Request('http://local/api/health'));
+    assert.equal(res.status, 503);
+    const h = (await res.json()) as { problems: string[] };
+    assert.ok(h.problems.some((p) => p.includes('还没有过一次轮询')));
   });
 });
 

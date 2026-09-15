@@ -10,7 +10,7 @@ const port = Number(process.env.OPENHEARD_PORT ?? 3000);
 const result = loadConfig(configPath);
 
 const app = result.ok
-  ? createApp(createStore(openDb(result.config.dbPath), result.config))
+  ? createApp(createStore(openDb(result.config.dbPath), result.config), result.config.ingestToken)
   : createBrokenApp(result.problems);
 
 if (!result.ok) {
