@@ -1,5 +1,5 @@
 import { ReloadOutlined } from '@ant-design/icons'
-import { Button, Empty, Result, Skeleton } from 'antd'
+import { Alert, Button, Empty, Result, Skeleton } from 'antd'
 import type { ReactNode } from 'react'
 
 interface Props {
@@ -28,7 +28,9 @@ export function AsyncContent({ loading, error, empty, emptyText, onRetry, childr
     )
   }
 
-  if (error) {
+  // 手上一条数据都没有时才整页报错。已经在渲染的表格不能被一次轮询失败盖掉，
+  // 那会连带丢掉展开行、分页和筛选，而下一次轮询多半自己就好了。
+  if (error && empty) {
     return (
       <Result
         status="warning"
@@ -40,6 +42,24 @@ export function AsyncContent({ loading, error, empty, emptyText, onRetry, childr
           </Button>
         }
       />
+    )
+  }
+
+  if (error) {
+    return (
+      <>
+        <Alert
+          type="warning"
+          banner
+          message={`刷新失败，下面是上一次拿到的内容。${error}`}
+          action={
+            <Button size="small" type="text" icon={<ReloadOutlined />} onClick={onRetry}>
+              重试
+            </Button>
+          }
+        />
+        {children}
+      </>
     )
   }
 

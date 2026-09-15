@@ -23,9 +23,11 @@ export function Preferences({ children }: { children: ReactNode }) {
 
   const dark = mode === 'system' ? systemDark : mode === 'dark'
 
-  // CSS 变量按这个属性切换，和 antd 的算法各管一半。
+  // dataset.theme 给我们自己的选择器用，colorScheme 让浏览器的滚动条和
+  // 原生控件跟着走。只设前者的话暗色下滚动条还是亮的。
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+    document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
   }, [dark])
 
   const value = useMemo(

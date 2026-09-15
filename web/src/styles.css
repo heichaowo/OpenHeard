@@ -46,6 +46,12 @@ select {
   z-index: 30;
   overflow: hidden;
   border-inline-end: 1px solid var(--ant-color-border-secondary);
+  /* antd 在同一帧把 width、min-width、max-width 一起换掉，
+     只给 width 过渡的话会被 max-width 立刻钳住，看上去就是瞬间跳。 */
+  transition:
+    width 160ms cubic-bezier(.2, 0, 0, 1),
+    min-width 160ms cubic-bezier(.2, 0, 0, 1),
+    max-width 160ms cubic-bezier(.2, 0, 0, 1) !important;
 }
 
 .app-sider .ant-layout-sider-children {

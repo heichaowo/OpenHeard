@@ -18,3 +18,12 @@ export const nowUtc = () => dayjs.utc()
  */
 export const unixFromDisplayedUtc = (d: dayjs.Dayjs) =>
   dayjs.utc(d.format('YYYY-MM-DD HH:mm:ss')).unix()
+
+/**
+ * 把一个只看日期的值和一个只看时间的值拼成 UTC。
+ *
+ * 两边各自可能是本地模式也可能是 UTC 模式，所以只认它们显示出来的那串字，
+ * 和 unixFromDisplayedUtc 同一个口径。
+ */
+export const mergeDateTime = (date: dayjs.Dayjs, time: dayjs.Dayjs) =>
+  dayjs.utc(`${date.format('YYYY-MM-DD')} ${time.format('HH:mm:ss')}`, 'YYYY-MM-DD HH:mm:ss')

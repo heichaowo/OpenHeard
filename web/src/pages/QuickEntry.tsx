@@ -12,10 +12,11 @@ import {
 } from 'antd'
 import { PageHeader } from '../components/PageHeader'
 import type { Dayjs } from 'dayjs'
+import { Grid, TimePicker } from 'antd'
 import { bandOf, isValidCallsign, normalizeCallsign } from '@core'
 import type { Mode, Qso } from '@core'
 import { useStore } from '../store'
-import { nowUtc, unixFromDisplayedUtc } from '../time'
+import { mergeDateTime, nowUtc, unixFromDisplayedUtc } from '../time'
 
 type FormValues = Pick<
   Qso,
@@ -33,6 +34,41 @@ type FormValues = Pick<
   | 'myHeightM'
   | 'note'
 > & { at: Dayjs }
+
+/**
+ * 日期加时间。
+ *
+ * 带 showTime 的单个选择器面板宽 457px，比任何手机都宽，左半边会掉到屏幕外
+ * 且不可滚动。窄屏下拆成两个，日期面板 288px 放得下。
+ */
+function UtcDateTime({ value, onChange }: { value?: Dayjs; onChange?: (v: Dayjs | null) => void }) {
+  const wide = Grid.useBreakpoint().sm ?? true
+  if (wide) {
+    return (
+      <DatePicker
+        showTime
+        format="YYYY-MM-DD HH:mm:ss"
+        style={{ width: '100%' }}
+        value={value}
+        onChange={onChange}
+      />
+    )
+  }
+  return (
+    <Space.Compact style={{ width: '100%' }}>
+      <DatePicker
+        style={{ flex: 1 }}
+        value={value}
+        onChange={(d) => onChange?.(d && value ? mergeDateTime(d, value) : d)}
+      />
+      <TimePicker
+        style={{ width: 118 }}
+        value={value}
+        onChange={(t) => onChange?.(t && value ? mergeDateTime(value, t) : t)}
+      />
+    </Space.Compact>
+  )
+}
 
 export default function QuickEntry() {
   const { message } = App.useApp()
@@ -99,7 +135,7 @@ export default function QuickEntry() {
         </Form.Item>
 
         <Form.Item name="at" label="时间 UTC" rules={[{ required: true, message: '时间必填' }]}>
-          <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" style={{ width: '100%' }} />
+          <UtcDateTime />
         </Form.Item>
 
         <Form.Item label="信道">
