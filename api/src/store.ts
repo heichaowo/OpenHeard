@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from './config.ts';
 import { checkHealth } from './health.ts';
@@ -29,6 +30,27 @@ import {
 import type { IngestRow, PollLog } from './db.ts';
 
 const nowS = () => Math.floor(Date.now() / 1000);
+
+/**
+ * 机器本身的几个数。
+ *
+ * 这台机器无人值守，跑飞的轮询和内存泄漏只看磁盘看不出来，要等到磁盘满了
+ * 才发现就太晚了。放在运维接口后面，不进 /health：健康检查是给一行 curl 用的。
+ *
+ * load 除以核数，这样它和 1.0 比较才有意义，不用记这台机器有几个核。
+ */
+function machine() {
+  const cores = cpus().length || 1;
+  return {
+    rssBytes: process.memoryUsage().rss,
+    uptimeS: Math.floor(process.uptime()),
+    cores,
+    // macOS 的 freemem 不算可回收的那部分，偏小，只当趋势看。
+    memFreeBytes: freemem(),
+    memTotalBytes: totalmem(),
+    load1: Number((loadavg()[0] / cores).toFixed(2)),
+  };
+}
 
 /** 调用方能区分的三种失败。 */
 export class StoreError extends Error {
@@ -145,6 +167,7 @@ export function createStore(db: DatabaseSync, config: Config) {
     // 运维页一次拿齐，免得开三个请求各自过期。
     ops: () => ({
       health: checkHealth(db, config, nowS()),
+      machine: machine(),
       polls: selectPollLog(db, 40),
       activities: activityCounts(db),
       queries: config.queries.map((q) => ({ key: q.key, intervalS: q.intervalS, amount: q.amount })),
