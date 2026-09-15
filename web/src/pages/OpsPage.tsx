@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Card, Descriptions, Statistic, Table, Tag, Typography } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { ApiError, api } from '../api'
@@ -26,14 +26,20 @@ export default function OpsPage() {
   const [ops, setOps] = useState<Ops | undefined>()
   const [error, setError] = useState<string | undefined>()
   const [loading, setLoading] = useState(true)
+  // 上一次还没回来就别再发。重试按钮和 20 秒的定时器用的是同一个 load，
+  // 两个请求抢着 setOps，后回来的那个未必是后发的那个。
+  const inFlight = useRef(false)
 
   const load = useCallback(async () => {
+    if (inFlight.current) return
+    inFlight.current = true
     try {
       setOps(await api.ops())
       setError(undefined)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally {
+      inFlight.current = false
       setLoading(false)
     }
   }, [])
@@ -42,8 +48,17 @@ export default function OpsPage() {
     // setState 都在 await 之后，规则认不出异步这一层。拉后端正是 effect 该做的事。
     // oxlint-disable-next-line react/set-state-in-effect
     void load()
-    const t = setInterval(() => void load(), POLL_MS)
-    return () => clearInterval(t)
+    // 标签页在后台时不拉。这一页是留着看的，没人看的时候拉只是白占带宽和数据库。
+    const tick = () => {
+      if (!document.hidden) void load()
+    }
+    const t = setInterval(tick, POLL_MS)
+    // 切回来立刻补一次，否则要等下一个 20 秒才知道现在是什么样。
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', tick)
+    }
   }, [load])
 
   const columns: TableColumnsType<PollRow> = [

@@ -17,6 +17,8 @@ export interface Store {
   promote: (clusterId: string, draft: QsoDraft) => Promise<void>
   ignore: (clusterId: string) => Promise<void>
   addQso: (draft: QsoDraft) => Promise<void>
+  /** 改一条已入库的。id、创建时间和来源聚类不动。 */
+  editQso: (id: string, draft: QsoDraft) => Promise<void>
   removeQso: (id: string) => Promise<void>
   refresh: () => Promise<void>
 }

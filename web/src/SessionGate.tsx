@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { LockOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Form, Input, Spin, Typography } from 'antd'
-import { ApiError, api } from './api'
+import { ApiError, api, setUnauthorizedHandler } from './api'
 import { SessionContext } from './session'
 
 /**
@@ -14,6 +14,7 @@ import { SessionContext } from './session'
 export function SessionGate({ children }: { children: ReactNode }) {
   const [signedIn, setSignedIn] = useState<boolean | undefined>()
   const [error, setError] = useState<string | undefined>()
+  const [expired, setExpired] = useState(false)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -24,8 +25,19 @@ export function SessionGate({ children }: { children: ReactNode }) {
     )
   }, [])
 
+  // 会话是开着页面的时候过期的，不是刷新的时候。任何一条 401 都退回登录页，
+  // 否则轮询只会一直堆「没登录」，而页面上没有任何回去的路。
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setSignedIn(false)
+      setExpired(true)
+    })
+    return () => setUnauthorizedHandler(undefined)
+  }, [])
+
   const signOut = useCallback(async () => {
     await api.logout().catch(() => undefined)
+    setExpired(false)
     setSignedIn(false)
   }, [])
 
@@ -45,6 +57,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
       try {
         await api.login(password)
         setError(undefined)
+        setExpired(false)
         setSignedIn(true)
       } catch (e) {
         setError(e instanceof ApiError ? e.message : String(e))
@@ -61,6 +74,9 @@ export function SessionGate({ children }: { children: ReactNode }) {
           <Typography.Paragraph type="secondary">
             管理端要口令。公开展示页不在这道门里面。
           </Typography.Paragraph>
+          {expired && !error && (
+            <Alert type="warning" showIcon message="会话过期了，重新登录" style={{ marginBottom: 16 }} />
+          )}
           {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
           <Form layout="vertical" onFinish={submit}>
             <Form.Item name="password" rules={[{ required: true, message: '口令必填' }]}>

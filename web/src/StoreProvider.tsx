@@ -37,8 +37,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // 拉后端正是 effect 该做的「和外部系统同步」，规则认不出异步这一层。
     // oxlint-disable-next-line react/set-state-in-effect
     void refresh()
-    const t = setInterval(() => void refresh(), POLL_MS)
-    return () => clearInterval(t)
+    // 标签页在后台时定时器不拉，切回来立刻补一次。挡的只是定时器，
+    // refresh 本身不挡：入库之后那一次必须跑到，否则页面停在改之前的样子。
+    const tick = () => {
+      if (!document.hidden) void refresh()
+    }
+    const t = setInterval(tick, POLL_MS)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', tick)
+    }
   }, [refresh])
 
   const rows = useMemo<PendingRow[]>(
@@ -65,6 +74,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       addQso: async (draft) => {
         await api.addQso(draft)
+        await refresh()
+      },
+      editQso: async (id, draft) => {
+        await api.editQso(id, draft)
         await refresh()
       },
       removeQso: async (id) => {

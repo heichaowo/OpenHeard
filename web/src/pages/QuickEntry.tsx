@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   App,
   Button,
@@ -74,6 +75,7 @@ export default function QuickEntry() {
   const { message } = App.useApp()
   const { station, channels, addQso } = useStore()
   const [form] = Form.useForm<FormValues>()
+  const [busy, setBusy] = useState(false)
 
   const initial: Partial<FormValues> = {
     at: nowUtc(),
@@ -99,6 +101,7 @@ export default function QuickEntry() {
       return
     }
     const call = normalizeCallsign(values.call)
+    setBusy(true)
     try {
       await addQso({ ...values, call, startAt: unixFromDisplayedUtc(at), band })
       message.success(`${call} 已入库`)
@@ -106,6 +109,8 @@ export default function QuickEntry() {
       form.setFieldsValue({ at: nowUtc() })
     } catch (e) {
       message.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -210,7 +215,7 @@ export default function QuickEntry() {
           <Input.TextArea rows={2} />
         </Form.Item>
 
-        <Button type="primary" htmlType="submit">
+        <Button type="primary" htmlType="submit" loading={busy}>
           入库
         </Button>
       </Form>

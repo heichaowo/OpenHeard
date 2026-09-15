@@ -1,45 +1,17 @@
 import { useState } from 'react'
-import {
-  App,
-  Button,
-  Descriptions,
-  Divider,
-  Drawer,
-  Form,
-  Input,
-  InputNumber,
-  Popconfirm,
-  Space,
-  Table,
-  Tag,
-  Typography,
-} from 'antd'
+import { App, Button, Descriptions, Drawer, Form, Popconfirm, Space, Table, Tag, Typography } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { Card, Grid } from 'antd'
 import { AsyncContent } from '../components/AsyncContent'
 import { PageHeader } from '../components/PageHeader'
-import { isValidCallsign, missingFields, normalizeCallsign } from '@core'
+import { QsoFields } from '../components/QsoFields'
+import type { QsoFormValues } from '../components/QsoFields'
+import { missingFields, normalizeCallsign } from '@core'
 import { ApiError } from '../api'
-import type { Activity, Qso, QsoDraft, QsoField } from '@core'
+import type { Activity, QsoDraft, QsoField } from '@core'
 import { useStore } from '../store'
 import type { PendingRow } from '../store'
 import { utcSec } from '../time'
-
-/** 人可以编辑的字段。机器填的那些在抽屉上半部只读显示。 */
-type FormValues = Pick<
-  Qso,
-  | 'call'
-  | 'rstSent'
-  | 'rstRcvd'
-  | 'gridsquare'
-  | 'qth'
-  | 'myQth'
-  | 'myDevice'
-  | 'myAntenna'
-  | 'myPower'
-  | 'myHeightM'
-  | 'note'
->
 
 const LABELS: Partial<Record<QsoField, string>> = {
   call: '对方呼号',
@@ -109,11 +81,14 @@ function ActivityTable({ activities }: { activities: Activity[] }) {
 }
 
 export default function PendingQueue() {
-  const { message } = App.useApp()
-  const [form] = Form.useForm<FormValues>()
+  const { message, modal } = App.useApp()
+  const [form] = Form.useForm<QsoFormValues>()
   const { pending, promote, ignore, loading, error, refresh } = useStore()
   const wide = Grid.useBreakpoint().md ?? true
   const [editing, setEditing] = useState<PendingRow | null>(null)
+  // 哪一行正在入库。楼下用手机弱网确认时，慢一点就会想再点一下。
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   const open = (row: PendingRow) => {
     setEditing(row)
@@ -141,15 +116,35 @@ export default function PendingQueue() {
   }
 
   const straightIn = async (row: PendingRow) => {
+    setBusyId(row.cluster.id)
     try {
       await promote(row.cluster.id, row.draft)
       message.success(`${row.draft.call} 已入库`)
     } catch (e) {
       fail(e)
+    } finally {
+      setBusyId(null)
     }
   }
 
-  const submit = async (values: FormValues) => {
+  // 抽屉里填好的东西只在表单里，关掉就没了。setFieldsValue 不算 touched，
+  // 所以这里问的是「你手敲过没有」，不是「有没有预填」。
+  const close = () => {
+    if (!form.isFieldsTouched()) {
+      setEditing(null)
+      return
+    }
+    modal.confirm({
+      title: '丢掉刚填的内容？',
+      content: '关掉之后这些字要重填一遍。',
+      okText: '丢掉',
+      okButtonProps: { danger: true },
+      cancelText: '继续填',
+      onOk: () => setEditing(null),
+    })
+  }
+
+  const submit = async (values: QsoFormValues) => {
     if (!editing) return
     const draft: QsoDraft = {
       ...editing.draft,
@@ -161,12 +156,15 @@ export default function PendingQueue() {
       message.error(`还缺 ${still.map((k) => LABELS[k] ?? k).join('、')}`)
       return
     }
+    setSubmitting(true)
     try {
       await promote(editing.cluster.id, draft)
       setEditing(null)
       message.success(`${draft.call} 已入库`)
     } catch (e) {
       fail(e)
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -225,7 +223,12 @@ export default function PendingQueue() {
       render: (_, row) => (
         <Space size={0}>
           {row.missing.length === 0 && (
-            <Button type="link" onClick={() => straightIn(row)}>
+            <Button
+              type="link"
+              loading={busyId === row.cluster.id}
+              disabled={busyId !== null && busyId !== row.cluster.id}
+              onClick={() => straightIn(row)}
+            >
               直接入库
             </Button>
           )}
@@ -276,9 +279,9 @@ export default function PendingQueue() {
         size={420}
         open={editing !== null}
         maskClosable={false}
-        onClose={() => setEditing(null)}
+        onClose={close}
         extra={
-          <Button type="primary" onClick={() => form.submit()}>
+          <Button type="primary" loading={submitting} onClick={() => form.submit()}>
             入库
           </Button>
         }
@@ -295,61 +298,7 @@ export default function PendingQueue() {
               <Descriptions.Item label="来源">{originOf(editing)}</Descriptions.Item>
             </Descriptions>
             <Form form={form} layout="vertical" onFinish={submit} style={{ marginTop: 24 }}>
-              <Form.Item
-                name="call"
-                label="对方呼号"
-                normalize={normalizeCallsign}
-                rules={[
-                  { required: true, message: '呼号必填' },
-                  {
-                    validator: (_, value: string) =>
-                      !value || isValidCallsign(value)
-                        ? Promise.resolve()
-                        : Promise.reject(new Error('呼号格式不对')),
-                  },
-                ]}
-              >
-                <Input autoFocus placeholder="BD7KLO" />
-              </Form.Item>
-              <Space>
-                <Form.Item name="rstSent" label="发出报告">
-                  <Input style={{ width: 100 }} />
-                </Form.Item>
-                <Form.Item name="rstRcvd" label="收到报告">
-                  <Input style={{ width: 100 }} />
-                </Form.Item>
-              </Space>
-              <Space>
-                <Form.Item name="gridsquare" label="对方网格">
-                  <Input style={{ width: 100 }} placeholder="OM24" />
-                </Form.Item>
-                <Form.Item name="qth" label="对方 QTH">
-                  <Input style={{ width: 140 }} />
-                </Form.Item>
-              </Space>
-              <Divider titlePlacement="left" plain>
-                本台
-              </Divider>
-              <Form.Item name="myQth" label="QTH">
-                <Input />
-              </Form.Item>
-              <Form.Item name="myDevice" label="设备">
-                <Input />
-              </Form.Item>
-              <Form.Item name="myAntenna" label="天线">
-                <Input />
-              </Form.Item>
-              <Space>
-                <Form.Item name="myPower" label="功率">
-                  <Input style={{ width: 100 }} />
-                </Form.Item>
-                <Form.Item name="myHeightM" label="天线高度（米）">
-                  <InputNumber style={{ width: 140 }} />
-                </Form.Item>
-              </Space>
-              <Form.Item name="note" label="备注">
-                <Input.TextArea rows={2} />
-              </Form.Item>
+              <QsoFields />
               {/* 让输入框里按回车也能提交，抽屉标题栏那个按钮在表单外面 */}
               <Button htmlType="submit" style={{ display: 'none' }} />
             </Form>

@@ -12,6 +12,19 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * 会话失效时通知谁。
+ *
+ * 管理端会开着好几个小时等自动入库，而会话有 30 天的期限。到期之后每一次轮询
+ * 都只是多一条「没登录」，页面上没有任何回到登录页的路，队列会一直堆着没人管。
+ * SessionGate 挂上这个回调，401 一出现就退回登录页。
+ */
+let onUnauthorized: (() => void) | undefined
+
+export function setUnauthorizedHandler(fn: (() => void) | undefined) {
+  onUnauthorized = fn
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response
   try {
@@ -24,6 +37,8 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (res.status === 204) return undefined as T
+  // /session 自己的 401 是口令不对，不是会话过期，交给登录表单显示。
+  if (res.status === 401 && !path.startsWith('/session')) onUnauthorized?.()
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string; missing?: string[] }
     throw new ApiError(res.status, body.error ?? `后端回了 ${res.status}`, body.missing)
@@ -81,6 +96,9 @@ export const api = {
 
   addQso: (draft: QsoDraft) =>
     call<Qso>('/qsos', { method: 'POST', body: JSON.stringify(draft) }),
+
+  editQso: (id: string, draft: QsoDraft) =>
+    call<Qso>(`/qsos/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(draft) }),
 
   removeQso: (id: string) => call<void>(`/qsos/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }
