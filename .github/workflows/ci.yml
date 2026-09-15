@@ -14,10 +14,10 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Node 24 起类型擦除默认开启，api/ 和 daemon/ 直接跑 .ts，没有构建步骤。
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
           cache: npm
@@ -59,7 +59,7 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: 检查禁用词
         run: |
           if grep -rnE '进行[一-龥]{0,4}(处理|部署|操作|检查)|予以|加以|应当|；|——' \
