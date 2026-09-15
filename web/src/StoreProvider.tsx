@@ -33,6 +33,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
+    // 这里的 setState 都发生在 await 之后，不是同步的。
+    // 拉后端正是 effect 该做的「和外部系统同步」，规则认不出异步这一层。
+    // oxlint-disable-next-line react/set-state-in-effect
     void refresh()
     const t = setInterval(() => void refresh(), POLL_MS)
     return () => clearInterval(t)
