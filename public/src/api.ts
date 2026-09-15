@@ -6,6 +6,8 @@ export interface RecentQso {
   startAt: number
   band: string
   mode: Mode
+  rstSent: string
+  rstRcvd: string
   qth?: string
   gridsquare?: string
 }

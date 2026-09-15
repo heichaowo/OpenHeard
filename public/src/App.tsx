@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { fetchSummary } from './api.ts'
 import type { Summary } from './api.ts'
 import { utc } from './time.ts'
@@ -38,25 +38,56 @@ function Stat({
   )
 }
 
+/** 采集一直在跑，页面开着就该看见新的通联。 */
+const REFRESH_MS = 60000
+
 export function App() {
   const [data, setData] = useState<Summary | undefined>()
   const [error, setError] = useState<string | undefined>()
 
-  useEffect(() => {
-    fetchSummary().then(setData, (e: Error) => setError(e.message))
+  const load = useCallback(() => {
+    fetchSummary().then(
+      (d) => {
+        setData(d)
+        setError(undefined)
+      },
+      (e: Error) => setError(e.message),
+    )
   }, [])
 
-  if (error) {
+  useEffect(() => {
+    load()
+    // 标签页在后台时不拉，切回来立刻补一次。
+    const tick = () => {
+      if (!document.hidden) load()
+    }
+    const t = setInterval(tick, REFRESH_MS)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [load])
+
+  // 拉失败但手上还有上一次的数据，就接着显示，只在上面挂一条。
+  if (error && !data) {
     return (
       <main className="page">
-        <p className="notice">{error}</p>
+        <p className="notice" role="alert">
+          {error}
+          <button type="button" className="retry" onClick={load}>
+            重试
+          </button>
+        </p>
       </main>
     )
   }
   if (!data) {
     return (
       <main className="page">
-        <p className="notice">正在读取…</p>
+        <p className="notice" aria-live="polite">
+          正在读取…
+        </p>
       </main>
     )
   }
@@ -69,6 +100,14 @@ export function App() {
 
   return (
     <main className="page">
+      {error && (
+        <p className="notice stale" role="status">
+          {error}
+          <button type="button" className="retry" onClick={load}>
+            重试
+          </button>
+        </p>
+      )}
       <header className="head">
         <h1>{call}</h1>
         {where && <p className="where">{where}</p>}
@@ -108,6 +147,7 @@ export function App() {
                   <th scope="col">呼号</th>
                   <th scope="col">波段</th>
                   <th scope="col">模式</th>
+                  <th scope="col">报告 发/收</th>
                   <th scope="col">对方 QTH</th>
                 </tr>
               </thead>
@@ -120,6 +160,7 @@ export function App() {
                     <td>
                       <span className="chip">{q.mode}</span>
                     </td>
+                    <td className="mono">{`${q.rstSent} / ${q.rstRcvd}`}</td>
                     <td>{[q.qth, q.gridsquare].filter(Boolean).join(' ') || '—'}</td>
                   </tr>
                 ))}
