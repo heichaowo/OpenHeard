@@ -71,12 +71,14 @@
 recv  0{"sid":...}               engine.io OPEN
 send  40                         socket.io CONNECT，默认 namespace
 recv  40{"sid":...}              CONNECT 确认
-send  42["join","src_<DMRID>"]   必须发，不 join 就没有任何推送
+send  42["join","src_<DMRID>"]   订阅才要，不 join 就没有任何推送
 recv  2       -> send 3          PING/PONG，约 25 秒，不回就被断开
 recv  42["mqtt",{"payload":"<json 字符串>"}]
 ```
 
 `payload` 是嵌在事件对象里的 JSON 字符串，需要二次解析。
+
+上面那个 `join` 只属于订阅路径。`searchHouse` 不需要它，2026-09-14 实测不 join 直接查，照样返回 200 行和 `searchHouseComplete`。
 
 房间由服务端过滤。前缀映射是 `{DestinationID: dst, ContextID: con, SourceID: src}`，只有这三个字段，且只支持相等。所以 `src_<DMRID>` 只推我们自己的会话，全球流量不会到达。
 
@@ -86,7 +88,7 @@ recv  42["mqtt",{"payload":"<json 字符串>"}]
 
 要拿对方呼号，必须再按 `DestinationID` 查目标话务组。2026-09-14 实测 `DestinationID` 等于 91 的一次查询返回 50 行，含 22 个不同 SourceID。
 
-`condition` 支持 `OR`，服务端按 OR 语义执行。所以一次查询能同时覆盖本台和话务组，两条 rule 写在一起即可。
+`condition` 支持 `OR`，服务端按 OR 语义执行。**但每条规则必须单独发一次查询。** `amount` 是合并去重后的全局上限，所以热闹的规则会把安静的规则饿死。2026-09-15 实测把 91 组和 460 组 OR 在一起，`amount` 取 200。返回的 200 行全部来自 91 组，460 组一行都没有。单独查 460 组同样取 200 行，跨度是 3.9 天。
 
 代价是回溯深度。amount 同为 200 时，src 查询跨 53 天。`DestinationID` 等于 460 跨 3.6 天，等于 91 只跨 51 分钟。话务组越热闹，同样行数覆盖的时间越短。所以轮询间隔必须按话务组定，不能用一个全局值。
 
@@ -130,6 +132,10 @@ feed 每按一次 PTT 就产生一条会话。一条群组会话没有明确的�
 实测依据：抽样 67 次已完成会话，**超过一半时长在 0 到 3 秒**，属于误触 PTT、试机和短按。会话数远不等于通联数。
 
 从 `activity` 提升到 `qso` 只需一次点击。自动化消灭的是打字，不是判断。手工录入的模拟记录直接写 `qso`，不带 `activity` 行，因为没有任何东西观测到它们。
+
+**提升和忽略记在 `activity` 上，不记在 cluster 上。** cluster 是按阈值算出来的，边界会变。轮询随时可能补进一条更早的行，阈值实测出真值后也要改。任何一种都会让已处理的对话换一个 cluster id 重新出现，人再点一次就多一条重复的正式记录。
+
+`activity` 有保留期，`qso` 没有。`activity` 丢了可以重新轮询取回，`qso` 不能。裁剪要跳过已经被提升或忽略引用的行。
 
 ## 把发射事件聚成通联
 
