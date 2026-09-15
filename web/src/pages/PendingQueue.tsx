@@ -5,6 +5,7 @@ import { Card, Grid } from 'antd'
 import { AsyncContent } from '../components/AsyncContent'
 import { PageHeader } from '../components/PageHeader'
 import { QsoFields } from '../components/QsoFields'
+import { FIELD_LABELS as LABELS } from '../fields'
 import type { QsoFormValues } from '../components/QsoFields'
 import { missingFields, normalizeCallsign } from '@core'
 import { ApiError, errorText } from '../api'
@@ -14,16 +15,6 @@ import { useRecall } from '../recall'
 import { useStore } from '../store'
 import type { PendingRow } from '../store'
 import { useTime } from '../useTime'
-
-const LABELS: Partial<Record<QsoField, string>> = {
-  call: '对方呼号',
-  startAt: '时间',
-  freqMhz: '频率',
-  band: '波段',
-  mode: '模式',
-  rstSent: '发出报告',
-  rstRcvd: '收到报告',
-}
 
 const ORIGIN_LABELS: Record<Activity['origin'], string> = {
   'brandmeister': 'BrandMeister',

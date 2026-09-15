@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Qso, QsoDraft } from '@core'
@@ -35,14 +35,21 @@ const qso = (id: string, call: string): Qso => ({
 
 const draft: QsoDraft = { ...qso('x', 'BA1AA'), rstSent: '41' }
 
+const store: { current?: ReturnType<typeof useStore> } = {}
+
 function Probe() {
-  const store = useStore()
+  store.current = useStore()
   return (
     <div>
-      <p data-testid="calls">{store.qsos.map((q) => `${q.call}:${q.rstSent}`).join(',')}</p>
-      <p data-testid="error">{store.error ?? ''}</p>
-      <p data-testid="loading">{String(store.loading)}</p>
-      <button type="button" onClick={() => void store.editQso('q1', draft).catch(() => undefined)}>
+      <p data-testid="calls">
+        {store.current?.qsos.map((q) => `${q.call}:${q.rstSent}`).join(',')}
+      </p>
+      <p data-testid="error">{store.current?.error ?? ''}</p>
+      <p data-testid="loading">{String(store.current?.loading)}</p>
+      <button
+        type="button"
+        onClick={() => void store.current?.editQso('q1', draft).catch(() => undefined)}
+      >
         改
       </button>
     </div>
@@ -83,6 +90,36 @@ describe('StoreProvider', () => {
 
     await waitFor(() => expect(screen.getByTestId('calls')).toHaveTextContent('BD7KLO:41'))
     expect(m.editQso).toHaveBeenCalledWith('q1', draft)
+  })
+
+  // 轮询和写完之后的刷新会同时在路上，先发的未必先回。照单全收的话，
+  // 一个早发的响应会把刚入库的那条盖回去，直到下一轮才恢复。
+  it('慢的那个响应回来晚了就丢掉，不盖住新的', async () => {
+    mount()
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+
+    // 第一次 refresh 慢，第二次快。第二次先落地，第一次回来时必须被丢掉。
+    let releaseSlow: (v: Qso[]) => void = () => undefined
+    m.qsos.mockImplementationOnce(
+      () => new Promise<Qso[]>((resolve) => { releaseSlow = resolve }),
+    )
+    m.qsos.mockResolvedValue([{ ...qso('q1', 'BD7KLO'), rstSent: '41' }])
+
+    let slow: Promise<void> | undefined
+    let fast: Promise<void> | undefined
+    await act(async () => {
+      slow = store.current?.refresh()
+      fast = store.current?.refresh()
+      await fast
+    })
+    expect(screen.getByTestId('calls')).toHaveTextContent('BD7KLO:41')
+
+    await act(async () => {
+      releaseSlow([{ ...qso('q1', 'BD7KLO'), rstSent: '59' }])
+      await slow
+    })
+
+    expect(screen.getByTestId('calls')).toHaveTextContent('BD7KLO:41')
   })
 
   it('拉不动时把原因放出来，手上的数据不丢', async () => {

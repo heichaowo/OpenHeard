@@ -92,7 +92,8 @@ export interface Ops {
   activities: { origin: string; n: number; latest: number }[]
   queries: { key: string; intervalS: number; amount: number }[]
   clusterGapS: number
-  retentionDays: number
+  activityRetentionDays: number
+  pendingWindowDays: number
   now: number
 }
 

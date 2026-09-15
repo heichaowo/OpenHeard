@@ -205,7 +205,12 @@ export default function OpsPage() {
                   {ops.clusterGapS} 秒
                   <Typography.Text type="secondary"> （要用真实流量实测定下来）</Typography.Text>
                 </Descriptions.Item>
-                <Descriptions.Item label="发射保留期">{ops.retentionDays} 天</Descriptions.Item>
+                <Descriptions.Item label="发射保留期">
+                  {ops.activityRetentionDays} 天
+                </Descriptions.Item>
+                <Descriptions.Item label="待确认队列回看">
+                  {ops.pendingWindowDays} 天
+                </Descriptions.Item>
                 {ops.queries.map((q) => (
                   <Descriptions.Item key={q.key} label={<span className="mono">{q.key}</span>}>
                     每 {q.intervalS} 秒一次，每次取 {q.amount} 行

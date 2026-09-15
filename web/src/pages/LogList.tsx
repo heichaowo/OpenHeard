@@ -19,6 +19,7 @@ import { confirmDiscard } from '../discard'
 import { AsyncContent } from '../components/AsyncContent'
 import { PageHeader } from '../components/PageHeader'
 import { QsoFields } from '../components/QsoFields'
+import { FIELD_LABELS } from '../fields'
 import type { QsoFormValues } from '../components/QsoFields'
 import type { TableColumnsType } from 'antd'
 import { adifFile, missingFields, normalizeCallsign } from '@core'
@@ -80,7 +81,7 @@ export default function LogList() {
     const draft: QsoDraft = { ...editing, ...values, call: normalizeCallsign(values.call) }
     const still = missingFields(draft)
     if (still.length > 0) {
-      message.error('还有必填的没填')
+      message.error(`还缺 ${still.map((k) => FIELD_LABELS[k] ?? k).join('、')}`)
       return
     }
     setSaving(true)

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { missingFields } from '@core'
 import type { Channel, PendingItem, Qso, StationDefaults } from '@core'
@@ -17,18 +17,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | undefined>()
 
+  // 每次 refresh 领一个号，只有最新那一次的结果作数。
+  //
+  // 定时轮询和写完之后的那次刷新会同时在路上，先发的未必先回；照单全收的话
+  // 一个早发的响应会把刚入库的那条盖回去，直到下一轮才恢复。挡住旧结果而不是
+  // 挡住请求，写完那一次才一定跑得到。
+  const seq = useRef(0)
+
   const refresh = useCallback(async () => {
+    const mine = ++seq.current
     try {
       const [s, p, q] = await Promise.all([api.station(), api.pending(), api.qsos()])
+      if (mine !== seq.current) return
       setStation(s.station)
       setChannels(s.channels)
       setPending(p)
       setQsos(q)
       setError(undefined)
     } catch (e) {
+      if (mine !== seq.current) return
       setError(errorText(e))
     } finally {
-      setLoading(false)
+      if (mine === seq.current) setLoading(false)
     }
   }, [])
 

@@ -120,7 +120,15 @@ export default function QuickEntry() {
     const call = normalizeCallsign(values.call)
     setBusy(true)
     try {
-      await addQso({ ...values, call, startAt: time.fromDisplayed(at), band })
+      // myGridsquare 表单里没有这一格，但它必须跟着走：从队列提升的那条
+      // draftFromCluster 会带上，手工补录不带就会在 ADIF 里空着一个 MY_GRIDSQUARE。
+      await addQso({
+        myGridsquare: station.myGridsquare,
+        ...values,
+        call,
+        startAt: time.fromDisplayed(at),
+        band,
+      })
       message.success(`${call} 已入库`)
       form.resetFields(['call', 'gridsquare', 'qth', 'note'])
       form.setFieldsValue({ at: time.now() })
