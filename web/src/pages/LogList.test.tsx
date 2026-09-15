@@ -3,8 +3,10 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Qso } from '@core'
+import { Preferences } from '../Preferences'
 import { StoreContext } from '../store'
 import type { Store } from '../store'
+import { ZONE_KEY } from '../theme'
 import LogList from './LogList'
 
 const qso = (over: Partial<Qso> = {}): Qso => ({
@@ -38,19 +40,45 @@ const store = (qsos: Qso[]): Store => ({
   refresh: vi.fn(),
 })
 
-const mount = (qsos: Qso[] = [qso()]) =>
-  render(
-    <App>
-      <StoreContext value={store(qsos)}>
-        <LogList />
-      </StoreContext>
-    </App>,
+const mount = (qsos: Qso[] = [qso()], zone?: string) => {
+  if (zone) localStorage.setItem(ZONE_KEY, zone)
+  else localStorage.removeItem(ZONE_KEY)
+  return render(
+    <Preferences>
+      <App>
+        <StoreContext value={store(qsos)}>
+          <LogList />
+        </StoreContext>
+      </App>
+    </Preferences>,
   )
+}
 
 const button = (name: string) =>
   screen.getByRole('button', { name: new RegExp(name.split('').join('\\s*')) })
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  localStorage.clear()
+})
+
+// 记录是 Unix 秒 UTC，显示按选定的时区。同一行在两个时区里是两串字。
+describe('LogList 的时间显示', () => {
+  // antd 的 Table 会把表头渲染两处（量宽度那一行和真正那一行），所以按数量断言。
+  const seen = (text: string) => screen.getAllByText(text).length > 0
+
+  it('缺省 UTC，表头写明时区', () => {
+    mount()
+    expect(seen('时间 UTC')).toBe(true)
+    expect(seen('2026-09-10 00:26:40')).toBe(true)
+  })
+
+  it('选了成都就按成都显示，表头跟着改', () => {
+    mount([qso()], 'Asia/Shanghai')
+    expect(seen('时间 Asia/Shanghai UTC+08:00')).toBe(true)
+    expect(seen('2026-09-10 08:26:40')).toBe(true)
+  })
+})
 
 describe('LogList 的编辑抽屉', () => {
   it('打开时填的是这一行的值', async () => {

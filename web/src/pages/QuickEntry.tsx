@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   App,
   Button,
@@ -20,7 +20,8 @@ import { bandOf, isValidCallsign, normalizeCallsign } from '@core'
 import type { Mode, Qso } from '@core'
 import { useRecall } from '../recall'
 import { useStore } from '../store'
-import { mergeDateTime, nowUtc, unixFromDisplayedUtc, utcSec } from '../time'
+import { atIn, unixFromDisplayed } from '../time'
+import { useTime } from '../useTime'
 
 type FormValues = Pick<
   Qso,
@@ -40,13 +41,14 @@ type FormValues = Pick<
 > & { at: Dayjs }
 
 /**
- * 日期加时间。
+ * 日期加时间。显示和输入都按当前选定的时区。
  *
  * 带 showTime 的单个选择器面板宽 457px，比任何手机都宽，左半边会掉到屏幕外
  * 且不可滚动。窄屏下拆成两个，日期面板 288px 放得下。
  */
-function UtcDateTime({ value, onChange }: { value?: Dayjs; onChange?: (v: Dayjs | null) => void }) {
+function ZonedDateTime({ value, onChange }: { value?: Dayjs; onChange?: (v: Dayjs | null) => void }) {
   const wide = Grid.useBreakpoint().sm ?? true
+  const time = useTime()
   if (wide) {
     return (
       <DatePicker
@@ -63,12 +65,12 @@ function UtcDateTime({ value, onChange }: { value?: Dayjs; onChange?: (v: Dayjs 
       <DatePicker
         style={{ flex: 1 }}
         value={value}
-        onChange={(d) => onChange?.(d && value ? mergeDateTime(d, value) : d)}
+        onChange={(d) => onChange?.(d && value ? time.merge(d, value) : d)}
       />
       <TimePicker
         style={{ width: 118 }}
         value={value}
-        onChange={(t) => onChange?.(t && value ? mergeDateTime(value, t) : t)}
+        onChange={(t) => onChange?.(t && value ? time.merge(value, t) : t)}
       />
     </Space.Compact>
   )
@@ -79,10 +81,11 @@ export default function QuickEntry() {
   const { station, channels, qsos, addQso } = useStore()
   const [form] = Form.useForm<FormValues>()
   const [busy, setBusy] = useState(false)
+  const time = useTime()
   const { recalledAt, onValuesChange, reset: resetRecall } = useRecall(form, qsos)
 
   const initial: Partial<FormValues> = {
-    at: nowUtc(),
+    at: time.now(),
     mode: 'FM',
     rstSent: '59',
     rstRcvd: '59',
@@ -92,6 +95,16 @@ export default function QuickEntry() {
     myPower: station.myPower,
     myHeightM: station.myHeightM,
   }
+
+  // 换时区时把已经填好的时间搬过去：先按旧时区把显示的那串字读成时刻，
+  // 再按新时区写出来。不搬的话显示不变而含义变了，提交就差一个时区。
+  const prevZone = useRef(time.zone)
+  useEffect(() => {
+    if (prevZone.current === time.zone) return
+    const at = form.getFieldValue('at') as Dayjs | undefined
+    if (at) form.setFieldsValue({ at: atIn(unixFromDisplayed(at, prevZone.current), time.zone) })
+    prevZone.current = time.zone
+  }, [time.zone, form])
 
   const pickChannel = (name: string) => {
     const ch = channels.find((c) => c.name === name)
@@ -107,10 +120,10 @@ export default function QuickEntry() {
     const call = normalizeCallsign(values.call)
     setBusy(true)
     try {
-      await addQso({ ...values, call, startAt: unixFromDisplayedUtc(at), band })
+      await addQso({ ...values, call, startAt: time.fromDisplayed(at), band })
       message.success(`${call} 已入库`)
       form.resetFields(['call', 'gridsquare', 'qth', 'note'])
-      form.setFieldsValue({ at: nowUtc() })
+      form.setFieldsValue({ at: time.now() })
       resetRecall()
     } catch (e) {
       message.error(errorText(e))
@@ -150,8 +163,12 @@ export default function QuickEntry() {
           <Input autoFocus placeholder="BD7KLO" />
         </Form.Item>
 
-        <Form.Item name="at" label="时间 UTC" rules={[{ required: true, message: '时间必填' }]}>
-          <UtcDateTime />
+        <Form.Item
+          name="at"
+          label={`时间 ${time.label}`}
+          rules={[{ required: true, message: '时间必填' }]}
+        >
+          <ZonedDateTime />
         </Form.Item>
 
         <Form.Item label="信道">
@@ -201,7 +218,7 @@ export default function QuickEntry() {
         </Space>
         {recalledAt !== undefined && (
           <Typography.Paragraph type="secondary" style={{ marginTop: -12 }}>
-            QTH 和网格来自 {utcSec(recalledAt)} 那次通联，改掉就是。
+            QTH 和网格来自 {time.at(recalledAt)} 那次通联，改掉就是。
           </Typography.Paragraph>
         )}
 

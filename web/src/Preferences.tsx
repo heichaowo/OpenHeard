@@ -1,15 +1,25 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { PreferencesContext, STORAGE_KEY } from './theme'
+import { PreferencesContext, STORAGE_KEY, ZONE_KEY } from './theme'
 import type { ThemeMode } from './theme'
+import { UTC, allZones } from './time'
+import type { Zone } from './time'
 
 const read = (): ThemeMode => {
   const v = localStorage.getItem(STORAGE_KEY)
   return v === 'light' || v === 'dark' ? v : 'system'
 }
 
+// 缺省 UTC，因为日志本来就是 UTC，业余无线电也按 UTC 记。
+// 存下来的名字要对一遍：换台机器或者换个浏览器版本，IANA 的名字会被并掉。
+const readZone = (): Zone => {
+  const v = localStorage.getItem(ZONE_KEY)
+  return v && allZones().includes(v) ? v : UTC
+}
+
 export function Preferences({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<ThemeMode>(read)
+  const [zone, setZoneState] = useState<Zone>(readZone)
   const [systemDark, setSystemDark] = useState(
     () => window.matchMedia('(prefers-color-scheme: dark)').matches,
   )
@@ -38,8 +48,13 @@ export function Preferences({ children }: { children: ReactNode }) {
         setModeState(m)
         localStorage.setItem(STORAGE_KEY, m)
       },
+      zone,
+      setZone: (z: Zone) => {
+        setZoneState(z)
+        localStorage.setItem(ZONE_KEY, z)
+      },
     }),
-    [mode, dark],
+    [mode, dark, zone],
   )
 
   return <PreferencesContext value={value}>{children}</PreferencesContext>

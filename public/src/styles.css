@@ -211,6 +211,35 @@ tbody tr + tr td {
   font-size: 12px;
 }
 
+/* ---- 显示时区 ---- */
+
+.head-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.zone {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim);
+  font-size: 13px;
+}
+
+.zone select {
+  max-inline-size: 220px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
 /* ---- 其他 ---- */
 
 .notice {

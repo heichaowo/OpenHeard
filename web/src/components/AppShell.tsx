@@ -13,6 +13,7 @@ import { Badge, Button, Drawer, Dropdown, Layout, Menu } from 'antd'
 import type { MenuProps } from 'antd'
 import { useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { ZonePicker } from './ZonePicker'
 import { useSession } from '../session'
 import { usePreferences } from '../theme'
 import { useStore } from '../store'
@@ -127,6 +128,7 @@ export function AppShell() {
             aria-label="菜单"
           />
           <div className="header-actions">
+            <ZonePicker />
             <ThemeMenu />
             <Button
               type="text"

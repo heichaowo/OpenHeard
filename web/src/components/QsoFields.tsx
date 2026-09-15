@@ -1,7 +1,6 @@
 import { Divider, Form, Input, InputNumber, Space, Typography } from 'antd'
 import { isValidCallsign, normalizeCallsign } from '@core'
 import type { Qso } from '@core'
-import { utcSec } from '../time'
 
 /**
  * 人可以编辑的字段。待确认队列和日志里的编辑用同一份，两处填的是同一件事。
@@ -26,11 +25,11 @@ export type QsoFormValues = Pick<
 
 export function QsoFields({
   autoFocus = true,
-  recalledAt,
+  recalledFrom,
 }: {
   autoFocus?: boolean
-  /** 对方 QTH 和网格是从这个时刻的那次通联补来的。 */
-  recalledAt?: number
+  /** 对方 QTH 和网格是从哪次通联补来的，已经按当前时区格式化好。 */
+  recalledFrom?: string
 }) {
   return (
     <>
@@ -66,9 +65,9 @@ export function QsoFields({
           <Input style={{ width: 140 }} />
         </Form.Item>
       </Space>
-      {recalledAt !== undefined && (
+      {recalledFrom !== undefined && (
         <Typography.Paragraph type="secondary" style={{ marginTop: -12 }}>
-          QTH 和网格来自 {utcSec(recalledAt)} 那次通联，改掉就是。
+          QTH 和网格来自 {recalledFrom} 那次通联，改掉就是。
         </Typography.Paragraph>
       )}
       <Divider titlePlacement="left" plain>

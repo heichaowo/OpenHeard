@@ -25,7 +25,7 @@ function Harness({ qsos, initial }: { qsos: Qso[]; initial?: Partial<QsoFormValu
   const { recalledAt, onValuesChange } = useRecall(form, qsos)
   return (
     <Form form={form} layout="vertical" initialValues={initial} onValuesChange={onValuesChange}>
-      <QsoFields recalledAt={recalledAt} />
+      <QsoFields recalledFrom={recalledAt === undefined ? undefined : String(recalledAt)} />
     </Form>
   )
 }

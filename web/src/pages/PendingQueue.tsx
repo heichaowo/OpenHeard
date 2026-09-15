@@ -13,7 +13,7 @@ import type { Activity, QsoDraft, QsoField } from '@core'
 import { useRecall } from '../recall'
 import { useStore } from '../store'
 import type { PendingRow } from '../store'
-import { utcSec } from '../time'
+import { useTime } from '../useTime'
 
 const LABELS: Partial<Record<QsoField, string>> = {
   call: '对方呼号',
@@ -38,8 +38,10 @@ const originOf = (row: PendingRow) => {
 }
 
 function ActivityTable({ activities }: { activities: Activity[] }) {
+  const time = useTime()
   const columns: TableColumnsType<Activity> = [
-    { title: '时间', dataIndex: 'startAt', render: utcSec, width: 200 },
+    // 外层表头写了时区，这张展开表也要写，否则两个时间看着像不同口径。
+    { title: `时间 ${time.label}`, dataIndex: 'startAt', render: time.at, width: 220 },
     {
       title: '时长',
       dataIndex: 'durationS',
@@ -92,6 +94,7 @@ export default function PendingQueue() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const { recalledAt, onValuesChange, reset: resetRecall } = useRecall(form, qsos)
+  const time = useTime()
 
   const open = (row: PendingRow) => {
     setEditing(row)
@@ -159,9 +162,9 @@ export default function PendingQueue() {
 
   const columns: TableColumnsType<PendingRow> = [
     {
-      title: '时间 UTC',
+      title: `时间 ${time.label}`,
       key: 'startAt',
-      render: (_, row) => utcSec(row.cluster.startAt),
+      render: (_, row) => time.at(row.cluster.startAt),
       width: 200,
     },
     {
@@ -278,8 +281,8 @@ export default function PendingQueue() {
         {editing && (
           <>
             <Descriptions size="small" column={1} bordered>
-              <Descriptions.Item label="时间 UTC">
-                {utcSec(editing.cluster.startAt)}
+              <Descriptions.Item label={`时间 ${time.label}`}>
+                {time.at(editing.cluster.startAt)}
               </Descriptions.Item>
               <Descriptions.Item label="频率">{editing.draft.freqMhz} MHz</Descriptions.Item>
               <Descriptions.Item label="波段">{editing.draft.band}</Descriptions.Item>
@@ -293,7 +296,7 @@ export default function PendingQueue() {
               onValuesChange={onValuesChange}
               style={{ marginTop: 24 }}
             >
-              <QsoFields recalledAt={recalledAt} />
+              <QsoFields recalledFrom={recalledAt === undefined ? undefined : time.at(recalledAt)} />
               {/* 让输入框里按回车也能提交，抽屉标题栏那个按钮在表单外面 */}
               <Button htmlType="submit" style={{ display: 'none' }} />
             </Form>

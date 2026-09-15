@@ -32,10 +32,12 @@
 | `distinctCalls` | 不同呼号数 |
 | `firstAt`、`lastAt` | 最早和最近一次的 Unix 秒 UTC，没有记录时缺省 |
 | `byBand`、`byMode` | `{key, n}[]`，按条数倒序 |
-| `recent` | 最近 30 条，每条只有 `id`、`call`、`startAt`、`band`、`mode`、`qth`、`gridsquare` |
+| `recent` | 最近 30 条，每条只有 `id`、`call`、`startAt`、`band`、`mode`、`rstSent`、`rstRcvd`、`qth`、`gridsquare` |
 | `generatedAt` | 生成时刻的 Unix 秒 UTC |
 
-`recent` 不带本台字段和备注。公开面只需要对方是谁、什么时候、走哪个波段和模式。
+`recent` 不带本台字段和备注。公开面需要对方是谁、什么时候、走哪个波段和模式，外加双向报告。别的电台核对这次通联时要看报告。
+
+时间一律 Unix 秒 UTC。公开页显示成哪个时区由看的人自己选，接口不受影响。
 
 ## 健康检查
 
@@ -84,11 +86,15 @@ a static export would look like.
 | `distinctCalls` | Number of distinct callsigns |
 | `firstAt`, `lastAt` | Unix seconds UTC of the first and last, absent with no records |
 | `byBand`, `byMode` | `{key, n}[]`, most frequent first |
-| `recent` | The last 30, carrying only `id`, `call`, `startAt`, `band`, `mode`, `qth`, `gridsquare` |
+| `recent` | The last 30, carrying only `id`, `call`, `startAt`, `band`, `mode`, `rstSent`, `rstRcvd`, `qth`, `gridsquare` |
 | `generatedAt` | Unix seconds UTC when it was built |
 
-`recent` omits our own station fields and the notes. The public face only
-needs who, when, which band and which mode.
+`recent` omits our own station fields and the notes. The public face needs who,
+when, which band, which mode, and both reports — another station checks a
+contact against those.
+
+Times are Unix seconds UTC. Which timezone the page shows them in is the
+visitor's choice and does not reach the API.
 
 ## Health
 

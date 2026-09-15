@@ -25,7 +25,7 @@ import { adifFile, missingFields, normalizeCallsign } from '@core'
 import type { Qso, QsoDraft } from '@core'
 import { useRecall } from '../recall'
 import { useStore } from '../store'
-import { utcSec } from '../time'
+import { useTime } from '../useTime'
 
 function download(name: string, text: string) {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
@@ -45,6 +45,7 @@ export default function LogList() {
   const [editing, setEditing] = useState<Qso | null>(null)
   const [saving, setSaving] = useState(false)
   const { recalledAt, onValuesChange, reset: resetRecall } = useRecall(form, qsos)
+  const time = useTime()
 
   const rows = useMemo(() => {
     const needle = normalizeCallsign(search)
@@ -104,7 +105,7 @@ export default function LogList() {
   }
 
   const columns: TableColumnsType<Qso> = [
-    { title: '时间 UTC', dataIndex: 'startAt', render: utcSec, width: 190 },
+    { title: `时间 ${time.label}`, dataIndex: 'startAt', render: time.at, width: 190 },
     {
       title: '呼号',
       dataIndex: 'call',
@@ -230,7 +231,9 @@ export default function LogList() {
         {editing && (
           <>
             <Descriptions size="small" column={1} bordered>
-              <Descriptions.Item label="时间 UTC">{utcSec(editing.startAt)}</Descriptions.Item>
+              <Descriptions.Item label={`时间 ${time.label}`}>
+                {time.at(editing.startAt)}
+              </Descriptions.Item>
               <Descriptions.Item label="频率">{editing.freqMhz} MHz</Descriptions.Item>
               <Descriptions.Item label="波段">{editing.band}</Descriptions.Item>
               <Descriptions.Item label="模式">{editing.mode}</Descriptions.Item>
@@ -248,7 +251,7 @@ export default function LogList() {
               onValuesChange={onValuesChange}
               style={{ marginTop: 16 }}
             >
-              <QsoFields recalledAt={recalledAt} />
+              <QsoFields recalledFrom={recalledAt === undefined ? undefined : time.at(recalledAt)} />
               {/* 让输入框里按回车也能提交，抽屉标题栏那个按钮在表单外面 */}
               <Button htmlType="submit" style={{ display: 'none' }} />
             </Form>

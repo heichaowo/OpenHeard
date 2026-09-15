@@ -5,7 +5,7 @@ import { api, errorText } from '../api'
 import type { Ops, PollRow } from '../api'
 import { AsyncContent } from '../components/AsyncContent'
 import { PageHeader } from '../components/PageHeader'
-import { utcSec } from '../time'
+import { useTime } from '../useTime'
 
 /** 运维数据自己拉，不进全局 store：只有这一页要，刷新频率也不一样。 */
 const POLL_MS = 20000
@@ -37,6 +37,7 @@ export default function OpsPage() {
   // 上一次还没回来就别再发。重试按钮和 20 秒的定时器用的是同一个 load，
   // 两个请求抢着 setOps，后回来的那个未必是后发的那个。
   const inFlight = useRef(false)
+  const time = useTime()
 
   const load = useCallback(async () => {
     if (inFlight.current) return
@@ -70,7 +71,7 @@ export default function OpsPage() {
   }, [load])
 
   const columns: TableColumnsType<PollRow> = [
-    { title: '时间 UTC', dataIndex: 'at', render: utcSec, width: 190 },
+    { title: `时间 ${time.label}`, dataIndex: 'at', render: time.at, width: 190 },
     {
       title: '来源',
       dataIndex: 'queryKey',
@@ -189,7 +190,7 @@ export default function OpsPage() {
               <Descriptions size="small" column={1} bordered>
                 {ops.activities.map((a) => (
                   <Descriptions.Item key={a.origin} label={ORIGINS[a.origin] ?? a.origin}>
-                    {a.n} 条，最近一条 {utcSec(a.latest)}
+                    {a.n} 条，最近一条 {time.at(a.latest)}
                   </Descriptions.Item>
                 ))}
                 {ops.activities.length === 0 && (

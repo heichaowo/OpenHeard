@@ -62,19 +62,24 @@
 |---|---|---|
 | `GET /api/qsos` | 无 | `Qso[]`，按开始时间倒序 |
 | `POST /api/qsos` | `QsoDraft` | `Qso`，或 `422` |
+| `PUT /api/qsos/:id` | `QsoDraft` | `Qso`，或 `404`、`422` |
 | `DELETE /api/qsos/:id` | 无 | `204`，或 `404` |
 
 `POST` 是手工补录，写进去的记录没有 `clusterId`，也不动 `activity` 表，因为没有任何东西观测到它。
 
-呼号入库前统一去空格转大写。时间一律 Unix 秒 UTC。
+`PUT` 改一条已经入库的。`id`、`createdAt` 和 `clusterId` 保持原样，其余整份替换。`clusterId` 从库里读，请求体里的那个不作数：它是这条记录和当初那几次发射的唯一联系，删了重录就断了，而改一个打错的报告不该把来源一起丢掉。
+
+呼号入库前统一去空格转大写。时间一律 Unix 秒 UTC，界面显示的时区可选，接口不受影响。
 
 ## 运维
 
 | 方法和路径 | 响应 |
 |---|---|
-| `GET /api/ops` | 健康状态、最近 40 次采集、按来源分组的发射数、以及决定行为的配置值 |
+| `GET /api/ops` | 健康状态、机器负载和内存、最近 40 次采集、按来源分组的发射数、以及决定行为的配置值 |
 
 不论健康与否都回 `200`，因为这一页的用途是把问题显示出来。要当外部监控用 `GET /health`，它不要会话，只回 `{"ok", "problems"}`，不健康时回 `503`。
+
+`machine` 里是负载、本进程内存、系统内存和已运行时长。负载已经除以核数，直接和 1.0 比。无人值守时跑飞的轮询和内存泄漏只看磁盘看不出来。这几项不进 `/health`，那里只回 `ok` 和 `problems`。
 
 `poll_log` 里 `fetched`、`parsed`、`written` 分开记。来源改字段名时 `parsed` 会掉到 0 而 `fetched` 不变，那和「这批全是重复行」的计数长得一样，只有分开记才分得出来。
 
@@ -116,7 +121,7 @@ fields that are still absent.
 | Status | When |
 |---|---|
 | `401` | No session, or the wrong password |
-| `404` | The contact to delete does not exist |
+| `404` | The contact to edit or delete does not exist |
 | `409` | The cluster id no longer matches. An earlier transmission arrived between the two requests and moved the boundary; refresh and retry |
 | `422` | The draft is missing required fields, named in `missing` |
 | `503` | The config is broken. `problems` says why, and every route answers this |
@@ -158,23 +163,36 @@ Deleting a contact releases its transmissions back into the queue.
 |---|---|---|
 | `GET /api/qsos` | none | `Qso[]`, newest first |
 | `POST /api/qsos` | `QsoDraft` | `Qso`, or `422` |
+| `PUT /api/qsos/:id` | `QsoDraft` | `Qso`, or `404` / `422` |
 | `DELETE /api/qsos/:id` | none | `204`, or `404` |
 
 `POST` is manual entry. What it writes carries no `clusterId` and touches no
 `activity` row, because nothing observed it.
 
+`PUT` edits a row already in the log. `id`, `createdAt` and `clusterId` stay
+and everything else is replaced. `clusterId` is read from the stored row, not
+from the request body: it is the only link back to the transmissions the
+contact came from, and correcting a mistyped report should not cost that link.
+
 Callsigns are stripped of spaces and upper-cased before storage. Times are
-Unix seconds UTC throughout.
+Unix seconds UTC throughout; the display timezone is the operator's choice and
+does not reach the API.
 
 ## Operations
 
 | Method and path | Response |
 |---|---|
-| `GET /api/ops` | Health, the last 40 polls, activity counts by origin, and the config values that decide behaviour |
+| `GET /api/ops` | Health, machine load and memory, the last 40 polls, activity counts by origin, and the config values that decide behaviour |
 
 It answers `200` whether healthy or not, because the page exists to display
 problems. For an external monitor use `GET /health`: no session, only
 `{"ok", "problems"}`, and `503` when unhealthy.
+
+`machine` carries load, this process's memory, system memory and uptime. Load
+is already divided by the core count, so it compares against 1.0. Unattended,
+a runaway poll loop or a leak shows up in none of the other figures until the
+disk fills. None of it is in `/health`, which answers only `ok` and
+`problems`.
 
 `poll_log` records `fetched`, `parsed` and `written` separately. When a feed
 renames a field, `parsed` drops to zero while `fetched` does not, and that

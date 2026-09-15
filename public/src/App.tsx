@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { fetchSummary } from './api.ts'
 import type { Summary } from './api.ts'
-import { utc } from './time.ts'
+import { zoneName } from '@core'
+import { UTC, ZONE_KEY, allZones, at, localZone, zoneLabel } from './time.ts'
 
 function Bar({ rows }: { rows: { key: string; n: number }[] }) {
   const max = Math.max(1, ...rows.map((r) => r.n))
@@ -41,9 +42,64 @@ function Stat({
 /** 采集一直在跑，页面开着就该看见新的通联。 */
 const REFRESH_MS = 60000
 
+const readZone = () => {
+  try {
+    const v = localStorage.getItem(ZONE_KEY)
+    if (v && allZones().includes(v)) return v
+  } catch {
+    // 无痕窗口读不到，当没选过。
+  }
+  return UTC
+}
+
+/**
+ * 显示时区。缺省 UTC，因为业余无线电按 UTC 记，来看这一页的多半也是同好。
+ *
+ * 只改显示，记录本身一律 UTC。
+ */
+function ZoneSelect({ zone, onChange }: { zone: string; onChange: (z: string) => void }) {
+  const here = localZone()
+  const quick = here === UTC ? [UTC] : [UTC, here]
+  return (
+    <label className="zone">
+      <span className="zone-label">时区</span>
+      <select
+        value={zone}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={`显示时区，现在是 ${zoneLabel(zone)}`}
+      >
+        {quick.map((z) => (
+          <option key={z} value={z}>
+            {zoneLabel(z)}
+          </option>
+        ))}
+        <optgroup label="全部">
+          {allZones()
+            .filter((z) => !quick.includes(z))
+            .map((z) => (
+              <option key={z} value={z}>
+                {zoneName(z)}
+              </option>
+            ))}
+        </optgroup>
+      </select>
+    </label>
+  )
+}
+
 export function App() {
   const [data, setData] = useState<Summary | undefined>()
   const [error, setError] = useState<string | undefined>()
+  const [zone, setZone] = useState<string>(readZone)
+
+  const pickZone = useCallback((z: string) => {
+    setZone(z)
+    try {
+      localStorage.setItem(ZONE_KEY, z)
+    } catch {
+      // 无痕窗口写不了，这一次会话里照样有效。
+    }
+  }, [])
 
   const load = useCallback(() => {
     fetchSummary().then(
@@ -109,7 +165,10 @@ export function App() {
         </p>
       )}
       <header className="head">
-        <h1>{call}</h1>
+        <div className="head-top">
+          <h1>{call}</h1>
+          <ZoneSelect zone={zone} onChange={pickZone} />
+        </div>
         {where && <p className="where">{where}</p>}
         {rig.length > 0 && <p className="rig">{rig.join(' · ')}</p>}
       </header>
@@ -117,8 +176,8 @@ export function App() {
       <section className="stats" aria-label="统计">
         <Stat label="通联总数" value={data.total} />
         <Stat label="不同呼号" value={data.distinctCalls} />
-        <Stat small label="最早一次" value={data.firstAt ? utc(data.firstAt, false) : '—'} />
-        <Stat small label="最近一次" value={data.lastAt ? utc(data.lastAt) : '—'} />
+        <Stat small label="最早一次" value={data.firstAt ? at(data.firstAt, zone, false) : '—'} />
+        <Stat small label="最近一次" value={data.lastAt ? at(data.lastAt, zone) : '—'} />
       </section>
 
       {data.total > 0 && (
@@ -143,7 +202,7 @@ export function App() {
             <table>
               <thead>
                 <tr>
-                  <th scope="col">时间 UTC</th>
+                  <th scope="col">时间 {zoneLabel(zone)}</th>
                   <th scope="col">呼号</th>
                   <th scope="col">波段</th>
                   <th scope="col">模式</th>
@@ -154,7 +213,7 @@ export function App() {
               <tbody>
                 {data.recent.map((q) => (
                   <tr key={q.id}>
-                    <td className="mono">{utc(q.startAt)}</td>
+                    <td className="mono">{at(q.startAt, zone)}</td>
                     <td className="call">{q.call}</td>
                     <td>{q.band}</td>
                     <td>
@@ -171,7 +230,8 @@ export function App() {
       </section>
 
       <footer>
-        本页由 OpenHeard 自动记录并生成，{utc(data.generatedAt)} UTC。
+        本页由 OpenHeard 自动记录并生成，{at(data.generatedAt, zone)} {zoneLabel(zone)}。
+        记录本身一律 UTC，这里只是换个时区写出来。
       </footer>
     </main>
   )
