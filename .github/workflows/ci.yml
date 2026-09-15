@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一分支上新的推送取消还在跑的那一次。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 24 起类型擦除默认开启，api/ 和 daemon/ 直接跑 .ts，没有构建步骤。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            api/package-lock.json
+            daemon/package-lock.json
+            web/package-lock.json
+            public/package-lock.json
+
+      - name: 装依赖
+        run: |
+          npm ci --prefix api
+          npm ci --prefix daemon
+          npm ci --prefix web
+          npm ci --prefix public
+
+      # core/ 的测试挂在 web 的 vitest 下面，所以它和 web 一起跑。
+      - name: 类型检查
+        run: |
+          npm run typecheck --prefix api
+          npm run typecheck --prefix daemon
+          npx --prefix web tsc -b web
+
+      - name: 测试
+        run: |
+          npm test --prefix api
+          npm test --prefix daemon
+          npm test --prefix web
+
+      - name: Lint
+        run: npm run lint --prefix web
+
+      - name: 构建
+        run: |
+          npm run build --prefix web
+          npm run build --prefix public
+
+  # 中文文档过一遍简明技术中文的规则。缺工具时跳过，不要让它变成噪声。
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 检查禁用词
+        run: |
+          if grep -rnE '进行[一-龥]{0,4}(处理|部署|操作|检查)|予以|加以|应当|；|——' \
+              specs/*.md docs/*.md README.md; then
+            echo "上面这些不符合简明技术中文的规则"
+            exit 1
+          fi
