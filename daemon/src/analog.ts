@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Activity } from './core.ts';
 import { SquelchDetector, bandEnergyDb } from './detector.ts';
+import { decodeMdc } from './mdc.ts';
 
 export interface AnalogConfig {
   /** 守哪个频率，Hz。一次只能守一个。 */
@@ -23,6 +24,8 @@ export interface AnalogConfig {
   /** 回到基准以下这么多算还没走，和上面之间是迟滞。 */
   closeMarginDb: number;
   minDurationS: number;
+  /** 本台的 MDC-1200 unit ID。解出它就说明这次发射是自己。缺省不判。 */
+  myUnitId?: number;
   /** 每次发射的音频往这里写，留给以后的语音识别。空字符串就不写。 */
   recordingsDir: string;
   rtlFmPath: string;
@@ -127,13 +130,23 @@ export function watchAnalog(
       if (closedNow) captured = [];
 
       if (event && audio) {
+        // 只有 CRC 通过且 unit ID 相等才算本台。op 和 arg 不参与判定。
+        const frames = cfg.myUnitId === undefined ? [] : decodeMdc(audio, cfg.sampleRate);
+        const mine = frames.some((f) => f.unitId === cfg.myUnitId);
+        if (frames.length > 0) {
+          const at = frames.map((f) => (f.atSample / cfg.sampleRate).toFixed(2)).join(', ');
+          console.log(
+            `解出 ${frames.length} 个 MDC 帧: ` +
+              frames.map((f) => `${f.unitId.toString(16).toUpperCase().padStart(4, '0')}@${at}s`).join(' '),
+          );
+        }
+
         const activity: Activity = {
           id: eventId(cfg.channel, event.startAt),
           origin: 'sdr-fm',
           startAt: Math.round(event.startAt),
           durationS: Number(event.durationS.toFixed(2)),
-          // MDC-1200 还没做，所以模拟侧现在判不出哪次是本台。
-          mine: false,
+          mine,
           freqMhz: cfg.freqHz / 1e6,
           channel: cfg.channel,
           audioSnrDb: Number(event.audioSnrDb.toFixed(1)),

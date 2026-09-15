@@ -1,7 +1,9 @@
 import { parseArgs } from 'node:util';
 import { fetchHistory } from './brandmeister.ts';
 import type { Rule } from './brandmeister.ts';
+import { readFileSync } from 'node:fs';
 import { watchAnalog } from './analog.ts';
+import { decodeMdc } from './mdc.ts';
 import { loadConfig } from './config.ts';
 import { Ingest } from './ingest.ts';
 import { normalise } from './normalise.ts';
@@ -17,6 +19,8 @@ const { values } = parseArgs({
     gain: { type: 'string' },
     recordings: { type: 'string' },
     'rtl-fm': { type: 'string' },
+    'unit-id': { type: 'string' },
+    'mdc-probe': { type: 'string' },
     config: { type: 'string' },
   },
 });
@@ -66,7 +70,22 @@ async function once(spec: string): Promise<void> {
   );
 }
 
-if (values.analog) {
+if (values['mdc-probe']) {
+  // 把一个 WAV 过一遍解码器。用来拿真实录音验证。
+  const buf = readFileSync(values['mdc-probe']);
+  const rate = buf.readUInt32LE(24);
+  const pcm = new Int16Array(buf.buffer, buf.byteOffset + 44, (buf.length - 44) >> 1);
+  const frames = decodeMdc(pcm, rate);
+  console.log(`${values['mdc-probe']}  ${rate} Hz  ${(pcm.length / rate).toFixed(2)} 秒`);
+  if (frames.length === 0) console.log('  没有解出 MDC 帧');
+  for (const f of frames) {
+    const hex = f.unitId.toString(16).toUpperCase().padStart(4, '0');
+    console.log(
+      `  unitId ${hex} (十进制 ${f.unitId})  op ${f.op.toString(16).padStart(2, '0')}` +
+        `  arg ${f.arg.toString(16).padStart(2, '0')}  在 ${(f.atSample / rate).toFixed(3)} 秒`,
+    );
+  }
+} else if (values.analog) {
   // 只守模拟信道，不连 API，用来在真信号上验证判决。
   // 用法: node src/index.ts --analog 438.700 [--gain 32.8]
   const mhz = Number(values.analog);
@@ -85,6 +104,7 @@ if (values.analog) {
       openMarginDb: 12,
       closeMarginDb: 7,
       minDurationS: 0.3,
+      myUnitId: values['unit-id'] === undefined ? undefined : parseInt(values['unit-id'], 16),
       recordingsDir: values.recordings ?? './recordings',
       rtlFmPath: values['rtl-fm'] ?? 'rtl_fm',
     },
