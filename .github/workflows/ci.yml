@@ -28,32 +28,11 @@ jobs:
             public/package-lock.json
 
       - name: 装依赖
-        run: |
-          npm ci --prefix api
-          npm ci --prefix daemon
-          npm ci --prefix web
-          npm ci --prefix public
+        run: npm run install:all
 
-      # core/ 的测试挂在 web 的 vitest 下面，所以它和 web 一起跑。
-      - name: 类型检查
-        run: |
-          npm run typecheck --prefix api
-          npm run typecheck --prefix daemon
-          npx --prefix web tsc -b web
-
-      - name: 测试
-        run: |
-          npm test --prefix api
-          npm test --prefix daemon
-          npm test --prefix web
-
-      - name: Lint
-        run: npm run lint --prefix web
-
-      - name: 构建
-        run: |
-          npm run build --prefix web
-          npm run build --prefix public
+      # 和本地 npm run verify 是同一条命令，两边不会走岔。
+      - name: 检查
+        run: npm run verify
 
   # 中文文档过一遍简明技术中文的规则。缺工具时跳过，不要让它变成噪声。
   docs:
