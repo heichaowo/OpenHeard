@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>__LABEL__</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__REPO__/api/src/index.ts</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__/api</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__PATH__</string>
+    <key>OPENHEARD_CONFIG</key>
+    <string>__CONFIG__</string>
+    <key>OPENHEARD_PORT</key>
+    <string>__PORT__</string>
+    <!-- 全局 WebSocket 对这个端点会打实验性警告，不关掉会一直污染日志 -->
+    <key>NODE_NO_WARNINGS</key>
+    <string>1</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- 崩溃后别立刻重来，给日志留下可读的间隔 -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>__LOGS__/api.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOGS__/api.err.log</string>
+</dict>
+</plist>

@@ -16,7 +16,7 @@
 
 还差两样。聚类的间隔阈值要用真实流量实测，现在是占位数。公开展示页对外怎么落地没有方案，主机在国内而 `bg0cg.ampr.org` 无法备案。
 
-设计规范在 `specs/openheard.md`，只写约束代码的内容。接口文档在 `docs/`，分管理端、公开端、采集三篇，另有一篇配置说明。场地数据和调研过程不放在仓库里。
+设计规范在 `specs/openheard.md`，只写约束代码的内容。接口文档在 `docs/`，分管理端、公开端、采集三篇，另有配置和部署各一篇。场地数据和调研过程不放在仓库里。
 
 ## 已定的设计决定
 
@@ -51,6 +51,8 @@ cd public && npm install && npm run dev
 ```
 
 `npm test` 在 `api/`、`daemon/` 和 `web/` 下各自可跑，`web/` 那个跑的是 `core/` 的测试。
+
+装到常驻的机器上走 `infra/install.sh`，它把 `api` 和 `daemon` 做成两个 LaunchAgent，步骤见 [docs/deployment.md](docs/deployment.md)。
 
 ## 许可证
 
@@ -96,8 +98,8 @@ where the public page is served from, since the host is in China and
 
 The spec is in `specs/openheard.md` and covers only what constrains the code.
 The API docs are in `docs/`, one file each for the admin, public and ingest
-surfaces plus one for configuration. Site data and research stay outside this
-repository.
+surfaces plus one for configuration and one for deployment. Site data and
+research stay outside this repository.
 
 ## Settled design decisions
 
@@ -138,6 +140,10 @@ cd public && npm install && npm run dev
 
 `npm test` works in `api/`, `daemon/` and `web/`; the one in `web/` runs the
 `core/` tests.
+
+To install on the machine it lives on, `infra/install.sh` sets `api` and
+`daemon` up as two LaunchAgents. The steps are in
+[docs/deployment.md](docs/deployment.md).
 
 ## Licence
 
