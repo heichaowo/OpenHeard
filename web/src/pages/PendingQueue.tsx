@@ -15,6 +15,9 @@ import {
   Typography,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
+import { Card, Grid } from 'antd'
+import { AsyncContent } from '../components/AsyncContent'
+import { PageHeader } from '../components/PageHeader'
 import { isValidCallsign, missingFields, normalizeCallsign } from '@core'
 import { ApiError } from '../api'
 import type { Activity, Qso, QsoDraft, QsoField } from '@core'
@@ -108,7 +111,8 @@ function ActivityTable({ activities }: { activities: Activity[] }) {
 export default function PendingQueue() {
   const { message } = App.useApp()
   const [form] = Form.useForm<FormValues>()
-  const { pending, promote, ignore, loading, error } = useStore()
+  const { pending, promote, ignore, loading, error, refresh } = useStore()
+  const wide = Grid.useBreakpoint().md ?? true
   const [editing, setEditing] = useState<PendingRow | null>(null)
 
   const open = (row: PendingRow) => {
@@ -217,6 +221,7 @@ export default function PendingQueue() {
       title: '操作',
       key: 'action',
       width: 220,
+      fixed: wide ? ('right' as const) : undefined,
       render: (_, row) => (
         <Space size={0}>
           {row.missing.length === 0 && (
@@ -242,21 +247,30 @@ export default function PendingQueue() {
 
   return (
     <>
-      <Typography.Paragraph type="secondary">
-        机器能填的已经填好。模拟信号不带身份信息，所以对方呼号只能人补。
-      </Typography.Paragraph>
-      <Table
-        rowKey={(row) => row.cluster.id}
-        columns={columns}
-        dataSource={pending}
-        loading={loading}
-        pagination={false}
-        scroll={{ x: 900 }}
-        locale={{ emptyText: error ?? '队列空了' }}
-        expandable={{
-          expandedRowRender: (row) => <ActivityTable activities={row.cluster.activities} />,
-        }}
+      <PageHeader
+        title="待确认队列"
+        description="机器能填的已经填好。模拟信号不带身份信息，所以对方呼号只能人补。"
       />
+      <Card className="surface table-card">
+        <AsyncContent
+          loading={loading}
+          error={error}
+          empty={pending.length === 0}
+          emptyText="队列空了，没有等着确认的对话"
+          onRetry={refresh}
+        >
+          <Table
+            rowKey={(row) => row.cluster.id}
+            columns={columns}
+            dataSource={pending}
+            pagination={false}
+            scroll={{ x: 900 }}
+            expandable={{
+              expandedRowRender: (row) => <ActivityTable activities={row.cluster.activities} />,
+            }}
+          />
+        </AsyncContent>
+      </Card>
       <Drawer
         title="确认入库"
         size={420}

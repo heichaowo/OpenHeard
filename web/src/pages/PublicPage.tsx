@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Card, Col, Layout, Row, Statistic, Table, Tag, Typography } from 'antd'
+import { Card, Layout, Statistic, Table, Tag, Typography } from 'antd'
 import type { TableColumnsType } from 'antd'
 import type { Qso } from '@core'
 import { useStore } from '../store'
@@ -32,8 +32,8 @@ export default function PublicPage() {
   ]
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Layout.Content style={{ padding: 24, maxWidth: 900, margin: '0 auto', width: '100%' }}>
+    <Layout className="public-page">
+      <Layout.Content className="public-inner">
         <Typography.Title level={2} style={{ marginBottom: 0 }}>
           {CALLSIGN}
         </Typography.Title>
@@ -41,29 +41,24 @@ export default function PublicPage() {
           {[station.myQth, station.myGridsquare].filter(Boolean).join(' · ')}
         </Typography.Paragraph>
 
-        <Row gutter={16} style={{ marginBottom: 24 }}>
-          <Col xs={12} sm={8}>
-            <Card size="small">
-              <Statistic title="通联总数" value={qsos.length} />
-            </Card>
-          </Col>
-          <Col xs={12} sm={8}>
-            <Card size="small">
-              <Statistic title="不同呼号" value={calls} />
-            </Card>
-          </Col>
-          <Col xs={24} sm={8}>
-            <Card size="small">
-              <Statistic
-                title="最近一次"
-                value={recent[0] ? utcMin(recent[0].startAt) : '—'}
-                styles={{ content: { fontSize: 20 } }}
-              />
-            </Card>
-          </Col>
-        </Row>
+        <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+          <Card className="surface" size="small">
+            <Statistic title="通联总数" value={qsos.length} />
+          </Card>
+          <Card className="surface" size="small">
+            <Statistic title="不同呼号" value={calls} />
+          </Card>
+          <Card className="surface" size="small">
+            <Statistic
+              title="最近一次"
+              value={recent[0] ? utcMin(recent[0].startAt) : '—'}
+              styles={{ content: { fontSize: 20 } }}
+            />
+          </Card>
+        </div>
 
         <Typography.Title level={5}>最近通联</Typography.Title>
+        <Card className="surface table-card">
         <Table
           rowKey="id"
           size="small"
@@ -73,6 +68,7 @@ export default function PublicPage() {
           scroll={{ x: 600 }}
           locale={{ emptyText: '还没有通联' }}
         />
+        </Card>
 
         <Typography.Paragraph type="secondary" style={{ marginTop: 24 }}>
           本页由 OpenHeard 自动记录并生成。

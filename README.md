@@ -47,6 +47,15 @@ npm run dev
 
 `npm test` 跑 `core/` 的测试，`npm run build` 做类型检查并构建。
 
+## 用到的别人的代码
+
+Web 界面的布局、主题取值和两个组件改写自 OpenLogTool Server。
+
+- 版权 © 2026 Mazha0309 与贡献者，AGPL-3.0-only
+- 来源 <https://github.com/Mazha0309/OpenLogToolServer>
+- 涉及 `web/src/styles.css`、`web/src/App.tsx` 的主题段、`web/src/components/AppShell.tsx`、`PageHeader.tsx`、`AsyncContent.tsx`
+- 都做了删减和改写，各文件头部注明了改动
+
 ## 许可证
 
 **AGPL-3.0**，见 `LICENSE`。把修改过的副本跑成网络服务，就必须向使用者提供它的源码。
@@ -117,6 +126,17 @@ npm run dev
 ```
 
 `npm test` runs the `core/` tests. `npm run build` type-checks and builds.
+
+## Borrowed code
+
+The web UI's layout, theme tokens and two components are adapted from
+OpenLogTool Server.
+
+- Copyright © 2026 Mazha0309 and contributors, AGPL-3.0-only
+- Source <https://github.com/Mazha0309/OpenLogToolServer>
+- Covers `web/src/styles.css`, the theme block in `web/src/App.tsx`, and
+  `web/src/components/AppShell.tsx`, `PageHeader.tsx`, `AsyncContent.tsx`
+- All were trimmed and rewritten; each file's header says what changed
 
 ## Licence
 

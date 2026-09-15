@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
-import { App, Button, Flex, Input, Popconfirm, Space, Table, Tag, Typography } from 'antd'
+import { App, Button, Card, Grid, Input, Popconfirm, Space, Table, Tag, Typography } from 'antd'
+import { AsyncContent } from '../components/AsyncContent'
+import { PageHeader } from '../components/PageHeader'
 import type { TableColumnsType } from 'antd'
 import { adifFile, normalizeCallsign } from '@core'
 import type { Qso } from '@core'
@@ -17,7 +19,8 @@ function download(name: string, text: string) {
 
 export default function LogList() {
   const { message } = App.useApp()
-  const { qsos, removeQso, loading, error } = useStore()
+  const { qsos, removeQso, loading, error, refresh } = useStore()
+  const wide = Grid.useBreakpoint().md ?? true
   const [search, setSearch] = useState('')
 
   const rows = useMemo(() => {
@@ -78,6 +81,7 @@ export default function LogList() {
       title: '操作',
       key: 'action',
       width: 90,
+      fixed: wide ? ('right' as const) : undefined,
       render: (_, q) => (
         <Popconfirm title={`删除与 ${q.call} 的通联？`} onConfirm={() =>
             removeQso(q.id).catch((e: Error) => message.error(e.message))
@@ -92,26 +96,38 @@ export default function LogList() {
 
   return (
     <>
-      <Flex justify="space-between" align="center" wrap gap={12} style={{ marginBottom: 16 }}>
-        <Space>
-          <Input.Search
-            allowClear
-            placeholder="按呼号筛选"
-            style={{ width: 220 }}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <Typography.Text type="secondary">{rows.length} 条</Typography.Text>
-        </Space>
-        <Button onClick={exportAdif}>导出 ADIF</Button>
-      </Flex>
+      <PageHeader
+        title="日志"
+        description="正式记录。每一行都由人的判断产生，导出的 ADIF 以它为准。"
+        actions={<Button onClick={exportAdif}>导出 ADIF</Button>}
+      />
+      <Card
+        className="surface table-card"
+        title={
+          <div className="table-toolbar">
+            <Input.Search
+              allowClear
+              className="table-toolbar-search"
+              placeholder="按呼号筛选"
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <Typography.Text type="secondary">{rows.length} 条</Typography.Text>
+          </div>
+        }
+      >
+        <AsyncContent
+          loading={loading}
+          error={error}
+          empty={rows.length === 0}
+          emptyText={search ? '没有匹配的呼号' : '还没有通联'}
+          onRetry={refresh}
+        >
       <Table
         rowKey="id"
         columns={columns}
         dataSource={rows}
-        loading={loading}
         scroll={{ x: 1000 }}
         pagination={{ pageSize: 20, hideOnSinglePage: true }}
-        locale={{ emptyText: error ?? '还没有通联' }}
         expandable={{
           rowExpandable: (q) => Boolean(q.note || q.myDevice),
           expandedRowRender: (q) => (
@@ -127,6 +143,8 @@ export default function LogList() {
           ),
         }}
       />
+        </AsyncContent>
+      </Card>
     </>
   )
 }

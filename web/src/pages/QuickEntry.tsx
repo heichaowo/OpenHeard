@@ -9,8 +9,8 @@ import {
   InputNumber,
   Select,
   Space,
-  Typography,
 } from 'antd'
+import { PageHeader } from '../components/PageHeader'
 import type { Dayjs } from 'dayjs'
 import { bandOf, isValidCallsign, normalizeCallsign } from '@core'
 import type { Mode, Qso } from '@core'
@@ -74,10 +74,12 @@ export default function QuickEntry() {
   }
 
   return (
-    <Card style={{ maxWidth: 560 }}>
-      <Typography.Paragraph type="secondary">
-        给没有任何观测的通联用。经过采集的通联走待确认队列，不在这里录。
-      </Typography.Paragraph>
+    <>
+      <PageHeader
+        title="快速补录"
+        description="给没有任何观测的通联用。经过采集的走待确认队列，不在这里录。"
+      />
+      <Card className="surface" style={{ maxWidth: 560 }}>
       <Form form={form} layout="vertical" initialValues={initial} onFinish={submit}>
         <Form.Item
           name="call"
@@ -176,6 +178,7 @@ export default function QuickEntry() {
           入库
         </Button>
       </Form>
-    </Card>
+      </Card>
+    </>
   )
 }

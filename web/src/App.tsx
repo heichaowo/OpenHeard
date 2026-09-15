@@ -1,43 +1,39 @@
-import { App as AntApp, ConfigProvider, Layout, Menu, Typography } from 'antd'
+import { App as AntApp, ConfigProvider, theme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
-import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
+import { AppShell } from './components/AppShell'
 import LogList from './pages/LogList'
 import PendingQueue from './pages/PendingQueue'
 import PublicPage from './pages/PublicPage'
 import QuickEntry from './pages/QuickEntry'
+import { Preferences } from './Preferences'
 import { StoreProvider } from './StoreProvider'
+import { usePreferences } from './theme'
 
-const NAV = [
-  { key: '/pending', label: <Link to="/pending">待确认队列</Link> },
-  { key: '/log', label: <Link to="/log">日志</Link> },
-  { key: '/new', label: <Link to="/new">快速补录</Link> },
-  { key: '/p', label: <Link to="/p">公开页</Link> },
-]
-
-function AdminLayout() {
-  const { pathname } = useLocation()
+// 主题取值取自 OpenLogTool Server，Copyright © 2026 Mazha0309 与贡献者，AGPL-3.0-only。
+// 来源 https://github.com/Mazha0309/OpenLogToolServer （web/src/App.tsx 的 ThemedApp）
+function Themed() {
+  const { dark } = usePreferences()
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Layout.Header style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-        <Typography.Title level={5} style={{ color: '#fff', margin: 0, whiteSpace: 'nowrap' }}>
-          OpenHeard
-        </Typography.Title>
-        <Menu theme="dark" mode="horizontal" selectedKeys={[pathname]} items={NAV} style={{ flex: 1, minWidth: 0 }} />
-      </Layout.Header>
-      <Layout.Content style={{ padding: 24 }}>
-        <Outlet />
-      </Layout.Content>
-    </Layout>
-  )
-}
-
-export default function App() {
-  return (
-    <ConfigProvider locale={zhCN}>
+    <ConfigProvider
+      locale={zhCN}
+      theme={{
+        algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
+        token: { colorPrimary: '#1677ff', borderRadius: 8, fontSize: 14 },
+        components: {
+          Layout: {
+            bodyBg: 'var(--app-bg)',
+            headerBg: 'var(--app-elevated)',
+            siderBg: 'var(--app-elevated)',
+          },
+          Menu: { itemBorderRadius: 7 },
+        },
+      }}
+    >
       <AntApp>
         <StoreProvider>
           <Routes>
-            <Route element={<AdminLayout />}>
+            <Route element={<AppShell />}>
               <Route index element={<Navigate to="/pending" replace />} />
               <Route path="pending" element={<PendingQueue />} />
               <Route path="log" element={<LogList />} />
@@ -49,5 +45,13 @@ export default function App() {
         </StoreProvider>
       </AntApp>
     </ConfigProvider>
+  )
+}
+
+export default function App() {
+  return (
+    <Preferences>
+      <Themed />
+    </Preferences>
   )
 }
