@@ -16,7 +16,7 @@
 
 还差两样。聚类的间隔阈值要用真实流量实测，现在是占位数。公开展示页对外怎么落地没有方案，主机在国内而 `bg0cg.ampr.org` 无法备案。
 
-设计规范在 `specs/openheard.md`，只写约束代码的内容。场地数据、验证步骤和调研过程不放在仓库里。
+设计规范在 `specs/openheard.md`，只写约束代码的内容。接口文档在 `docs/`，分管理端、公开端、采集三篇，另有一篇配置说明。场地数据和调研过程不放在仓库里。
 
 ## 已定的设计决定
 
@@ -95,7 +95,9 @@ where the public page is served from, since the host is in China and
 `bg0cg.ampr.org` cannot get an ICP filing.
 
 The spec is in `specs/openheard.md` and covers only what constrains the code.
-Site data, procedures and research are kept outside this repository.
+The API docs are in `docs/`, one file each for the admin, public and ingest
+surfaces plus one for configuration. Site data and research stay outside this
+repository.
 
 ## Settled design decisions
 
