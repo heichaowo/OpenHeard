@@ -35,6 +35,13 @@ export interface Activity {
   audioSnrDb?: number;
 }
 
+/** 频谱表里的一条。属于部署配置，类型放这里是因为前后端都要用。 */
+export interface Channel {
+  name: string;
+  freqMhz: number;
+  mode: Mode;
+}
+
 /** 按间隔阈值把发射事件聚成的一次对话。 */
 export interface Cluster {
   id: string;

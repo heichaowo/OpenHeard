@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isValidCallsign, normalizeCallsign } from './callsign';
+import { isValidCallsign, normalizeCallsign } from './callsign.ts';
 
 describe('normalizeCallsign', () => {
   it('去空格并转大写', () => {

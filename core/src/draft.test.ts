@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { draftFromCluster, missingFields } from './draft';
-import type { Activity, Cluster } from './types';
+import { draftFromCluster, missingFields } from './draft.ts';
+import type { Activity, Cluster } from './types.ts';
 
 const at = (over: Partial<Activity>): Activity => ({
   id: 'a',

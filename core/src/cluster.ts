@@ -1,4 +1,4 @@
-import type { Activity, Cluster } from './types';
+import type { Activity, Cluster } from './types.ts';
 
 /** 一次发射的结束时刻。 */
 const endOf = (a: Activity) => a.startAt + a.durationS;

@@ -8,3 +8,7 @@ build/
 *.db
 *.sqlite3
 recordings/
+openheard.config.json
+*.db-wal
+*.db-shm
+*.tsbuildinfo

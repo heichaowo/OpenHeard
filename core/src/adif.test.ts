@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { adifDate, adifFile, adifMode, adifRecord, adifTime } from './adif';
-import type { Qso } from './types';
+import { adifDate, adifFile, adifMode, adifRecord, adifTime } from './adif.ts';
+import type { Qso } from './types.ts';
 
 // 2026-09-12T23:30:00Z，在东八区已经是 13 日早上。
 const UNIX = Math.floor(Date.UTC(2026, 8, 12, 23, 30, 0) / 1000);

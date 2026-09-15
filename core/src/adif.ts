@@ -1,4 +1,4 @@
-import type { Mode, Qso } from './types';
+import type { Mode, Qso } from './types.ts';
 
 // ADIF 组装。时间一律 UTC，长度是 UTF-8 字节数。
 

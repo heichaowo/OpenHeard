@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bandOf, modeOf } from './band';
+import { bandOf, modeOf } from './band.ts';
 
 describe('bandOf', () => {
   it('两个波段的边界都算在内', () => {

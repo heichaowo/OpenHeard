@@ -1,0 +1,45 @@
+{
+  "dbPath": "./openheard.db",
+
+  "dmrId": 4600000,
+
+  "//clusterGapS": "间隔阈值，秒。这个值要来自对真实流量的实测，下面这个是占位，还没有依据。",
+  "clusterGapS": 120,
+
+  "pendingWindowDays": 7,
+  "activityRetentionDays": 90,
+
+  "//ingestToken": "openssl rand -hex 32",
+  "ingestToken": "换成你自己的随机串换成你自己的随机串",
+
+  "station": {
+    "myGridsquare": "OM24",
+    "myQth": "成都",
+    "myDevice": "Quansheng UV-K6",
+    "myAntenna": "Nagoya NA-771",
+    "myPower": "5W",
+    "myHeightM": 30,
+    "networkFreqMhz": 439.525
+  },
+
+  "channels": [
+    { "name": "439.525 中继", "freqMhz": 439.525, "mode": "FM" },
+    { "name": "145.500 直频", "freqMhz": 145.5, "mode": "FM" }
+  ],
+
+  "//queries": "每条规则单独一次查询。OR 合并时 amount 是全局上限，热闹的组会把安静的组饿死。",
+  "queries": [
+    {
+      "key": "src:4600000",
+      "rule": { "id": "SourceID", "operator": "equal", "value": 4600000 },
+      "amount": 200,
+      "intervalS": 3600
+    },
+    {
+      "key": "dst:46001",
+      "rule": { "id": "DestinationID", "operator": "equal", "value": 46001 },
+      "amount": 200,
+      "intervalS": 900
+    }
+  ]
+}

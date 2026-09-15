@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { clusterActivities } from './cluster';
-import type { Activity } from './types';
+import { clusterActivities } from './cluster.ts';
+import type { Activity } from './types.ts';
 
 const at = (id: string, startAt: number, durationS = 5, over: Partial<Activity> = {}): Activity => ({
   id,

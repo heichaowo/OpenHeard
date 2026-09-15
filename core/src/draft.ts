@@ -1,5 +1,5 @@
-import { bandOf, modeOf } from './band';
-import type { Cluster, Qso, QsoDraft } from './types';
+import { bandOf, modeOf } from './band.ts';
+import type { Cluster, Qso, QsoDraft } from './types.ts';
 
 /** 本台的固定信息。属于部署配置，不是设计。 */
 export interface StationDefaults {

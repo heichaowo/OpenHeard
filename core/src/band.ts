@@ -1,4 +1,4 @@
-import type { Mode, Origin } from './types';
+import type { Mode, Origin } from './types.ts';
 
 /**
  * 频率转 ADIF 波段名。
