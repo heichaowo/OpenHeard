@@ -21,11 +21,22 @@ die() { echo "错误：$*" >&2; exit 1; }
 [ -n "$NODE" ] || die "找不到 node"
 [ -f "$CONFIG" ] || die "找不到配置文件 $CONFIG"
 
+# 转成绝对路径。相对路径写进 plist 会按 WorkingDirectory 算，跟你敲命令时的位置不是一处。
+CONFIG="$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")"
+
+# Node 24 起类型擦除默认开启。低于 24 跑不了 .ts，服务会起来就崩，反复重启。
+MAJOR="$("$NODE" -p 'process.versions.node.split(".")[0]')"
+[ "$MAJOR" -ge 24 ] || die "要 Node 24 或更高，现在是 $("$NODE" -v)"
+
 # 配置错了照样装进去，就变成一个每 30 秒重启一次、谁也看不见的循环。
 echo "== 先验配置 =="
-node "$REPO/api/src/check-config.ts" "$CONFIG" || die "配置不过，先改配置再装"
+"$NODE" "$REPO/api/src/check-config.ts" "$CONFIG" || die "配置不过，先改配置再装"
 
 command -v rtl_fm >/dev/null || echo "提醒：PATH 里没有 rtl_fm，模拟守听会起不来"
+
+# 这个脚本也是升级路径，所以先备份。qso 是人判断过的结果，重建不出来。
+echo "== 备份数据库 =="
+"$NODE" "$REPO/api/src/backup.ts" "$CONFIG" || die "备份没成，先别升"
 
 # 配置里有 ingestToken 和 sessionSecret，不该让同机别的账户读到。
 chmod 600 "$CONFIG"

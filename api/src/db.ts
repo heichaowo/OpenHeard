@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import type { Activity, Qso } from './core.ts';
+import { migrate } from './migrations.ts';
 
 /** 采集端推过来的一行：归一化结果加上原始行。 */
 export interface IngestRow {
@@ -24,11 +24,14 @@ export interface PollLog {
 }
 
 export function openDb(path: string): DatabaseSync {
-  const db = new DatabaseSync(path);
+  // node:sqlite 开库就把外键打开了，所以要关只能在这里关。现在一条外键也没有，
+  // 但重建表那种迁移要求外键是关的，而 PRAGMA foreign_keys 在事务里不生效，
+  // 迁移又每一版一个事务，到那时再想关就没地方关了。
+  const db = new DatabaseSync(path, { enableForeignKeyConstraints: false });
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA busy_timeout = 5000');
+  migrate(db);
   db.exec('PRAGMA foreign_keys = ON');
-  db.exec(readFileSync(new URL('./schema.sql', import.meta.url), 'utf8'));
   return db;
 }
 

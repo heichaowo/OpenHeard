@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import type { Channel, StationDefaults } from './core.ts';
 
 /** searchHouse 的一条查询。每条规则单独发一次，不用 OR 合并。 */
@@ -105,6 +106,9 @@ export function loadConfig(path: string): ConfigResult {
     ok: true,
     config: {
       ...(raw as unknown as Config),
+      // 相对路径按配置文件所在目录算，不按 cwd。否则同一份配置，launchd 从
+      // api/ 起的服务和你在仓库根手敲的备份命令会指向两个不同的文件。
+      dbPath: resolve(dirname(path), raw.dbPath as string),
       host: typeof raw.host === 'string' ? raw.host : '127.0.0.1',
     },
   };

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import type { Rule } from './brandmeister.ts';
 
 export interface Query {
@@ -60,6 +61,9 @@ export function loadConfig(path: string): ConfigResult {
 
   if (problems.length > 0) return { ok: false, problems };
 
+  // 相对路径按配置文件所在目录算，不按 cwd，和 api 那边一致。
+  const near = (p: string) => resolve(dirname(path), p);
+
   const a = raw.analog;
   let analog: AnalogConfig | undefined;
   if (isObject(a)) {
@@ -71,7 +75,7 @@ export function loadConfig(path: string): ConfigResult {
         channel: a.channel,
         gainDb: typeof a.gainDb === 'number' ? a.gainDb : 32.8,
         unitId: typeof a.unitId === 'string' ? a.unitId : undefined,
-        recordingsDir: typeof a.recordingsDir === 'string' ? a.recordingsDir : './recordings',
+        recordingsDir: near(typeof a.recordingsDir === 'string' ? a.recordingsDir : './recordings'),
       };
     }
   }
@@ -85,7 +89,7 @@ export function loadConfig(path: string): ConfigResult {
       queries: queries as Query[],
       apiUrl: typeof raw.apiUrl === 'string' ? raw.apiUrl : 'http://127.0.0.1:3000',
       ingestToken: token as string,
-      spoolDir: typeof raw.spoolDir === 'string' ? raw.spoolDir : './spool',
+      spoolDir: near(typeof raw.spoolDir === 'string' ? raw.spoolDir : './spool'),
     },
   };
 }

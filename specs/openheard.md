@@ -40,6 +40,10 @@
 
 **健康检查不要会话，也不带计数、路径和磁盘。** 它的用处是一行 curl 当外部监控，要会话就用不上了。细节留在管理端的运维接口后面。
 
+**schema 版本记在 `PRAGMA user_version` 里，迁移在开库时跑。** 第 1 版就是最初那份 schema.sql，整份都是 `CREATE TABLE IF NOT EXISTS`，所以老库跑一遍不改任何东西，只补上版本号。库的版本比程序新就直接不开，否则旧代码会按旧的理解读新表。
+
+**升级前备份，用 `VACUUM INTO` 而不是 `cp`。** WAL 模式下主库文件和 `-wal` 分两次读，`cp` 可能拷出半截。`qso` 是人判断过的结果，重建不出来。
+
 **日志里的时间一律 UTC。** 存储、导出和界面都用 UTC，不在任何一层做本地时区转换。
 
 **DMR 在 ADIF 里写成 `MODE=DIGITALVOICE` 加 `SUBMODE=DMR`。** 没有 `MODE=DMR` 这个取值。

@@ -4,6 +4,8 @@
 
 抄 `api/openheard.config.example.json` 起手。路径用 `OPENHEARD_CONFIG` 指定，缺省是 `./openheard.config.json`。
 
+配置里的相对路径（`dbPath`、`spoolDir`、`recordingsDir`）按配置文件所在目录算，不按 cwd。服务由 launchd 从各自的目录起，而备份是你在别处敲的，按 cwd 算两边会指向不同的文件。
+
 配置有问题时 API 照常监听，每条路由回 `503` 并列出原因。退出会让 launchd 的 KeepAlive 变成一个谁也看不见的重启循环。
 
 ## api 读的
@@ -80,6 +82,12 @@ executable depends on the other.
 
 Start from `api/openheard.config.example.json`. Point at it with
 `OPENHEARD_CONFIG`; the default is `./openheard.config.json`.
+
+Relative paths inside the config (`dbPath`, `spoolDir`, `recordingsDir`)
+resolve against the config file's own directory, not the working directory.
+launchd starts each service from its own directory while you run the backup
+from somewhere else, and resolving against the working directory would make
+those two point at different files.
 
 When the config is broken the API still listens and answers `503` on every
 route with the reasons. Exiting would turn launchd's KeepAlive into a restart

@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { createApp, createBrokenApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { openDb } from './db.ts';
+import { userVersion } from './migrations.ts';
 import { createStore } from './store.ts';
 
 const configPath = process.env.OPENHEARD_CONFIG ?? './openheard.config.json';
@@ -9,15 +10,18 @@ const port = Number(process.env.OPENHEARD_PORT ?? 3000);
 
 const result = loadConfig(configPath);
 
-const app = result.ok
-  ? createApp(createStore(openDb(result.config.dbPath), result.config), result.config.ingestToken, {
-      passwordHash: result.config.adminPasswordHash,
-      sessionSecret: result.config.sessionSecret,
-    })
-  : createBrokenApp(result.problems);
-
-if (!result.ok) {
+let app;
+if (result.ok) {
+  // 开库时顺带跑迁移。写库的只有这一个进程，所以不用抢锁。
+  const db = openDb(result.config.dbPath);
+  console.log(`数据库第 ${userVersion(db)} 版：${result.config.dbPath}`);
+  app = createApp(createStore(db, result.config), result.config.ingestToken, {
+    passwordHash: result.config.adminPasswordHash,
+    sessionSecret: result.config.sessionSecret,
+  });
+} else {
   for (const p of result.problems) console.error(`配置: ${p}`);
+  app = createBrokenApp(result.problems);
 }
 
 // 监听地址来自配置，默认只在本机。要从手机用就把 host 改成 0.0.0.0，

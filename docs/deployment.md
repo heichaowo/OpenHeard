@@ -69,12 +69,38 @@ sudo pmset -a sleep 0
 ## 升级
 
 ```bash
-cd ~/OpenHeard && cp openheard.db openheard.db.bak
-git pull && npm ci --prefix api && npm ci --prefix daemon
+cd ~/OpenHeard && git pull
+npm ci --prefix api && npm ci --prefix daemon
 infra/install.sh ~/OpenHeard/openheard.config.json
 ```
 
-**升级前先拷一份数据库。** `qso` 是人判断过的结果，重建不出来，而 `openheard.db` 只有一份。目前建表只有 `CREATE TABLE IF NOT EXISTS`，没有迁移路径，schema 改了要手工处理。
+`install.sh` 每次都先验配置、再备份、最后才装，所以升级不用额外动作。备份失败就停下来，不往下走。
+
+## 数据库
+
+schema 版本记在 `PRAGMA user_version` 里。api 开库时把落后的迁移补上，跑完把版本号写进 `api.log`。库的版本比程序新就不开库，因为旧代码会按旧的理解读新表。
+
+备份用 `VACUUM INTO`，不要用 `cp`。WAL 模式下主库和 `-wal` 是两个文件，`cp` 分两次读，中间写进来的改动只落在一边。
+
+配置里 `dbPath` 的相对路径按配置文件所在目录算，和你在哪个目录敲命令无关。
+
+```bash
+node api/src/backup.ts ~/OpenHeard/openheard.config.json
+```
+
+缺省写到数据库同级的 `backups/`，文件名带 UTC 时刻。第二个参数换目标目录。旧备份不自动删，自己清。
+
+恢复要在服务停着的时候做：
+
+```bash
+infra/uninstall.sh
+cd ~/OpenHeard
+cp backups/openheard-20260915T113840Z.db openheard.db
+rm -f openheard.db-wal openheard.db-shm
+infra/install.sh ~/OpenHeard/openheard.config.json
+```
+
+`-wal` 和 `-shm` 是旧库的，留着会和恢复回来的库对不上。
 
 ## 卸
 
@@ -178,15 +204,48 @@ you.
 ## Upgrading
 
 ```bash
-cd ~/OpenHeard && cp openheard.db openheard.db.bak
-git pull && npm ci --prefix api && npm ci --prefix daemon
+cd ~/OpenHeard && git pull
+npm ci --prefix api && npm ci --prefix daemon
 infra/install.sh ~/OpenHeard/openheard.config.json
 ```
 
-**Copy the database before upgrading.** `qso` rows are a human's judgement and
-cannot be rebuilt, and `openheard.db` is the only copy. Tables are created
-with `CREATE TABLE IF NOT EXISTS` and there is no migration path, so a schema
-change has to be handled by hand.
+`install.sh` validates the config, then backs up, then installs, so an upgrade
+needs nothing extra. A failed backup stops it before anything is installed.
+
+## The database
+
+The schema version lives in `PRAGMA user_version`. The API applies whatever
+migrations the database is behind on when it opens it, and writes the
+resulting version to `api.log`. A database newer than the binary is refused,
+since old code would read new tables with old assumptions.
+
+Back up with `VACUUM INTO`, not `cp`. Under WAL the main file and `-wal` are
+two files, and `cp` reads them one after the other, so a write landing in
+between ends up in only one of them.
+
+A relative `dbPath` in the config resolves against the config file's own
+directory, not against wherever you ran the command from.
+
+```bash
+node api/src/backup.ts ~/OpenHeard/openheard.config.json
+```
+
+It writes to `backups/` next to the database by default, named with a UTC
+timestamp. A second argument changes the directory. Old backups are never
+deleted for you.
+
+Restoring is done with the services stopped:
+
+```bash
+infra/uninstall.sh
+cd ~/OpenHeard
+cp backups/openheard-20260915T113840Z.db openheard.db
+rm -f openheard.db-wal openheard.db-shm
+infra/install.sh ~/OpenHeard/openheard.config.json
+```
+
+The `-wal` and `-shm` files belong to the old database and do not match the
+one restored.
 
 ## Uninstalling
 
