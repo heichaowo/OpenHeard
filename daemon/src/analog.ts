@@ -26,6 +26,9 @@ export interface AnalogConfig {
   minDurationS: number;
   /** 本台的 MDC-1200 unit ID。解出它就说明这次发射是自己。缺省不判。 */
   myUnitId?: number;
+  /** 静噪打开前留多少秒。MDC 的 BOT 突发在按下 PTT 后 30 ms 就发完，
+   *  而静噪要一两块音频才判得出来，不留前导就只剩 EOT 可解。 */
+  prerollS: number;
   /** 每次发射的音频往这里写，留给以后的语音识别。空字符串就不写。 */
   recordingsDir: string;
   rtlFmPath: string;
@@ -85,6 +88,8 @@ export function watchAnalog(
   const calibration: number[] = [];
   let detector: SquelchDetector | undefined;
   let captured: number[] = [];
+  const prerollN = Math.round(cfg.sampleRate * cfg.prerollS);
+  let preroll: number[] = [];
 
   child.stderr.on('data', (d: Buffer) => {
     const line = d.toString().trim();
@@ -121,7 +126,17 @@ export function watchAnalog(
 
       const wasOpen = detector.isOpen;
       const event = detector.push(samples, at, cfg.blockS);
-      if (detector.isOpen) for (const v of samples) captured.push(v);
+
+      if (!detector.isOpen) {
+        for (const v of samples) preroll.push(v);
+        if (preroll.length > prerollN) preroll = preroll.slice(preroll.length - prerollN);
+      } else {
+        if (!wasOpen) {
+          captured = preroll;
+          preroll = [];
+        }
+        for (const v of samples) captured.push(v);
+      }
 
       // 事件太短会被丢掉，那时 event 是 undefined，但音频照样要清掉，
       // 否则它会串进下一次发射。所以按状态翻转清，不按有没有事件清。
@@ -134,11 +149,15 @@ export function watchAnalog(
         const frames = cfg.myUnitId === undefined ? [] : decodeMdc(audio, cfg.sampleRate);
         const mine = frames.some((f) => f.unitId === cfg.myUnitId);
         if (frames.length > 0) {
-          const at = frames.map((f) => (f.atSample / cfg.sampleRate).toFixed(2)).join(', ');
-          console.log(
-            `解出 ${frames.length} 个 MDC 帧: ` +
-              frames.map((f) => `${f.unitId.toString(16).toUpperCase().padStart(4, '0')}@${at}s`).join(' '),
-          );
+          const list = frames
+            .map(
+              (f) =>
+                `${f.unitId.toString(16).toUpperCase().padStart(4, '0')}` +
+                `/${f.arg === 0x80 ? 'BOT' : f.arg === 0x00 ? 'EOT' : `arg${f.arg}`}` +
+                `@${(f.atSample / cfg.sampleRate).toFixed(2)}s`,
+            )
+            .join(' ');
+          console.log(`解出 ${frames.length} 个 MDC 帧: ${list}`);
         }
 
         const activity: Activity = {

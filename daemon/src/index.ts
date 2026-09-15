@@ -104,6 +104,7 @@ if (values['mdc-probe']) {
       openMarginDb: 12,
       closeMarginDb: 7,
       minDurationS: 0.3,
+      prerollS: 0.6,
       myUnitId: values['unit-id'] === undefined ? undefined : parseInt(values['unit-id'], 16),
       recordingsDir: values.recordings ?? './recordings',
       rtlFmPath: values['rtl-fm'] ?? 'rtl_fm',
