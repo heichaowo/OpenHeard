@@ -75,3 +75,50 @@ describe('clusterActivities', () => {
     expect(c[0]!.endAt).toBeCloseTo(105.5, 5);
   });
 });
+
+describe('按信道分开', () => {
+  it('不同话务组不并成一段', () => {
+    const rows = [
+      at('a', 100, 5, { origin: 'brandmeister', talkgroup: 91 }),
+      at('b', 105, 5, { origin: 'brandmeister', talkgroup: 460 }),
+      at('c', 110, 5, { origin: 'brandmeister', talkgroup: 91 }),
+    ];
+    expect(shape(rows, 120)).toEqual([['a', 'c'], ['b']]);
+  });
+
+  it('模拟信道和数字话务组不并成一段', () => {
+    // 本台可能同时在中继上说话和在话务组上说话，那是两次对话
+    const rows = [
+      at('fm1', 100, 3, { channel: '438.700 直频' }),
+      at('bm1', 102, 4, { origin: 'brandmeister', talkgroup: 46001 }),
+      at('fm2', 108, 3, { channel: '438.700 直频' }),
+      at('bm2', 110, 4, { origin: 'brandmeister', talkgroup: 46001 }),
+    ];
+    expect(shape(rows, 120)).toEqual([['fm1', 'fm2'], ['bm1', 'bm2']]);
+  });
+
+  it('不同模拟信道不并成一段', () => {
+    const rows = [
+      at('a', 100, 3, { channel: '438.700 直频' }),
+      at('b', 104, 3, { channel: '439.525 中继' }),
+    ];
+    expect(shape(rows, 120)).toEqual([['a'], ['b']]);
+  });
+
+  it('同一信道上还是按间隔切', () => {
+    const rows = [
+      at('a', 100, 3, { channel: 'X' }),
+      at('b', 110, 3, { channel: 'X' }),
+      at('c', 400, 3, { channel: 'X' }),
+    ];
+    expect(shape(rows, 60)).toEqual([['a', 'b'], ['c']]);
+  });
+
+  it('结果按时间排序，不按信道分组的顺序', () => {
+    const rows = [
+      at('late', 500, 3, { channel: 'A' }),
+      at('early', 100, 3, { channel: 'B' }),
+    ];
+    expect(shape(rows, 10)).toEqual([['early'], ['late']]);
+  });
+})
