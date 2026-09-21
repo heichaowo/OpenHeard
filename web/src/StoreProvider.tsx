@@ -14,6 +14,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [channels, setChannels] = useState<Channel[]>([])
   const [pending, setPending] = useState<PendingItem[]>([])
   const [qsos, setQsos] = useState<Qso[]>([])
+  const [recordings, setRecordings] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | undefined>()
 
@@ -27,12 +28,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     const mine = ++seq.current
     try {
-      const [s, p, q] = await Promise.all([api.station(), api.pending(), api.qsos()])
+      const [s, p, q, r] = await Promise.all([
+        api.station(),
+        api.pending(),
+        api.qsos(),
+        // 没配模拟守听时这里是空数组，不该让整页跟着失败。
+        api.recordings().catch(() => [] as string[]),
+      ])
       if (mine !== seq.current) return
       setStation(s.station)
       setChannels(s.channels)
       setPending(p)
       setQsos(q)
+      setRecordings(new Set(r))
       setError(undefined)
     } catch (e) {
       if (mine !== seq.current) return
@@ -71,6 +79,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       channels,
       pending: rows,
       qsos,
+      recordings,
       loading,
       error,
       refresh,
@@ -95,7 +104,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await refresh()
       },
     }),
-    [station, channels, rows, qsos, loading, error, refresh],
+    [station, channels, rows, qsos, recordings, loading, error, refresh],
   )
 
   return <StoreContext value={value}>{children}</StoreContext>

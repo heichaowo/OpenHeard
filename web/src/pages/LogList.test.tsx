@@ -30,6 +30,7 @@ const store = (qsos: Qso[]): Store => ({
   channels: [],
   pending: [],
   qsos,
+  recordings: new Set<string>(),
   loading: false,
   error: undefined,
   promote: vi.fn(),

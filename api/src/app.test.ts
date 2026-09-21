@@ -15,6 +15,7 @@ const MY_ID = 4600123;
 
 const config: Config = {
   dbPath: ':memory:',
+  path: '/tmp/openheard-test.config.json',
   host: '127.0.0.1',
   adminPasswordHash: hashPassword('secret'),
   sessionSecret: 's'.repeat(40),
@@ -526,6 +527,67 @@ describe('没接住的异常', () => {
     assert.equal(res.status, 500);
     assert.equal(res.headers.get('content-type')?.includes('application/json'), true);
     assert.ok(((await res.json()) as { error?: string }).error);
+  });
+});
+
+describe('录音回放', () => {
+  const withRec = (dir: string | undefined) =>
+    createApp(
+      createStore(openDb(':memory:'), config),
+      config.ingestToken,
+      { passwordHash: config.adminPasswordHash, sessionSecret: config.sessionSecret },
+      { recordingsDir: dir },
+    );
+
+  const rec = (app: ReturnType<typeof setup>, path = '') =>
+    app.fetch(new Request(`http://local/api/recordings${path}`, { headers: { cookie: cookie() } }));
+
+  it('列出哪几次发射有录音', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'openheard-rec-'));
+    writeFileSync(join(dir, 'a1.wav'), 'RIFF');
+    writeFileSync(join(dir, 'a2.wav'), 'RIFF');
+    writeFileSync(join(dir, '说明.txt'), '不是录音');
+
+    const body = (await (await rec(withRec(dir))).json()) as string[];
+
+    assert.deepEqual(body.sort(), ['a1', 'a2']);
+  });
+
+  it('放得出音频，带 content-type 和长度', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'openheard-rec-'));
+    writeFileSync(join(dir, 'a1.wav'), 'RIFFxxxx');
+
+    const res = await rec(withRec(dir), '/a1');
+
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'audio/wav');
+    assert.equal(res.headers.get('content-length'), '8');
+    assert.equal(await res.text(), 'RIFFxxxx');
+  });
+
+  it('没有那一条回 404，没配模拟守听也回 404', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'openheard-rec-'));
+    assert.equal((await rec(withRec(dir), '/没有这条')).status, 400);
+    assert.equal((await rec(withRec(dir), '/a9')).status, 404);
+    assert.equal((await rec(withRec(undefined), '/a1')).status, 404);
+    assert.deepEqual(await (await rec(withRec(undefined))).json(), []);
+  });
+
+  // id 直接拼进路径，跑出录音目录就等于把机器上任意文件发出去。
+  it('id 里的路径符号一律挡掉', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'openheard-rec-'));
+    for (const bad of ['/..%2f..%2fetc%2fpasswd', '/a%2f..%2f..%2fetc%2fpasswd', '/.']) {
+      const res = await rec(withRec(dir), bad);
+      assert.ok(res.status === 400 || res.status === 404, `${bad} -> ${res.status}`);
+    }
+  });
+
+  it('录音要会话，公开面拿不到', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'openheard-rec-'));
+    writeFileSync(join(dir, 'a1.wav'), 'RIFF');
+    const app = withRec(dir);
+    assert.equal((await app.fetch(new Request('http://local/api/recordings/a1'))).status, 401);
+    assert.equal((await app.fetch(new Request('http://local/public/recordings/a1'))).status, 404);
   });
 });
 

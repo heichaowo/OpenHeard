@@ -9,6 +9,7 @@ const m = vi.hoisted(() => ({
   station: vi.fn(),
   pending: vi.fn(),
   qsos: vi.fn(),
+  recordings: vi.fn(),
   editQso: vi.fn(),
   promote: vi.fn(),
   ignore: vi.fn(),
@@ -68,6 +69,7 @@ beforeEach(() => {
   m.station.mockResolvedValue({ station: {}, channels: [] })
   m.pending.mockResolvedValue([])
   m.qsos.mockResolvedValue([qso('q1', 'BD7KLO')])
+  m.recordings.mockResolvedValue([])
   m.editQso.mockResolvedValue(qso('q1', 'BD7KLO'))
 })
 

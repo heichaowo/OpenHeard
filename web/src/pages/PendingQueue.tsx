@@ -30,6 +30,7 @@ const originOf = (row: PendingRow) => {
 
 function ActivityTable({ activities }: { activities: Activity[] }) {
   const time = useTime()
+  const { recordings } = useStore()
   const columns: TableColumnsType<Activity> = [
     // 外层表头写了时区，这张展开表也要写，否则两个时间看着像不同口径。
     { title: `时间 ${time.label}`, dataIndex: 'startAt', render: time.at, width: 220 },
@@ -38,6 +39,23 @@ function ActivityTable({ activities }: { activities: Activity[] }) {
       dataIndex: 'durationS',
       render: (s: number) => `${s.toFixed(1)} 秒`,
       width: 100,
+    },
+    {
+      // 模拟 FM 空中不带身份信息，对方呼号只能靠回忆。能听回去才填得准。
+      title: '录音',
+      key: 'audio',
+      width: 260,
+      render: (_, row) =>
+        recordings.has(row.id) ? (
+          <audio
+            controls
+            preload="none"
+            src={`/api/recordings/${encodeURIComponent(row.id)}`}
+            style={{ height: 32, maxWidth: 240 }}
+          />
+        ) : (
+          <Typography.Text type="secondary">没有</Typography.Text>
+        ),
     },
     {
       title: '发射方',

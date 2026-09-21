@@ -104,6 +104,8 @@ export const api = {
   logout: () => call<{ signedIn: boolean }>('/session', { method: 'DELETE' }),
 
   ops: () => call<Ops>('/ops'),
+  /** 哪几次发射有录音。界面据此决定给哪几行放播放器。 */
+  recordings: () => call<string[]>('/recordings'),
   station: () => call<{ station: StationDefaults; channels: Channel[] }>('/station'),
   pending: () => call<PendingItem[]>('/pending'),
   qsos: () => call<Qso[]>('/qsos'),

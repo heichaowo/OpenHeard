@@ -26,7 +26,7 @@ if (result.ok) {
       passwordHash: result.config.adminPasswordHash,
       sessionSecret: result.config.sessionSecret,
     },
-    { webDist },
+    { webDist, recordingsDir: result.config.recordingsDir },
   );
   console.log(existsSync(webDist) ? `管理端界面：${webDist}` : `没有管理端界面，跑 npm run build --prefix web`);
 } else {

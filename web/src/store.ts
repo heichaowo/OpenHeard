@@ -8,6 +8,8 @@ export interface Store {
   channels: Channel[]
   pending: PendingRow[]
   qsos: Qso[]
+  /** 有录音的那几次发射的 id。 */
+  recordings: Set<string>
   /** 首次加载还没回来。 */
   loading: boolean
   /** 连不上后端或后端报错时的说明，正常是 undefined。 */

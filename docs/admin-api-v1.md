@@ -107,6 +107,17 @@ curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
 
 呼号入库前统一去空格转大写。时间一律 Unix 秒 UTC，界面显示的时区可选，接口不受影响。
 
+## 录音
+
+| 方法和路径 | 响应 |
+|---|---|
+| `GET /api/recordings` | `string[]`，有录音的那几次发射的 id |
+| `GET /api/recordings/:id` | `audio/wav`，没有回 `404` |
+
+守护进程把模拟侧每次静噪开启存成 `<activity id>.wav`，目录是配置里 `analog.recordingsDir`。模拟 FM 空中不带身份信息，对方呼号只能靠人回忆，所以确认的时候要能听回去。
+
+要会话。这是本台信道上的音频，不进公开面。列表那条存在是为了让界面知道该给哪几行放播放器，不必挨个探一次 404。
+
 ## 运维
 
 | 方法和路径 | 响应 |
@@ -253,6 +264,22 @@ contact came from, and correcting a mistyped report should not cost that link.
 Callsigns are stripped of spaces and upper-cased before storage. Times are
 Unix seconds UTC throughout; the display timezone is the operator's choice and
 does not reach the API.
+
+## Recordings
+
+| Method and path | Response |
+|---|---|
+| `GET /api/recordings` | `string[]`, the ids of transmissions that have audio |
+| `GET /api/recordings/:id` | `audio/wav`, or `404` |
+
+The daemon writes each analog squelch opening to `<activity id>.wav` under
+`analog.recordingsDir`. Analog FM carries no identity, so the far station's
+callsign comes from the operator's memory — being able to listen again is what
+makes that accurate.
+
+Both need a session. This is audio off our own channel and does not reach the
+public face. The list exists so the UI knows which rows get a player without
+probing each one for a 404.
 
 ## Operations
 

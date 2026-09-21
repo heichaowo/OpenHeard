@@ -33,6 +33,15 @@ export interface Config {
   station: StationDefaults;
   channels: Channel[];
   queries: Query[];
+  /**
+   * 模拟侧每次发射的音频落在哪里。守护进程写，api 读着发出去。
+   *
+   * 这一项本来是守护进程那半边的（在 analog 里），api 也读它，因为两边共用
+   * 同一份配置文件，而且按规范这两个进程跑在同一台机器上。
+   */
+  recordingsDir?: string;
+  /** 配置文件自己的路径。写设置的时候要写回这里。 */
+  path: string;
 }
 
 export type ConfigResult =
@@ -95,6 +104,16 @@ export function loadConfig(path: string): ConfigResult {
       // api/ 起的服务和你在仓库根手敲的备份命令会指向两个不同的文件。
       dbPath: resolve(dirname(path), raw.dbPath as string),
       host: typeof raw.host === 'string' ? raw.host : '127.0.0.1',
+      recordingsDir: recordingsDirOf(raw, path),
+      path: resolve(path),
     },
   };
+}
+
+/** analog.recordingsDir，缺省和守护进程那边同一个值。没有 analog 段就没有录音。 */
+function recordingsDirOf(raw: Record<string, unknown>, path: string): string | undefined {
+  const a = raw.analog;
+  if (!isObject(a)) return undefined;
+  const dir = typeof a.recordingsDir === 'string' ? a.recordingsDir : './recordings';
+  return resolve(dirname(path), dir);
 }

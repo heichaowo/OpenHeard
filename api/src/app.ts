@@ -8,6 +8,7 @@ import { COOKIE, SESSION_DAYS, signSession, verifyPassword, verifySession } from
 import type { QsoDraft } from './core.ts';
 import type { IngestRow, PollLog } from './db.ts';
 import { publicRoutes } from './public.ts';
+import { recordingRoutes } from './recordings.ts';
 import { StoreError } from './store.ts';
 import { createThrottle } from './throttle.ts';
 import type { Store } from './store.ts';
@@ -31,6 +32,8 @@ export function createApp(
     loginThrottle?: ReturnType<typeof createThrottle>;
     /** 管理端 SPA 的构建产物目录。给了就在根路径上把它发出去。 */
     webDist?: string;
+    /** 模拟侧录音的目录。 */
+    recordingsDir?: string;
   } = {},
 ) {
   const nowS = () => Math.floor(Date.now() / 1000);
@@ -145,6 +148,8 @@ export function createApp(
       }
     })
 
+    .route('/recordings', recordingRoutes(options.recordingsDir))
+
     .delete('/qsos/:id', (c) => {
       try {
         store.removeQso(c.req.param('id'));
@@ -164,6 +169,8 @@ export function createApp(
       console.error('没接住的异常:', e);
       return c.json({ error: '服务端出错了，看 api.err.log' }, 500);
     })
+    // 没匹配上的路由也回 JSON。前端按 JSON 解，拿到纯文本只会得到一句看不懂的话。
+    .notFound((c) => c.json({ error: '没有这个接口' }, 404))
     // 健康检查不要会话，否则一行 curl 的外部监控就用不上它。
     // 只回 ok 和原因，计数、路径和磁盘留在 /api/ops 后面。
     .get('/health', (c) => {
