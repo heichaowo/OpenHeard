@@ -112,7 +112,8 @@ export function createStore(db: DatabaseSync, config: Config) {
       const problems = checkSettings(next);
       if (problems.length > 0) throw new StoreError(422, problems.join('，'));
       writeSettings(config, next as Settings);
-      return settingsOf(config, (next as Settings).analog ?? config.analog);
+      // 用写完之后的 config，不要用请求体拼。拼出来的会掩盖没落盘的字段。
+      return settingsOf(config, config.analog);
     },
 
     pending: (): PendingItem[] =>

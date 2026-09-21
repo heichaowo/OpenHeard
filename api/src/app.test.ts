@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { createApp, createBrokenApp } from './app.ts';
 import { COOKIE, SESSION_DAYS, hashPassword, signSession } from './auth.ts';
+import { loadConfig } from './config.ts';
 import type { Config } from './config.ts';
 import type { Activity, Qso } from './core.ts';
 import { insertActivities, openDb } from './db.ts';
@@ -576,6 +577,99 @@ describe('没接住的异常', () => {
     assert.equal(res.status, 500);
     assert.equal(res.headers.get('content-type')?.includes('application/json'), true);
     assert.ok(((await res.json()) as { error?: string }).error);
+  });
+});
+
+// 写完之后再读一次，必须是新值。漏掉一个字段的话，文件和电台都换了，
+// 而设置页还显示旧的那个，看起来就像「改了没生效」。
+describe('设置读写', () => {
+  const onDisk = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'openheard-cfg-'));
+    const path = join(dir, 'openheard.config.json');
+    writeFileSync(
+      path,
+      JSON.stringify({
+        dbPath: ':memory:',
+        dmrId: 4616460,
+        clusterGapS: 120,
+        pendingWindowDays: 7,
+        activityRetentionDays: 90,
+        ingestToken: config.ingestToken,
+        adminPasswordHash: config.adminPasswordHash,
+        sessionSecret: config.sessionSecret,
+        station: { myCallsign: 'BG0CG' },
+        channels: [],
+        analog: { freqMhz: 438.7, channel: '438.700 直频', myUnitId: '6460', recordingsDir: './rec' },
+        queries: [
+          {
+            key: 'dst:46001',
+            rule: { id: 'DestinationID', operator: 'equal', value: 46001 },
+            amount: 200,
+            intervalS: 900,
+          },
+        ],
+      }),
+      { mode: 0o600 },
+    );
+    const r = loadConfig(path);
+    assert.ok(r.ok);
+    return createApp(createStore(openDb(':memory:'), r.config), config.ingestToken, {
+      passwordHash: config.adminPasswordHash,
+      sessionSecret: config.sessionSecret,
+    });
+  };
+
+  it('改完之后 GET 回来的是新值，不是启动时那份', async () => {
+    const app = onDisk();
+    const before = (await (await get(app, '/api/settings')).json()) as {
+      analog: { freqMhz: number };
+    };
+    assert.equal(before.analog.freqMhz, 438.7);
+
+    const put = await send(app, 'PUT', '/api/settings', {
+      ...before,
+      analog: { ...before.analog, freqMhz: 439.525, channel: '439.525 中继' },
+    });
+    assert.equal(put.status, 200);
+    assert.equal(((await put.json()) as { analog: { freqMhz: number } }).analog.freqMhz, 439.525);
+
+    const after = (await (await get(app, '/api/settings')).json()) as {
+      analog: { freqMhz: number; channel: string };
+    };
+    assert.equal(after.analog.freqMhz, 439.525);
+    assert.equal(after.analog.channel, '439.525 中继');
+  });
+
+  it('本台和信道也一样，改完立刻读得到', async () => {
+    const app = onDisk();
+    const s = (await (await get(app, '/api/settings')).json()) as Record<string, unknown>;
+
+    await send(app, 'PUT', '/api/settings', {
+      ...s,
+      station: { myCallsign: 'BG0CG', myQth: '都江堰' },
+      channels: [{ name: '145.500 直频', freqMhz: 145.5, mode: 'FM' }],
+    });
+
+    const after = (await (await get(app, '/api/settings')).json()) as {
+      station: { myQth: string };
+      channels: unknown[];
+    };
+    assert.equal(after.station.myQth, '都江堰');
+    assert.equal(after.channels.length, 1);
+    // 本台信息是从 /station 读的，那条也要跟着变
+    const st = (await (await get(app, '/api/station')).json()) as { station: { myQth: string } };
+    assert.equal(st.station.myQth, '都江堰');
+  });
+
+  it('乱填不落盘，原来的值还在', async () => {
+    const app = onDisk();
+    const s = (await (await get(app, '/api/settings')).json()) as Record<string, unknown>;
+
+    const bad = await send(app, 'PUT', '/api/settings', { ...s, analog: { freqMhz: 100, channel: 'x' } });
+    assert.equal(bad.status, 422);
+
+    const after = (await (await get(app, '/api/settings')).json()) as { analog: { freqMhz: number } };
+    assert.equal(after.analog.freqMhz, 438.7);
   });
 });
 

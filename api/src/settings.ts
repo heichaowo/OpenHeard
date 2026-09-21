@@ -1,6 +1,7 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { checkQueries } from './core.ts';
 import type { Channel, StationDefaults } from './core.ts';
+import { loadConfig } from './config.ts';
 import type { Config, Query } from './config.ts';
 
 /**
@@ -105,7 +106,17 @@ export function writeSettings(config: Config, next: Settings): void {
   renameSync(tmp, config.path);
 
   // 内存里这份是 createStore 按引用拿着的，就地改它，接口立刻反映新值。
-  config.station = next.station;
-  config.channels = next.channels;
-  config.queries = next.queries;
+  //
+  // 重新读一遍文件，而不是逐个字段往回抄。逐个抄的话漏一个就长期不一致：
+  // analog 就漏过，结果文件和电台都换了频率，而设置页还显示旧的那个，
+  // 看起来像「改了没生效」。重读一遍，漏不掉。
+  const fresh = loadConfig(config.path);
+  if (!fresh.ok) {
+    // 刚写出去的东西自己读不回来，说明写坏了，这时候该吵。
+    throw new Error(`写完的配置读不回来：${fresh.problems.join('，')}`);
+  }
+  config.station = fresh.config.station;
+  config.channels = fresh.config.channels;
+  config.queries = fresh.config.queries;
+  config.analog = fresh.config.analog;
 }
