@@ -18,7 +18,7 @@
 | `sessionSecret` | 是 | 会话签名密钥，至少 32 字符。换掉它，已发出的会话立刻失效 |
 | `ingestToken` | 是 | 采集入口的 Bearer token，至少 16 字符 |
 | `dmrId` | 是 | 本台在 radioid.net 的 7 位 ID。数字侧靠它判断一次发射是不是本台 |
-| `clusterGapS` | 是 | 聚类间隔阈值，秒。**没有缺省值**，这个数要来自对真实流量的实测 |
+| `clusterGapS` | 是 | 聚类间隔阈值，秒。**没有缺省值**，这个数要来自对真实流量的实测。46001 组实测 p90 是 102 秒，取 120 秒 |
 | `pendingWindowDays` | 是 | 待确认队列只看这么多天内的发射 |
 | `activityRetentionDays` | 是 | `activity` 的保留期。`qso` 不裁 |
 | `station` | 是 | 本台信息，见下 |
@@ -103,7 +103,7 @@ loop nobody can see.
 | `sessionSecret` | yes | Session signing key, at least 32 characters. Changing it invalidates every issued session |
 | `ingestToken` | yes | Bearer token for ingest, at least 16 characters |
 | `dmrId` | yes | Our 7-digit radioid.net ID. The digital side decides `mine` from it |
-| `clusterGapS` | yes | Clustering gap threshold in seconds. **No default**, because the number has to come from measuring real traffic |
+| `clusterGapS` | yes | Clustering gap threshold in seconds. **No default**, because the number has to come from measuring real traffic. Measured on talkgroup 46001, p90 is 102 seconds, so 120 |
 | `pendingWindowDays` | yes | How far back the pending queue looks |
 | `activityRetentionDays` | yes | How long `activity` is kept. `qso` is never pruned |
 | `station` | yes | Our own station, below |

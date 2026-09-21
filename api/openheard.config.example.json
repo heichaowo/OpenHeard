@@ -3,7 +3,7 @@
 
   "dmrId": 4600000,
 
-  "//clusterGapS": "间隔阈值，秒。这个值要来自对真实流量的实测，下面这个是占位，还没有依据。",
+  "//clusterGapS": "间隔阈值，秒。实测 BrandMeister 46001 组 9636 个静默间隔：p50 10 秒，p75 36 秒，p90 102 秒，p95 177 秒。取 120 秒，约 8% 的相邻发射会被切成两段。",
   "clusterGapS": 120,
 
   "pendingWindowDays": 7,

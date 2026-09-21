@@ -14,7 +14,7 @@
 
 两条采集线都在真信号上验过。BrandMeister 那条一次取回 200 行入库并聚成对话。模拟那条在 438.700 上把每次按下 PTT 切成事件，并靠 MDC-1200 认出本台。
 
-还差两样。聚类的间隔阈值要用真实流量实测，现在是占位数。公开展示页对外怎么落地没有方案，主机在国内而 `bg0cg.ampr.org` 无法备案。
+聚类的间隔阈值已经有实测依据，46001 组 9636 个静默间隔的 p90 是 102 秒，取 120 秒。还差一样，公开展示页对外怎么落地没有方案，主机在国内而 `bg0cg.ampr.org` 无法备案。
 
 设计规范在 `specs/openheard.md`，只写约束代码的内容。接口文档在 `docs/`，分管理端、公开端、采集三篇，另有配置和部署各一篇。场地数据和调研过程不放在仓库里。
 
@@ -91,10 +91,10 @@ pulls 200 rows into the database and clusters them into conversations; the
 analog one turns each key-up on 438.700 into an event and recognises our own
 station from its MDC-1200 burst.
 
-Two things are still open. The clustering gap threshold needs measuring
-against real traffic and is a placeholder today. And there is no plan yet for
-where the public page is served from, since the host is in China and
-`bg0cg.ampr.org` cannot get an ICP filing.
+The clustering gap threshold now has a measurement behind it: over 9636
+silence gaps on talkgroup 46001, p90 is 102 seconds, so it is set to 120. One thing is still open. There is no plan yet for where the public page is
+served from, since the host is in China and `bg0cg.ampr.org` cannot get an ICP
+filing.
 
 The spec is in `specs/openheard.md` and covers only what constrains the code.
 The API docs are in `docs/`, one file each for the admin, public and ingest
