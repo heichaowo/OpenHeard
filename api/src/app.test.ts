@@ -800,6 +800,17 @@ describe('管理端界面', () => {
   });
 
   // 前端是单页应用，/log 这种路由只有浏览器知道，服务端一律回首页。
+  // 首页里写死了带散列的资源名。浏览器把它缓存住的话，升级之后还会去取旧的
+  // 那一份，人看到的是上一版界面，而且会以为新功能根本没做出来。
+  it('首页不缓存，assets 长期缓存', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'openheard-web-'));
+    writeFileSync(join(dir, 'index.html'), '<!doctype html><title>OpenHeard</title>');
+    const app = withWeb(dir);
+
+    const page = await app.fetch(new Request('http://local/log'));
+    assert.equal(page.headers.get('cache-control'), 'no-store');
+  });
+
   it('有构建产物时任意路径都回首页，接口不受影响', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'openheard-web-'));
     writeFileSync(join(dir, 'index.html'), '<!doctype html><title>OpenHeard</title>');

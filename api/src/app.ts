@@ -211,10 +211,22 @@ export function createApp(
   const dist = options.webDist;
   if (dist !== undefined && existsSync(join(dist, 'index.html'))) {
     const index = join(dist, 'index.html');
+    // assets 下的文件名带内容散列，改了就是另一个名字，可以放心长期缓存。
+    app.use('/assets/*', async (c, next) => {
+      await next();
+      c.header('cache-control', 'public, max-age=31536000, immutable');
+    });
     app.use('/assets/*', serveStatic({ root: dist }));
     app.get('/favicon.svg', serveStatic({ root: dist }));
     // 前端是单页应用，/log、/ops 这些路由只有浏览器知道，服务端一律回首页。
-    app.get('*', (c) => c.html(readFileSync(index, 'utf8')));
+    //
+    // 首页必须不缓存。它里面写死了那几个带散列的文件名，浏览器把它缓存住的话，
+    // 升级之后还会去取旧的那一份，于是人看到的是上一版界面，而且会以为新功能
+    // 根本没做出来。
+    app.get('*', (c) => {
+      c.header('cache-control', 'no-store');
+      return c.html(readFileSync(index, 'utf8'));
+    });
   }
 
   return app;
