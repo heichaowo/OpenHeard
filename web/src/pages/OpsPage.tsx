@@ -142,7 +142,8 @@ export default function OpsPage() {
               />
             )}
 
-            <div className="stat-row" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
+            {/* 列数交给 CSS，写成行内样式的话媒体查询永远赢不了它。 */}
+            <div className="stat-row stat-row-4">
               <Card size="small">
                 <Statistic title="采集到的发射" value={ops.health.activityCount} />
               </Card>

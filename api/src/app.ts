@@ -119,6 +119,14 @@ export function createApp(
       }
     })
 
+    .post('/pending/ignore', async (c) => {
+      const { clusterIds } = (await c.req.json()) as { clusterIds?: unknown };
+      if (!Array.isArray(clusterIds) || clusterIds.some((x) => typeof x !== 'string')) {
+        return c.json({ error: 'clusterIds 要是字符串数组' }, 422);
+      }
+      return c.json(store.ignoreMany(clusterIds as string[]));
+    })
+
     .delete('/pending/:clusterId', (c) => {
       try {
         store.ignore(c.req.param('clusterId'));

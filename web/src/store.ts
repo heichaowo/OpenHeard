@@ -18,6 +18,8 @@ export interface Store {
   /** 下面这些都会打到后端，失败时抛 ApiError，调用方负责显示。 */
   promote: (clusterId: string, draft: QsoDraft) => Promise<void>
   ignore: (clusterId: string) => Promise<void>
+  /** 一次忽略好几段。一条一条调的话，剩下那些段的 id 会变，后面全会 409。 */
+  ignoreMany: (clusterIds: string[]) => Promise<{ ignored: number; missing: string[] }>
   addQso: (draft: QsoDraft) => Promise<void>
   /** 改一条已入库的。id、创建时间和来源聚类不动。 */
   editQso: (id: string, draft: QsoDraft) => Promise<void>

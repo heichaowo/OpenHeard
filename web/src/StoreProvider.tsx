@@ -91,6 +91,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await api.ignore(clusterId)
         await refresh()
       },
+      ignoreMany: async (clusterIds) => {
+        const r = await api.ignoreMany(clusterIds)
+        await refresh()
+        return r
+      },
       addQso: async (draft) => {
         await api.addQso(draft)
         await refresh()

@@ -188,7 +188,7 @@ export default function QuickEntry() {
           />
         </Form.Item>
 
-        <Space>
+        <Space wrap>
           <Form.Item
             name="freqMhz"
             label="频率 MHz"
@@ -207,7 +207,7 @@ export default function QuickEntry() {
           </Form.Item>
         </Space>
 
-        <Space>
+        <Space wrap>
           <Form.Item name="rstSent" label="发出报告" rules={[{ required: true }]}>
             <Input style={{ width: 100 }} />
           </Form.Item>
@@ -216,7 +216,7 @@ export default function QuickEntry() {
           </Form.Item>
         </Space>
 
-        <Space>
+        <Space wrap>
           <Form.Item name="gridsquare" label="对方网格">
             <Input style={{ width: 100 }} placeholder="OM24" />
           </Form.Item>
@@ -243,7 +243,7 @@ export default function QuickEntry() {
         <Form.Item name="myAntenna" label="天线">
           <Input />
         </Form.Item>
-        <Space>
+        <Space wrap>
           <Form.Item name="myPower" label="功率">
             <Input style={{ width: 100 }} />
           </Form.Item>

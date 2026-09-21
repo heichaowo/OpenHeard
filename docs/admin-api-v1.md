@@ -48,6 +48,7 @@
 | `GET /api/pending` | 无 | `PendingItem[]` |
 | `POST /api/pending/:clusterId/promote` | `QsoDraft` | `Qso`，或 `409`、`422` |
 | `DELETE /api/pending/:clusterId` | 无 | `204`，或 `409` |
+| `POST /api/pending/ignore` | `{clusterIds: string[]}` | `{ignored, missing}` |
 
 `PendingItem` 是 `{cluster, draft}`。`cluster` 是按信道和间隔阈值算出来的一段对话，不入库，每次请求重算。`draft` 是机器能预填的部分。
 
@@ -211,6 +212,7 @@ table behind the quick-entry channel picker.
 | `GET /api/pending` | none | `PendingItem[]` |
 | `POST /api/pending/:clusterId/promote` | `QsoDraft` | `Qso`, or `409`, `422` |
 | `DELETE /api/pending/:clusterId` | none | `204`, or `409` |
+| `POST /api/pending/ignore` | `{clusterIds: string[]}` | `{ignored, missing}` |
 
 A `PendingItem` is `{cluster, draft}`. The cluster is a conversation derived
 from the channel and the gap threshold; it is not stored and is recomputed per

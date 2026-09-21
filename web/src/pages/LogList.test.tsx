@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Qso } from '@core'
 import { Preferences } from '../Preferences'
+import { setViewportWidth } from '../testSetup'
 import { StoreContext } from '../store'
 import type { Store } from '../store'
 import { ZONE_KEY } from '../theme'
@@ -35,6 +36,7 @@ const store = (qsos: Qso[]): Store => ({
   error: undefined,
   promote: vi.fn(),
   ignore: vi.fn(),
+  ignoreMany: vi.fn(),
   addQso: vi.fn(),
   editQso,
   removeQso,
@@ -64,6 +66,23 @@ beforeEach(() => {
 })
 
 // 记录是 Unix 秒 UTC，显示按选定的时区。同一行在两个时区里是两串字。
+// 手机上是一条一张卡，不是那张要横滚的表。这一页在楼下是拿手机看的。
+describe('LogList 在手机上', () => {
+  it('窄屏出卡片，不出表格，编辑和删除都在一屏里', () => {
+    setViewportWidth(375)
+    try {
+      mount([qso({ qth: '深圳' })])
+      // 表头不该出现
+      expect(screen.queryAllByText('时间 UTC')).toHaveLength(0)
+      expect(screen.getByText('BD7KLO')).toBeInTheDocument()
+      expect(button('编辑')).toBeInTheDocument()
+      expect(button('删除')).toBeInTheDocument()
+    } finally {
+      setViewportWidth(1280)
+    }
+  })
+})
+
 describe('LogList 的时间显示', () => {
   // antd 的 Table 会把表头渲染两处（量宽度那一行和真正那一行），所以按数量断言。
   const seen = (text: string) => screen.getAllByText(text).length > 0

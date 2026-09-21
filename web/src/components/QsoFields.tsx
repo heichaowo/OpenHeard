@@ -49,7 +49,7 @@ export function QsoFields({
       >
         <Input autoFocus={autoFocus} placeholder="BD7KLO" />
       </Form.Item>
-      <Space>
+      <Space wrap>
         <Form.Item name="rstSent" label="发出报告">
           <Input style={{ width: 100 }} />
         </Form.Item>
@@ -57,7 +57,7 @@ export function QsoFields({
           <Input style={{ width: 100 }} />
         </Form.Item>
       </Space>
-      <Space>
+      <Space wrap>
         <Form.Item name="gridsquare" label="对方网格">
           <Input style={{ width: 100 }} placeholder="OM24" />
         </Form.Item>
@@ -82,7 +82,7 @@ export function QsoFields({
       <Form.Item name="myAntenna" label="天线">
         <Input />
       </Form.Item>
-      <Space>
+      <Space wrap>
         <Form.Item name="myPower" label="功率">
           <Input style={{ width: 100 }} />
         </Form.Item>

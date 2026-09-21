@@ -177,6 +177,56 @@ describe('忽略', () => {
   });
 });
 
+// 一条一条调的话，每忽略一段就重新聚类一次，剩下那些段的 id 会变，后面全 409。
+describe('一次忽略好几段', () => {
+  const start = Math.floor(Date.now() / 1000) - 3600;
+  const three = () =>
+    setup([
+      act('a1', { dmrId: MY_ID, startAt: start, talkgroup: 46001 }),
+      act('a2', { dmrId: MY_ID, startAt: start + 600, talkgroup: 46001 }),
+      act('a3', { dmrId: MY_ID, startAt: start + 1200, talkgroup: 46001 }),
+    ]);
+
+  it('三段一次忽略掉，队列空了', async () => {
+    const app = three();
+    const before = (await (await get(app, '/api/pending')).json()) as { cluster: { id: string } }[];
+    assert.equal(before.length, 3);
+
+    const res = await send(app, 'POST', '/api/pending/ignore', {
+      clusterIds: before.map((p) => p.cluster.id),
+    });
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ignored: 3, missing: [] });
+    assert.equal(((await (await get(app, '/api/pending')).json()) as unknown[]).length, 0);
+  });
+
+  it('只忽略给到的那几段，别的留着', async () => {
+    const app = three();
+    const before = (await (await get(app, '/api/pending')).json()) as { cluster: { id: string } }[];
+
+    await send(app, 'POST', '/api/pending/ignore', { clusterIds: [before[0].cluster.id] });
+
+    assert.equal(((await (await get(app, '/api/pending')).json()) as unknown[]).length, 2);
+  });
+
+  it('认不出来的 id 单独报出来，不影响别的', async () => {
+    const app = three();
+    const before = (await (await get(app, '/api/pending')).json()) as { cluster: { id: string } }[];
+
+    const res = await send(app, 'POST', '/api/pending/ignore', {
+      clusterIds: [before[0].cluster.id, '不存在'],
+    });
+
+    assert.deepEqual(await res.json(), { ignored: 1, missing: ['不存在'] });
+  });
+
+  it('传的不是字符串数组就 422', async () => {
+    assert.equal((await send(three(), 'POST', '/api/pending/ignore', { clusterIds: 'x' })).status, 422);
+    assert.equal((await send(three(), 'POST', '/api/pending/ignore', { clusterIds: [1] })).status, 422);
+  });
+});
+
 describe('手工补录', () => {
   it('呼号归一化后入库，不带 clusterId', async () => {
     const app = setup();

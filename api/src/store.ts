@@ -143,6 +143,30 @@ export function createStore(db: DatabaseSync, config: Config) {
       });
     },
 
+    /**
+     * 一次忽略好几段。
+     *
+     * 一条一条调的话，每忽略一段就要重新聚类一次，剩下那些段的边界和 id 都会变，
+     * 后面几条于是全部 409。这里在同一次聚类结果上一起解决，一个事务写完。
+     */
+    ignoreMany: (clusterIds: string[]): { ignored: number; missing: string[] } => {
+      const all = clusters();
+      const found = clusterIds
+        .map((id) => all.find((c) => c.id === id))
+        .filter((c): c is Cluster => c !== undefined);
+      const missing = clusterIds.filter((id) => !all.some((c) => c.id === id));
+
+      if (found.length > 0) {
+        const at = nowS();
+        withTx(db, () => {
+          for (const c of found) {
+            resolveActivities(db, c.activities.map((a) => a.id), null, at);
+          }
+        });
+      }
+      return { ignored: found.length, missing };
+    },
+
     // 手工录入没有任何观测，所以不带 clusterId，也不动 activity。
     addQso: (draft: QsoDraft): Qso => {
       const qso = build(draft);

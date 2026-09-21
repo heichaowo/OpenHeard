@@ -147,6 +147,12 @@ export const api = {
   ignore: (clusterId: string) =>
     call<void>(`/pending/${encodeURIComponent(clusterId)}`, { method: 'DELETE' }),
 
+  ignoreMany: (clusterIds: string[]) =>
+    call<{ ignored: number; missing: string[] }>('/pending/ignore', {
+      method: 'POST',
+      body: JSON.stringify({ clusterIds }),
+    }),
+
   addQso: (draft: QsoDraft) =>
     call<Qso>('/qsos', { method: 'POST', body: JSON.stringify(draft) }),
 

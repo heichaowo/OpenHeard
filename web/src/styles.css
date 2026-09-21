@@ -88,8 +88,14 @@ select {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  /* 手指点的目标之间要留够距离，挨着 4px 很容易点错旁边那个。 */
+  gap: 8px;
   margin-inline-start: auto;
+}
+
+.header-actions .ant-btn {
+  min-width: 40px;
+  min-height: 40px;
 }
 
 /* ---- 侧栏 ---- */
@@ -185,8 +191,14 @@ select {
   overflow: hidden;
 }
 
+/* 只管正常的数据格。展开行里是备注和改动历史，那些要能换行。 */
 .flush-card .ant-table-cell {
   white-space: nowrap;
+}
+
+.flush-card .ant-table-expanded-row .ant-table-cell {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .flush-card .ant-pagination {
@@ -226,6 +238,17 @@ select {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-block-end: 20px;
+}
+
+/* 四格那一行。列数写在这里而不是行内样式里，否则下面的媒体查询永远赢不了它。 */
+.stat-row-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .stat-row-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* ---- 杂项 ---- */
@@ -268,7 +291,8 @@ select {
   .page-head h1 {
     font-size: 21px !important;
   }
-  .stat-row {
+  .stat-row,
+  .stat-row-4 {
     grid-template-columns: 1fr;
   }
   .card-toolbar {
