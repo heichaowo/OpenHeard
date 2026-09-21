@@ -14,7 +14,8 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { errorText } from '../api'
+import { api, errorText } from '../api'
+import type { QsoChange } from '../api'
 import { confirmDiscard } from '../discard'
 import { AsyncContent } from '../components/AsyncContent'
 import { PageHeader } from '../components/PageHeader'
@@ -46,6 +47,7 @@ export default function LogList() {
   const [editing, setEditing] = useState<Qso | null>(null)
   const [saving, setSaving] = useState(false)
   const { recalledAt, onValuesChange, reset: resetRecall } = useRecall(form, qsos)
+  const [changes, setChanges] = useState<Record<string, QsoChange[]>>({})
   const time = useTime()
 
   const rows = useMemo(() => {
@@ -201,7 +203,14 @@ export default function LogList() {
         scroll={{ x: 1000 }}
         pagination={{ pageSize: 20, hideOnSinglePage: true }}
         expandable={{
-          rowExpandable: (q) => Boolean(q.note || q.myDevice),
+          // 改动历史要展开才知道有没有，所以每行都可展开。
+          onExpand: (open, q) => {
+            if (!open || changes[q.id] !== undefined) return
+            void api
+              .qsoHistory(q.id)
+              .then((h) => setChanges((m) => ({ ...m, [q.id]: h })))
+              .catch(() => setChanges((m) => ({ ...m, [q.id]: [] })))
+          },
           expandedRowRender: (q) => (
             <Space direction="vertical" size={2}>
               <Typography.Text type="secondary">
@@ -211,6 +220,20 @@ export default function LogList() {
                 {q.myHeightM === undefined ? '' : ` · 天线 ${q.myHeightM} m`}
               </Typography.Text>
               {q.note && <Typography.Text>{q.note}</Typography.Text>}
+              {changes[q.id]?.length ? (
+                <Typography.Text type="secondary">
+                  改过 {changes[q.id].length} 次，最近一次{' '}
+                  {time.at(changes[q.id][0].at)}，那之前是「
+                  {[
+                    changes[q.id][0].before.call,
+                    `${changes[q.id][0].before.rstSent}/${changes[q.id][0].before.rstRcvd}`,
+                    changes[q.id][0].before.qth,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  」
+                </Typography.Text>
+              ) : null}
             </Space>
           ),
         }}

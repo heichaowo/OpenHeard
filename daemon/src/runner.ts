@@ -1,9 +1,9 @@
-import { watchAnalog } from './analog.ts';
-import { fetchHistory } from './brandmeister.ts';
-import type { AnalogConfig, Query } from './config.ts';
-import { Ingest } from './ingest.ts';
-import type { IngestRow } from './ingest.ts';
-import { normalise } from './normalise.ts';
+import { watchAnalog } from "./analog.ts";
+import { fetchHistory } from "./brandmeister.ts";
+import type { AnalogConfig, Query } from "./config.ts";
+import { Ingest } from "./ingest.ts";
+import type { IngestRow } from "./ingest.ts";
+import { normalise } from "./normalise.ts";
 
 const nowS = () => Math.floor(Date.now() / 1000);
 
@@ -59,9 +59,20 @@ const RESTART_MS = 5000;
  * 模拟守听。每次静噪开启推一条 activity，顺带记一行 poll_log，
  * 这样运维页上看得出模拟侧还活着。
  */
-export function startAnalog(cfg: AnalogConfig, ingest: Ingest): void {
+export interface AnalogHandle {
+  /** 换频率、增益、信道名或者 unit id。停掉当前这个再按新配置开一个。 */
+  retune: (next: AnalogConfig) => void;
+}
+
+export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
+  let current = cfg;
+  let stop: (() => void) | undefined;
+  // 主动停的时候 rtl_fm 也会退出，onExit 会照样触发。不挡住的话会多开一份。
+  let deliberate = false;
+
   const spawn = () => {
-    const stop = watchAnalog(
+    const cfg = current;
+    const handle = watchAnalog(
       {
         freqHz: Math.round(cfg.freqMhz * 1e6),
         channel: cfg.channel,
@@ -73,15 +84,25 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): void {
         closeMarginDb: 7,
         minDurationS: 0.3,
         prerollS: 0.6,
-        myUnitId: cfg.myUnitId === undefined ? undefined : parseInt(cfg.myUnitId, 16),
+        myUnitId:
+          cfg.myUnitId === undefined ? undefined : parseInt(cfg.myUnitId, 16),
         recordingsDir: cfg.recordingsDir,
-        rtlFmPath: 'rtl_fm',
+        rtlFmPath: "rtl_fm",
       },
       (activity) => {
         const at = nowS();
         const started = Date.now();
         void ingest.push(
-          [{ activity, raw: JSON.stringify({ source: 'sdr-fm', channel: cfg.channel, at }) }],
+          [
+            {
+              activity,
+              raw: JSON.stringify({
+                source: "sdr-fm",
+                channel: cfg.channel,
+                at,
+              }),
+            },
+          ],
           {
             queryKey: `analog:${cfg.channel}`,
             at,
@@ -96,42 +117,86 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): void {
         );
       },
       () => {
+        if (deliberate) return;
         console.error(`rtl_fm 停了，${RESTART_MS / 1000} 秒后重开`);
         setTimeout(spawn, RESTART_MS);
       },
     );
-    process.on('SIGTERM', stop);
+    stop = handle;
+    process.on("SIGTERM", handle);
   };
+
   spawn();
+
+  return {
+    retune(next) {
+      current = next;
+      deliberate = true;
+      stop?.();
+      deliberate = false;
+      console.log(
+        `换到 ${next.freqMhz} MHz（${next.channel}），重新校准要几秒`,
+      );
+      spawn();
+    },
+  };
 }
 
 /** 每条查询一个计时器。间隔和 amount 按话务组各给各的，没有全局值。 */
-export function start(queries: Query[], dmrId: number, ingest: Ingest): void {
-  for (const q of queries) {
-    let running = false;
-    let lastDone = Date.now();
+export interface DigitalHandle {
+  /** 换话务组查询。清掉旧的计时器，按新的重开。 */
+  restart: (next: Query[]) => void;
+}
 
-    const tick = async () => {
-      if (running) return;
-      running = true;
-      try {
-        await runOnce(q, dmrId, ingest);
-        lastDone = Date.now();
-      } finally {
-        running = false;
-      }
-    };
+export function start(
+  queries: Query[],
+  dmrId: number,
+  ingest: Ingest,
+): DigitalHandle {
+  let timers: NodeJS.Timeout[] = [];
 
-    void tick();
-    setInterval(() => void tick(), q.intervalS * 1000);
+  const run = (list: Query[]) => {
+    for (const q of list) {
+      let running = false;
+      let lastDone = Date.now();
 
-    setInterval(() => {
-      const stalled = Date.now() - lastDone;
-      if (stalled > q.intervalS * WATCHDOG_FACTOR * 1000) {
-        // 无人值守时重启比挂死强。
-        console.error(`${q.key} 已经 ${Math.round(stalled / 1000)} 秒没跑完一轮，退出让守护重启`);
-        process.exit(1);
-      }
-    }, q.intervalS * 1000);
-  }
+      const tick = async () => {
+        if (running) return;
+        running = true;
+        try {
+          await runOnce(q, dmrId, ingest);
+          lastDone = Date.now();
+        } finally {
+          running = false;
+        }
+      };
+
+      void tick();
+      timers.push(setInterval(() => void tick(), q.intervalS * 1000));
+
+      timers.push(
+        setInterval(() => {
+          const stalled = Date.now() - lastDone;
+          if (stalled > q.intervalS * WATCHDOG_FACTOR * 1000) {
+            // 无人值守时重启比挂死强。
+            console.error(
+              `${q.key} 已经 ${Math.round(stalled / 1000)} 秒没跑完一轮，退出让守护重启`,
+            );
+            process.exit(1);
+          }
+        }, q.intervalS * 1000),
+      );
+    }
+  };
+
+  run(queries);
+
+  return {
+    restart(next) {
+      for (const t of timers) clearInterval(t);
+      timers = [];
+      console.log(`查询换成 ${next.map((q) => q.key).join("、") || "（空）"}`);
+      run(next);
+    },
+  };
 }

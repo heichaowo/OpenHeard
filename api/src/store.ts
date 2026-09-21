@@ -22,12 +22,15 @@ import {
   resolveActivities,
   selectPollLog,
   selectQso,
+  selectQsoHistory,
   selectQsos,
   selectUnresolvedActivities,
   updateQso,
   withTx,
 } from './db.ts';
-import type { IngestRow, PollLog } from './db.ts';
+import type { IngestRow, PollLog, QsoChange } from './db.ts';
+import { checkSettings, settingsOf, writeSettings } from './settings.ts';
+import type { Settings } from './settings.ts';
 
 const nowS = () => Math.floor(Date.now() / 1000);
 
@@ -102,6 +105,16 @@ export function createStore(db: DatabaseSync, config: Config) {
       channels: config.channels,
     }),
 
+    settings: (): Settings => settingsOf(config, config.analog),
+
+    /** 写回配置文件并就地更新内存里那份。守护进程自己盯着文件，会跟着改。 */
+    saveSettings: (next: unknown): Settings => {
+      const problems = checkSettings(next);
+      if (problems.length > 0) throw new StoreError(422, problems.join('；'));
+      writeSettings(config, next as Settings);
+      return settingsOf(config, (next as Settings).analog ?? config.analog);
+    },
+
     pending: (): PendingItem[] =>
       clusters().map((cluster) => ({
         cluster,
@@ -109,6 +122,8 @@ export function createStore(db: DatabaseSync, config: Config) {
       })),
 
     qsos: () => selectQsos(db),
+
+    qsoHistory: (id: string): QsoChange[] => selectQsoHistory(db, id),
 
     promote: (clusterId: string, draft: QsoDraft): Qso => {
       const cluster = find(clusterId);
@@ -144,12 +159,12 @@ export function createStore(db: DatabaseSync, config: Config) {
         id: existing.id,
         createdAt: existing.createdAt,
       };
-      updateQso(db, qso);
+      updateQso(db, qso, nowS());
       return qso;
     },
 
     removeQso: (id: string): void => {
-      if (!deleteQso(db, id)) throw new StoreError(404, '没有这条通联');
+      if (!deleteQso(db, id, nowS())) throw new StoreError(404, '没有这条通联');
     },
 
     // 采集端推过来的。判重在这里做，所以重复推送没有副作用。

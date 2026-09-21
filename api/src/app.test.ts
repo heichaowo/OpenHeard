@@ -263,6 +263,55 @@ describe('改一条已入库的通联', () => {
   });
 });
 
+describe('通联的改动留痕', () => {
+  const history = async (app: ReturnType<typeof setup>, id: string) =>
+    (await (await get(app, `/api/qsos/${id}/history`)).json()) as {
+      at: number;
+      action: string;
+      before: Qso;
+    }[];
+
+  it('新记录没有历史', async () => {
+    const app = setup();
+    const q = (await (await send(app, 'POST', '/api/qsos', complete)).json()) as Qso;
+    assert.deepEqual(await history(app, q.id), []);
+  });
+
+  it('每改一次留一条，存的是改之前的样子', async () => {
+    const app = setup();
+    const q = (await (await send(app, 'POST', '/api/qsos', complete)).json()) as Qso;
+
+    await send(app, 'PUT', `/api/qsos/${q.id}`, { ...q, qth: '成都' });
+    await send(app, 'PUT', `/api/qsos/${q.id}`, { ...q, qth: '都江堰' });
+
+    const h = await history(app, q.id);
+    assert.equal(h.length, 2);
+    assert.equal(h.every((x) => x.action === 'edit'), true);
+    // 最新那条在前，它记的是上一次改完的样子
+    assert.equal(h[0].before.qth, '成都');
+    assert.equal(h[1].before.qth, undefined);
+  });
+
+  // 手工补录的那条删掉就真没了，没有 activity 可以回到队列里。
+  it('删掉也留痕，还能看见删的是什么', async () => {
+    const app = setup();
+    const q = (await (await send(app, 'POST', '/api/qsos', complete)).json()) as Qso;
+
+    assert.equal((await send(app, 'DELETE', `/api/qsos/${q.id}`)).status, 204);
+
+    const h = await history(app, q.id);
+    assert.equal(h.length, 1);
+    assert.equal(h[0].action, 'delete');
+    assert.equal(h[0].before.call, 'BD7KLO');
+  });
+
+  it('删不掉的时候不留痕', async () => {
+    const app = setup();
+    assert.equal((await send(app, 'DELETE', '/api/qsos/没这条')).status, 404);
+    assert.deepEqual(await history(app, '没这条'), []);
+  });
+});
+
 describe('公开路由', () => {
   it('只读，没有写接口', async () => {
     const app = setup();

@@ -62,6 +62,7 @@
 | 方法和路径 | 请求 | 响应 |
 |---|---|---|
 | `GET /api/qsos` | 无 | `Qso[]`，按开始时间倒序 |
+| `GET /api/qsos/:id/history` | 无 | `{at, action, before}[]`，最近的在前 |
 | `POST /api/qsos` | `QsoDraft` | `Qso`，或 `422` |
 | `PUT /api/qsos/:id` | `QsoDraft` | `Qso`，或 `404`、`422` |
 | `DELETE /api/qsos/:id` | 无 | `204`，或 `404` |
@@ -105,7 +106,26 @@ curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
 
 `PUT` 改一条已经入库的。`id`、`createdAt` 和 `clusterId` 保持原样，其余整份替换。`clusterId` 从库里读，请求体里的那个不作数：它是这条记录和当初那几次发射的唯一联系，删了重录就断了，而改一个打错的报告不该把来源一起丢掉。
 
+改和删都会先把改之前那一行存进 `qso_history`，和改动同一个事务。`action` 是 `edit` 或 `delete`，`before` 是那一行当时的完整 JSON。自动来的通联删掉之后那几次发射会回到待确认队列，手工补录的删掉就只剩这一条痕迹。
+
 呼号入库前统一去空格转大写。时间一律 Unix 秒 UTC，界面显示的时区可选，接口不受影响。
+
+## 设置
+
+| 方法和路径 | 请求 | 响应 |
+|---|---|---|
+| `GET /api/settings` | 无 | `Settings` |
+| `PUT /api/settings` | `Settings` | `Settings`，或 `422` |
+
+`Settings` 是配置里人能在界面上改的那部分：`station`、`channels`、`queries`，以及 `analog` 的 `freqMhz`、`channel`、`gainDb`、`myUnitId`。
+
+改不了的留在文件里：`dbPath`、`host`、三个密钥、`recordingsDir`。它们要么一改就要重启整套，要么改错了就把自己关在门外。
+
+写入落盘，先写临时文件再 rename，然后就地更新内存里那份。只改内存的话，launchd 下次重启就悄悄变回去。文件里有密钥，权限保持 `600`，注释键和不在 `Settings` 里的字段原样保留。
+
+守护进程盯着配置文件，改了自己跟上，两个进程之间没有另一条接口。换频率大约有 5 秒听不见，`watchAnalog` 要拿 5 秒静音重算静噪基线。
+
+校验和配置文件那套是同一份，所以界面存不进去的东西，手改文件也起不来。
 
 ## 录音
 
@@ -211,6 +231,7 @@ Deleting a contact releases its transmissions back into the queue.
 | Method and path | Request | Response |
 |---|---|---|
 | `GET /api/qsos` | none | `Qso[]`, newest first |
+| `GET /api/qsos/:id/history` | none | `{at, action, before}[]`, newest first |
 | `POST /api/qsos` | `QsoDraft` | `Qso`, or `422` |
 | `PUT /api/qsos/:id` | `QsoDraft` | `Qso`, or `404` / `422` |
 | `DELETE /api/qsos/:id` | none | `204`, or `404` |
@@ -261,9 +282,42 @@ and everything else is replaced. `clusterId` is read from the stored row, not
 from the request body: it is the only link back to the transmissions the
 contact came from, and correcting a mistyped report should not cost that link.
 
+An edit or a delete first writes the previous row into `qso_history`, in the
+same transaction. `action` is `edit` or `delete` and `before` is that row's
+full JSON at the time. Deleting an automatically captured contact returns its
+transmissions to the pending queue; deleting a manual entry leaves this as the
+only trace.
+
 Callsigns are stripped of spaces and upper-cased before storage. Times are
 Unix seconds UTC throughout; the display timezone is the operator's choice and
 does not reach the API.
+
+## Settings
+
+| Method and path | Request | Response |
+|---|---|---|
+| `GET /api/settings` | none | `Settings` |
+| `PUT /api/settings` | `Settings` | `Settings`, or `422` |
+
+`Settings` is the part of the config a person edits in the UI: `station`,
+`channels`, `queries`, and `analog`'s `freqMhz`, `channel`, `gainDb` and
+`myUnitId`.
+
+The rest stays in the file: `dbPath`, `host`, the three secrets, and
+`recordingsDir`. Each either needs the whole thing restarted or locks you out
+if you get it wrong.
+
+Writes go to disk, through a temp file and a rename, and then update the
+in-memory config in place. Memory alone would silently revert on launchd's next
+restart. The file holds secrets, so it stays `600`, and comment keys and
+anything outside `Settings` are preserved.
+
+The daemon watches the config file and follows along; there is no second
+interface between the two processes. Retuning costs about five seconds of
+deafness while `watchAnalog` rebuilds its squelch baseline from fresh silence.
+
+Validation is the same code the config file goes through, so nothing the UI
+refuses would have started from a hand-edited file either.
 
 ## Recordings
 

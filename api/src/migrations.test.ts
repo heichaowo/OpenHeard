@@ -9,7 +9,7 @@ const tables = (db: DatabaseSync) =>
     { name: string }[]).map((r) => r.name);
 
 describe('migrate', () => {
-  it('空库升到最新版并建出四张表', () => {
+  it('空库升到最新版并建出五张表', () => {
     const db = new DatabaseSync(':memory:');
     const ran = migrate(db);
 
@@ -19,6 +19,7 @@ describe('migrate', () => {
       'activity',
       'poll_log',
       'qso',
+      'qso_history',
       'resolved_activity',
     ]);
   });
@@ -43,7 +44,7 @@ describe('migrate', () => {
 
     const ran = migrate(db);
 
-    assert.equal(ran.length, 1);
+    assert.equal(ran.length, MIGRATIONS.length);
     assert.equal(userVersion(db), LATEST);
     assert.equal((db.prepare('SELECT count(*) n FROM qso').get() as { n: number }).n, 1);
   });
@@ -81,7 +82,11 @@ describe('migrate', () => {
 
     const ran = migrate(db, list);
 
-    assert.deepEqual(ran.map((m) => m.version), [LATEST, LATEST + 1, LATEST + 2]);
+    assert.deepEqual(ran.map((m) => m.version), [
+      ...MIGRATIONS.map((m) => m.version),
+      LATEST + 1,
+      LATEST + 2,
+    ]);
     assert.equal(userVersion(db), LATEST + 2);
     assert.deepEqual(migrate(db, list), []);
   });

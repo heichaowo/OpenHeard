@@ -40,6 +40,8 @@ export interface Config {
    * 同一份配置文件，而且按规范这两个进程跑在同一台机器上。
    */
   recordingsDir?: string;
+  /** 模拟守听里人能改的那几项。守护进程那边还会多读 recordingsDir。 */
+  analog?: { freqMhz: number; channel: string; gainDb?: number; myUnitId?: string };
   /** 配置文件自己的路径。写设置的时候要写回这里。 */
   path: string;
 }
@@ -105,8 +107,23 @@ export function loadConfig(path: string): ConfigResult {
       dbPath: resolve(dirname(path), raw.dbPath as string),
       host: typeof raw.host === 'string' ? raw.host : '127.0.0.1',
       recordingsDir: recordingsDirOf(raw, path),
+      analog: analogOf(raw),
       path: resolve(path),
     },
+  };
+}
+
+/** analog 里人能在界面上改的那几项。校验在 daemon 那边做，这里只是读出来给界面。 */
+function analogOf(raw: Record<string, unknown>): Config['analog'] {
+  const a = raw.analog;
+  if (!isObject(a) || typeof a.freqMhz !== 'number' || typeof a.channel !== 'string') {
+    return undefined;
+  }
+  return {
+    freqMhz: a.freqMhz,
+    channel: a.channel,
+    gainDb: typeof a.gainDb === 'number' ? a.gainDb : undefined,
+    myUnitId: typeof a.myUnitId === 'string' ? a.myUnitId : typeof a.unitId === 'string' ? a.unitId : undefined,
   };
 }
 

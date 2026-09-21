@@ -7,6 +7,7 @@ import { decodeMdc } from './mdc.ts';
 import { loadConfig } from './config.ts';
 import { Ingest } from './ingest.ts';
 import { normalise } from './normalise.ts';
+import { watchConfig } from './reload.ts';
 import { start, startAnalog } from './runner.ts';
 
 const { values } = parseArgs({
@@ -134,6 +135,12 @@ if (values['mdc-probe']) {
     `openheard-daemon 起来了，${queries.length} 条查询` +
       `${analog ? `，守听 ${analog.freqMhz} MHz` : '，没配模拟守听'}，推给 ${apiUrl}`,
   );
-  start(queries, dmrId, ingest);
-  if (analog) startAnalog(analog, ingest);
+  const digital = start(queries, dmrId, ingest);
+  const radio = analog ? startAnalog(analog, ingest) : undefined;
+
+  // 界面改设置时 api 把配置文件写回去，这边看着文件跟着变，不用再开一条接口。
+  watchConfig(path, result.config, {
+    queries: (q) => digital.restart(q),
+    analog: (a) => radio?.retune(a),
+  });
 }

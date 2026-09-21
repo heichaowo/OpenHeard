@@ -196,7 +196,43 @@ export function selectQso(db: DatabaseSync, id: string): Qso | undefined {
  * id、created_at 和 cluster_id 不动。cluster_id 是这条记录和当初那几次发射的
  * 唯一联系，删了重录就断了，而改一个打错的 RST 不该把来源也一起丢掉。
  */
-export function updateQso(db: DatabaseSync, q: Qso): boolean {
+/** 改之前那一行存进 qso_history。和改动同一个事务，不会只留下一半。 */
+function remember(db: DatabaseSync, id: string, action: 'edit' | 'delete', at: number): void {
+  const before = selectQso(db, id);
+  if (before === undefined) return;
+  db.prepare('INSERT INTO qso_history (qso_id, at, action, before) VALUES (?,?,?,?)').run(
+    id,
+    at,
+    action,
+    JSON.stringify(before),
+  );
+}
+
+export interface QsoChange {
+  at: number;
+  action: 'edit' | 'delete';
+  before: Qso;
+}
+
+export function selectQsoHistory(db: DatabaseSync, id: string): QsoChange[] {
+  const rows = db
+    .prepare('SELECT at, action, before FROM qso_history WHERE qso_id = ? ORDER BY at DESC, id DESC')
+    .all(id) as { at: number; action: string; before: string }[];
+  return rows.map((r) => ({
+    at: Number(r.at),
+    action: r.action as 'edit' | 'delete',
+    before: JSON.parse(r.before) as Qso,
+  }));
+}
+
+export function updateQso(db: DatabaseSync, q: Qso, at: number): boolean {
+  return withTx(db, () => {
+    remember(db, q.id, 'edit', at);
+    return updateQsoRow(db, q);
+  });
+}
+
+function updateQsoRow(db: DatabaseSync, q: Qso): boolean {
   const r = db.prepare(`
     UPDATE qso SET
       call = ?, start_at = ?, freq_mhz = ?, band = ?, mode = ?,
@@ -214,8 +250,9 @@ export function updateQso(db: DatabaseSync, q: Qso): boolean {
 }
 
 /** 删掉一条通联，并把它占住的 activity 放回待确认队列。 */
-export function deleteQso(db: DatabaseSync, id: string): boolean {
+export function deleteQso(db: DatabaseSync, id: string, at: number): boolean {
   return withTx(db, () => {
+    remember(db, id, 'delete', at);
     db.prepare('DELETE FROM resolved_activity WHERE qso_id = ?').run(id);
     return Number(db.prepare('DELETE FROM qso WHERE id = ?').run(id).changes) > 0;
   });

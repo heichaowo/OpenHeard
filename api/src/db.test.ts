@@ -124,7 +124,7 @@ describe('删掉通联', () => {
     resolveActivities(db, ['a', 'b'], 'q1', 2);
     assert.equal(selectUnresolvedActivities(db, 0, MY_ID).length, 0);
 
-    assert.equal(deleteQso(db, 'q1'), true);
+    assert.equal(deleteQso(db, 'q1', 1), true);
     assert.equal(selectQsos(db).length, 0);
     assert.deepEqual(
       selectUnresolvedActivities(db, 0, MY_ID).map((x) => x.id),
@@ -133,7 +133,7 @@ describe('删掉通联', () => {
   });
 
   it('删不存在的返回 false', () => {
-    assert.equal(deleteQso(fresh(), 'nope'), false);
+    assert.equal(deleteQso(fresh(), 'nope', 1), false);
   });
 
   it('被忽略的行不受删通联影响', () => {
@@ -142,7 +142,7 @@ describe('删掉通联', () => {
     insertQso(db, qso('q1'));
     resolveActivities(db, ['a'], 'q1', 2);
     resolveActivities(db, ['b'], null, 2);
-    deleteQso(db, 'q1');
+    deleteQso(db, 'q1', 1);
     assert.deepEqual(
       selectUnresolvedActivities(db, 0, MY_ID).map((x) => x.id),
       ['a'],

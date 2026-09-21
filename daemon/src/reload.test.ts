@@ -1,0 +1,106 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, renameSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, it } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { loadConfig } from './config.ts';
+import { watchConfig } from './reload.ts';
+import type { AnalogConfig, Query } from './config.ts';
+
+const base = {
+  dmrId: 4616460,
+  ingestToken: 'x'.repeat(32),
+  analog: { freqMhz: 438.7, channel: '438.700 直频', myUnitId: '6460' },
+  queries: [
+    {
+      key: 'dst:46001',
+      rule: { id: 'DestinationID', operator: 'equal', value: 46001 },
+      amount: 200,
+      intervalS: 900,
+    },
+  ],
+};
+
+/** api 写设置就是这么落盘的：先写临时文件再 rename。 */
+function setup(): { path: string; write: (next: unknown) => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'openheard-reload-'));
+  const path = join(dir, 'openheard.config.json');
+  writeFileSync(path, JSON.stringify(base, null, 2));
+  return {
+    path,
+    write: (next) => {
+      writeFileSync(`${path}.tmp`, JSON.stringify(next, null, 2));
+      renameSync(`${path}.tmp`, path);
+    },
+  };
+}
+
+const start = (path: string) => {
+  const r = loadConfig(path);
+  assert.ok(r.ok);
+  const seen: { queries: Query[][]; analog: AnalogConfig[] } = { queries: [], analog: [] };
+  const stop = watchConfig(path, r.config, {
+    queries: (q) => seen.queries.push(q),
+    analog: (a) => seen.analog.push(a),
+  });
+  return { seen, stop };
+};
+
+describe('watchConfig', () => {
+  it('频率改了就通知换频', async () => {
+    const { path, write } = setup();
+    const { seen, stop } = start(path);
+
+    write({ ...base, analog: { ...base.analog, freqMhz: 145.5 } });
+    await sleep(900);
+    stop();
+
+    assert.equal(seen.analog.length, 1);
+    assert.equal(seen.analog[0].freqMhz, 145.5);
+    assert.equal(seen.queries.length, 0);
+  });
+
+  it('查询改了就通知重开计时器', async () => {
+    const { path, write } = setup();
+    const { seen, stop } = start(path);
+
+    write({
+      ...base,
+      queries: [{ ...base.queries[0], key: 'dst:91', rule: { id: 'DestinationID', operator: 'equal', value: 91 } }],
+    });
+    await sleep(900);
+    stop();
+
+    assert.equal(seen.queries.length, 1);
+    assert.equal(seen.queries[0][0].key, 'dst:91');
+    assert.equal(seen.analog.length, 0);
+  });
+
+  it('没实际变化就什么都不做', async () => {
+    const { path, write } = setup();
+    const { seen, stop } = start(path);
+
+    write({ ...base });
+    await sleep(900);
+    stop();
+
+    assert.deepEqual([seen.queries.length, seen.analog.length], [0, 0]);
+  });
+
+  // 手一抖存了个半截 JSON，不该让采集停摆。这个进程一退，launchd 每 30 秒重来一次。
+  it('改坏了就留在原样接着跑', async () => {
+    const { path, write } = setup();
+    const { seen, stop } = start(path);
+
+    writeFileSync(path, '{ 这不是 JSON');
+    await sleep(900);
+    write({ ...base, analog: { ...base.analog, freqMhz: 439.525 } });
+    await sleep(900);
+    stop();
+
+    // 坏的那次没生效，后面改好的那次照常生效
+    assert.equal(seen.analog.length, 1);
+    assert.equal(seen.analog[0].freqMhz, 439.525);
+  });
+});

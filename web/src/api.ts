@@ -68,6 +68,28 @@ export function errorText(e: unknown): string {
   return String(e)
 }
 
+export interface AnalogSettings {
+  freqMhz: number
+  channel: string
+  gainDb?: number
+  /** 本台的 MDC-1200 unit ID，十六进制字符串。 */
+  myUnitId?: string
+}
+
+/** 人能在界面上改的那几项。dbPath、监听地址和三个密钥只在配置文件里改。 */
+export interface Settings {
+  station: StationDefaults
+  channels: Channel[]
+  queries: { key: string; rule: { id: string; operator: string; value: number | string }; amount: number; intervalS: number }[]
+  analog?: AnalogSettings
+}
+
+export interface QsoChange {
+  at: number
+  action: 'edit' | 'delete'
+  before: Qso
+}
+
 export interface Machine {
   rssBytes: number
   uptimeS: number
@@ -106,6 +128,12 @@ export const api = {
   ops: () => call<Ops>('/ops'),
   /** 哪几次发射有录音。界面据此决定给哪几行放播放器。 */
   recordings: () => call<string[]>('/recordings'),
+
+  settings: () => call<Settings>('/settings'),
+  saveSettings: (next: Settings) =>
+    call<Settings>('/settings', { method: 'PUT', body: JSON.stringify(next) }),
+
+  qsoHistory: (id: string) => call<QsoChange[]>(`/qsos/${encodeURIComponent(id)}/history`),
   station: () => call<{ station: StationDefaults; channels: Channel[] }>('/station'),
   pending: () => call<PendingItem[]>('/pending'),
   qsos: () => call<Qso[]>('/qsos'),

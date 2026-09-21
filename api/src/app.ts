@@ -107,6 +107,7 @@ export function createApp(
     .get('/station', (c) => c.json(store.station()))
     .get('/pending', (c) => c.json(store.pending()))
     .get('/qsos', (c) => c.json(store.qsos()))
+    .get('/qsos/:id/history', (c) => c.json(store.qsoHistory(c.req.param('id'))))
 
     .post('/pending/:clusterId/promote', async (c) => {
       try {
@@ -149,6 +150,17 @@ export function createApp(
     })
 
     .route('/recordings', recordingRoutes(options.recordingsDir))
+
+    .get('/settings', (c) => c.json(store.settings()))
+
+    .put('/settings', async (c) => {
+      try {
+        return c.json(store.saveSettings(await c.req.json()));
+      } catch (e) {
+        const { status, body } = fail(e);
+        return c.json(body, status);
+      }
+    })
 
     .delete('/qsos/:id', (c) => {
       try {
