@@ -597,7 +597,7 @@ describe('设置读写', () => {
         ingestToken: config.ingestToken,
         adminPasswordHash: config.adminPasswordHash,
         sessionSecret: config.sessionSecret,
-        station: { myCallsign: 'BG0CG' },
+        station: { myCallsign: 'BG0CG', networkFreqMhz: 439.525 },
         channels: [],
         analog: { freqMhz: 438.7, channel: '438.700 直频', myUnitId: '6460', recordingsDir: './rec' },
         queries: [
@@ -646,7 +646,7 @@ describe('设置读写', () => {
 
     await send(app, 'PUT', '/api/settings', {
       ...s,
-      station: { myCallsign: 'BG0CG', myQth: '都江堰' },
+      station: { myCallsign: 'BG0CG', myQth: '都江堰', networkFreqMhz: 439.525 },
       channels: [{ name: '145.500 直频', freqMhz: 145.5, mode: 'FM' }],
     });
 

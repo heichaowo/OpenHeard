@@ -35,7 +35,33 @@ export function checkSettings(raw: unknown): string[] {
   if (!isObject(raw)) return ['设置的顶层不是对象'];
   const problems: string[] = [];
 
-  if (!isObject(raw.station)) problems.push('station 必填');
+  if (!isObject(raw.station)) {
+    problems.push('station 必填');
+  } else {
+    const st = raw.station;
+    for (const k of ['myCallsign', 'myGridsquare', 'myQth', 'myDevice', 'myAntenna', 'myPower']) {
+      if (st[k] !== undefined && st[k] !== null && typeof st[k] !== 'string') {
+        problems.push(`station.${k} 要是文字`);
+      }
+    }
+    for (const k of ['myHeightM', 'networkFreqMhz']) {
+      if (st[k] !== undefined && st[k] !== null && typeof st[k] !== 'number') {
+        problems.push(`station.${k} 要是数字`);
+      }
+    }
+    if (typeof st.networkFreqMhz === 'number' && !inBand(st.networkFreqMhz)) {
+      problems.push('station.networkFreqMhz 要在 2m 或 70cm 段内');
+    }
+    // 网络会话没有射频频率，全靠这个数记账。缺了的话数字侧每一段都没有频率
+    // 也就没有波段，于是永远停在待确认队列里，而界面上只说「还缺波段」。
+    if (
+      Array.isArray(raw.queries) &&
+      raw.queries.length > 0 &&
+      (st.networkFreqMhz === undefined || st.networkFreqMhz === null)
+    ) {
+      problems.push('有 BrandMeister 查询就要填网络记账频率，否则数字侧的对话都缺频率和波段，确认不了');
+    }
+  }
 
   if (!Array.isArray(raw.channels)) {
     problems.push('channels 必填，可以是空数组');
@@ -92,7 +118,11 @@ export function settingsOf(config: Config, analog?: AnalogSettings): Settings {
 export function writeSettings(config: Config, next: Settings): void {
   const raw = JSON.parse(readFileSync(config.path, 'utf8')) as Record<string, unknown>;
 
-  raw.station = next.station;
+  // 表单里清空一格给的是 null，不是「没这一项」。原样写进去会让下次读出来
+  // 是个 null，而 null 和缺省的行为不一样。空的就当没填，键去掉。
+  raw.station = Object.fromEntries(
+    Object.entries(next.station).filter(([, v]) => v !== null && v !== undefined && v !== ''),
+  );
   raw.channels = next.channels;
   raw.queries = next.queries;
   if (next.analog !== undefined) {

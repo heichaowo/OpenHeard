@@ -16,7 +16,7 @@ const base = {
   ingestToken: 'x'.repeat(32),
   adminPasswordHash: 'scrypt$16384$aa$bb',
   sessionSecret: 'y'.repeat(40),
-  station: { myCallsign: 'BG0CG' },
+  station: { myCallsign: 'BG0CG', networkFreqMhz: 439.525 },
   channels: [{ name: '439.525 中继', freqMhz: 439.525, mode: 'FM' }],
   analog: { freqMhz: 438.7, channel: '438.700 直频', myUnitId: '6460', recordingsDir: './rec' },
   queries: [
@@ -49,6 +49,20 @@ function written(extra: Record<string, unknown> = {}) {
 }
 
 describe('checkSettings', () => {
+  // 网络会话没有射频频率，全靠这个数记账。缺了的话数字侧每一段都没有波段，
+  // 于是永远停在待确认队列里，而界面上只说「还缺波段」。
+  it('有查询却没填网络记账频率就拦住', () => {
+    const problems = checkSettings({ ...ok, station: { myCallsign: 'BG0CG' } });
+    assert.ok(problems.some((p) => p.includes('网络记账频率')));
+    assert.deepEqual(checkSettings({ ...ok, station: { networkFreqMhz: null } }).length > 0, true);
+  });
+
+  it('没有查询时不强求网络记账频率', () => {
+    assert.deepEqual(checkSettings({ ...ok, queries: [], station: { myCallsign: 'BG0CG' } }), [
+      'queries 必填，至少一条',
+    ]);
+  });
+
   it('好的设置没有问题', () => {
     assert.deepEqual(checkSettings(ok), []);
   });
@@ -96,7 +110,10 @@ describe('writeSettings', () => {
   it('内存里那份也就地改了，接口立刻反映新值', () => {
     const { config } = written();
 
-    writeSettings(config, { ...ok, station: { myCallsign: 'BG0CG', myQth: '都江堰' } });
+    writeSettings(config, {
+      ...ok,
+      station: { myCallsign: 'BG0CG', myQth: '都江堰', networkFreqMhz: 439.525 },
+    });
 
     assert.equal(config.station.myQth, '都江堰');
   });
