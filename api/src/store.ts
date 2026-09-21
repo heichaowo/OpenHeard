@@ -110,7 +110,7 @@ export function createStore(db: DatabaseSync, config: Config) {
     /** 写回配置文件并就地更新内存里那份。守护进程自己盯着文件，会跟着改。 */
     saveSettings: (next: unknown): Settings => {
       const problems = checkSettings(next);
-      if (problems.length > 0) throw new StoreError(422, problems.join('；'));
+      if (problems.length > 0) throw new StoreError(422, problems.join('，'));
       writeSettings(config, next as Settings);
       return settingsOf(config, (next as Settings).analog ?? config.analog);
     },
