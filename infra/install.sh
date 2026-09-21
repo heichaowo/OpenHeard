@@ -34,6 +34,9 @@ echo "== 先验配置 =="
 
 command -v rtl_fm >/dev/null || echo "提醒：PATH 里没有 rtl_fm，模拟守听会起不来"
 
+# 没有构建产物的话，连上去只有接口，浏览器打开是一片 404。
+[ -f "$REPO/web/dist/index.html" ] || echo "提醒：没有 web/dist，管理端界面发不出来。跑 npm ci --prefix web && npm run build --prefix web"
+
 # 这个脚本也是升级路径，所以先备份。qso 是人判断过的结果，重建不出来。
 echo "== 备份数据库 =="
 "$NODE" "$REPO/api/src/backup.ts" "$CONFIG" || die "备份没成，先别升"

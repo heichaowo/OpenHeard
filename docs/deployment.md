@@ -16,6 +16,7 @@ Node 24 或更高。低于 24 没有类型擦除，`api/` 和 `daemon/` 直接�
 brew install node rtl-sdr
 git clone https://github.com/heichaowo/OpenHeard.git ~/OpenHeard
 cd ~/OpenHeard && npm ci --prefix api && npm ci --prefix daemon
+npm ci --prefix web && npm run build --prefix web
 cp api/openheard.config.example.json openheard.config.json
 ```
 
@@ -71,12 +72,33 @@ sudo pmset -a sleep 0
 ```bash
 cd ~/OpenHeard && git pull
 npm ci --prefix api && npm ci --prefix daemon
+npm ci --prefix web && npm run build --prefix web
 infra/install.sh ~/OpenHeard/openheard.config.json
 ```
 
 `install.sh` 每次都先验配置、再备份、最后才装，所以升级不用额外动作。备份失败就停下来，不往下走。
 
 头一次装的时候健康检查是通过的，那时还一次都没轮询过，这不算问题。等过了最慢那条查询间隔的三倍还没轮询成功，`/health` 才开始回 503。
+
+## 从手机上用
+
+监听地址缺省是 `127.0.0.1`，所以本机之外谁都够不着。站在楼下拿手台要用手机确认通联，有两条路。
+
+**走 Tailscale。** 服务照旧只绑回环，由 Tailscale 从 tailnet 转进来，只有自己的设备连得上，而且它自己终结 TLS，会话 cookie 走的是加密链路。
+
+```bash
+tailscale serve --bg --https=8443 3000
+```
+
+之后手机上开 `https://<主机名>.<tailnet>.ts.net:8443`。`--https=443` 也行，但那个端口可能已经被这台机器上别的服务占了，`tailscale serve status` 看得到。撤掉是 `tailscale serve --https=8443 off`。
+
+**改成 `0.0.0.0`。** 这样同一个局域网上任何设备都够得着，包括登录口。登录口有限速，但那是最后一道，不是第一道。没有 Tailscale 才走这条。
+
+会话 cookie 在请求从 https 过来时带 `Secure`。Tailscale 转进来的是明文回环，所以看的是 `X-Forwarded-Proto`。
+
+## 管理端界面
+
+`api` 在根路径上发 `web/dist`，所以装之前要先构建，否则浏览器打开只有接口、一片 404。前端路由（`/log`、`/ops` 这些）由服务端一律回首页。
 
 ## 数据库
 
@@ -148,6 +170,7 @@ directly in `api/` and `daemon/` stops working.
 brew install node rtl-sdr
 git clone https://github.com/heichaowo/OpenHeard.git ~/OpenHeard
 cd ~/OpenHeard && npm ci --prefix api && npm ci --prefix daemon
+npm ci --prefix web && npm run build --prefix web
 cp api/openheard.config.example.json openheard.config.json
 ```
 
@@ -210,6 +233,7 @@ you.
 ```bash
 cd ~/OpenHeard && git pull
 npm ci --prefix api && npm ci --prefix daemon
+npm ci --prefix web && npm run build --prefix web
 infra/install.sh ~/OpenHeard/openheard.config.json
 ```
 
@@ -219,6 +243,38 @@ needs nothing extra. A failed backup stops it before anything is installed.
 On a first install the health check passes even though nothing has been polled
 yet, which is not a problem. `/health` only starts answering 503 once three
 times the slowest query interval has gone by with no successful poll.
+
+## Using it from a phone
+
+The listen address defaults to `127.0.0.1`, so nothing off the machine can
+reach it. Confirming a contact from a phone while standing outside with a
+handheld has two routes.
+
+**Tailscale.** The service stays bound to loopback and Tailscale proxies in
+from the tailnet, so only your own devices reach it, and it terminates TLS
+itself, so the session cookie travels encrypted.
+
+```bash
+tailscale serve --bg --https=8443 3000
+```
+
+Then open `https://<host>.<tailnet>.ts.net:8443` on the phone. `--https=443`
+works too, but that port may already be taken by something else on the machine;
+`tailscale serve status` shows what is there. Remove it with
+`tailscale serve --https=8443 off`.
+
+**Set `0.0.0.0`.** Anything on the same LAN can then reach it, login included.
+The login is rate limited, but that is the last line, not the first. Take this
+route only without Tailscale.
+
+The session cookie is marked `Secure` when the request arrived over https.
+Tailscale proxies in as plain loopback, so what is read is `X-Forwarded-Proto`.
+
+## The admin UI
+
+`api` serves `web/dist` at the root, so it has to be built before installing;
+otherwise a browser finds only the API and a page of 404s. Client-side routes
+(`/log`, `/ops` and the rest) are answered with the index page.
 
 ## The database
 

@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { createApp, createBrokenApp } from './app.ts';
 import { COOKIE, SESSION_DAYS, hashPassword, signSession } from './auth.ts';
@@ -523,6 +526,62 @@ describe('没接住的异常', () => {
     assert.equal(res.status, 500);
     assert.equal(res.headers.get('content-type')?.includes('application/json'), true);
     assert.ok(((await res.json()) as { error?: string }).error);
+  });
+});
+
+describe('管理端界面', () => {
+  const withWeb = (dist: string) =>
+    createApp(
+      createStore(openDb(':memory:'), config),
+      config.ingestToken,
+      { passwordHash: config.adminPasswordHash, sessionSecret: config.sessionSecret },
+      { webDist: dist },
+    );
+
+  it('没有构建产物时不影响接口', async () => {
+    const app = withWeb('/nowhere');
+    assert.equal((await app.fetch(new Request('http://local/health'))).status, 200);
+    assert.equal((await app.fetch(new Request('http://local/'))).status, 404);
+  });
+
+  // 前端是单页应用，/log 这种路由只有浏览器知道，服务端一律回首页。
+  it('有构建产物时任意路径都回首页，接口不受影响', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'openheard-web-'));
+    writeFileSync(join(dir, 'index.html'), '<!doctype html><title>OpenHeard</title>');
+    const app = withWeb(dir);
+
+    for (const path of ['/', '/log', '/ops']) {
+      const res = await app.fetch(new Request(`http://local${path}`));
+      assert.equal(res.status, 200, path);
+      assert.ok((await res.text()).includes('OpenHeard'), path);
+    }
+
+    // 接口还是接口，没被首页盖掉
+    assert.equal((await app.fetch(new Request('http://local/api/qsos'))).status, 401);
+    assert.equal((await app.fetch(new Request('http://local/health'))).status, 200);
+    assert.equal((await app.fetch(new Request('http://local/public/summary'))).status, 200);
+  });
+});
+
+describe('会话 cookie 的 Secure', () => {
+  const login = (app: ReturnType<typeof setup>, headers: Record<string, string> = {}) =>
+    app.fetch(
+      new Request('http://local/api/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...headers },
+        body: JSON.stringify({ password: 'secret' }),
+      }),
+    );
+
+  it('明文回环不带 Secure', async () => {
+    const res = await login(setup());
+    assert.equal(res.headers.get('set-cookie')?.includes('Secure'), false);
+  });
+
+  // 走 Tailscale 时 TLS 在它那里终结，到这里已经是明文回环，只能看转发头。
+  it('转发头说是 https 就带上 Secure', async () => {
+    const res = await login(setup(), { 'x-forwarded-proto': 'https' });
+    assert.equal(res.headers.get('set-cookie')?.includes('Secure'), true);
   });
 });
 

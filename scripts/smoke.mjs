@@ -128,6 +128,16 @@ try {
   const summary = await fetch(`${BASE}/public/summary`);
   check('公开 summary 不要会话', summary.status === 200 && typeof (await summary.json()).total === 'number');
 
+  // 管理端界面。构建产物在才验，CI 里 verify 先 build 再 smoke，所以是在的。
+  const { existsSync } = await import('node:fs');
+  if (existsSync(join(root, 'web/dist/index.html'))) {
+    const page = await fetch(`${BASE}/log`);
+    const html = page.status === 200 ? await page.text() : '';
+    check('前端路由回首页而不是 404', page.status === 200 && html.includes('<div id="root">'));
+  } else {
+    check('前端路由回首页而不是 404', true, '(没有 web/dist，跳过)');
+  }
+
   // 守护进程：只验坏配置那条路，正常那条一起来就打外网
   const bad = join(dir, 'bad.config.json');
   writeFileSync(bad, JSON.stringify({ dbPath: './x.db' }));

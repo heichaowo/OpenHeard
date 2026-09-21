@@ -1,4 +1,7 @@
 import { getConnInfo } from '@hono/node-server/conninfo';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { COOKIE, SESSION_DAYS, signSession, verifyPassword, verifySession } from './auth.ts';
@@ -24,7 +27,11 @@ export function createApp(
   store: Store,
   ingestToken: string,
   auth: { passwordHash: string; sessionSecret: string },
-  options: { loginThrottle?: ReturnType<typeof createThrottle> } = {},
+  options: {
+    loginThrottle?: ReturnType<typeof createThrottle>;
+    /** 管理端 SPA 的构建产物目录。给了就在根路径上把它发出去。 */
+    webDist?: string;
+  } = {},
 ) {
   const nowS = () => Math.floor(Date.now() / 1000);
   const throttle =
@@ -75,6 +82,9 @@ export function createApp(
         sameSite: 'Lax',
         path: '/',
         maxAge: SESSION_DAYS * 86400,
+        // 走 Tailscale 时前面是它在终结 TLS，请求到这里是明文回环，
+        // 所以看转发头。伪造这个头只会让伪造者自己的 cookie 存不下来。
+        secure: isHttps(c.req.header('x-forwarded-proto'), c.req.url),
       });
       return c.json({ signedIn: true });
     })
@@ -147,7 +157,7 @@ export function createApp(
 
   const api = new Hono().route('/ingest', ingest).route('/session', session).route('/', guarded);
 
-  return new Hono()
+  const app = new Hono()
     // 没接住的异常也回 JSON。带 try/catch 的路由回 {error}，而几个只读的 GET
     // 没有，掉进 Hono 默认的纯文本 500，前端按 JSON 解就会得到一句没头没脑的话。
     .onError((e, c) => {
@@ -168,6 +178,25 @@ export function createApp(
         qsos: () => store.qsos(),
       }),
     );
+
+  // 管理端界面。不发它的话，机器上只有接口，手机连过来是一片 404。
+  // 静态文件不要会话，会话挡的是它背后的接口。
+  const dist = options.webDist;
+  if (dist !== undefined && existsSync(join(dist, 'index.html'))) {
+    const index = join(dist, 'index.html');
+    app.use('/assets/*', serveStatic({ root: dist }));
+    app.get('/favicon.svg', serveStatic({ root: dist }));
+    // 前端是单页应用，/log、/ops 这些路由只有浏览器知道，服务端一律回首页。
+    app.get('*', (c) => c.html(readFileSync(index, 'utf8')));
+  }
+
+  return app;
+}
+
+/** 这次请求是不是从 https 过来的。前面可能有 Tailscale 在终结 TLS。 */
+function isHttps(forwardedProto: string | undefined, url: string): boolean {
+  if (forwardedProto !== undefined) return forwardedProto.split(',')[0].trim() === 'https';
+  return url.startsWith('https:');
 }
 
 /**
