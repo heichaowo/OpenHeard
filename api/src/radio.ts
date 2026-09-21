@@ -64,7 +64,8 @@ export function createRadioState() {
     /** 没有守听、或者报不上来时是 undefined。 */
     view(now: number): RadioView | undefined {
       if (latest === undefined) return undefined;
-      const ageS = now - latest.at;
+      // 两个进程的秒取整会差一拍，负数看着像出了错。
+      const ageS = Math.max(0, now - latest.at);
       return { ...latest, ageS, fresh: ageS <= STALE_S };
     },
   };

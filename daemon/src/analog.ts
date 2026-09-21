@@ -95,6 +95,8 @@ export interface RadioStatus {
 /** 电台状态往外报的间隔。比 50 毫秒一块稀疏得多，够看就行。 */
 const STATUS_MS = 1000;
 
+const round1 = (v: number | undefined) => (v === undefined ? undefined : Math.round(v * 10) / 10);
+
 export function watchAnalog(
   cfg: AnalogConfig,
   onEvent: (activity: Activity, audio: Buffer) => void,
@@ -168,10 +170,11 @@ export function watchAnalog(
           freqMhz: cfg.freqHz / 1e6,
           channel: cfg.channel,
           gainDb: cfg.gainDb,
-          idleDb,
-          openBelowDb: idleDb === undefined ? undefined : idleDb - cfg.openMarginDb,
-          closeAboveDb: idleDb === undefined ? undefined : idleDb - cfg.closeMarginDb,
-          noiseDb: bandEnergyDb(samples, cfg.sampleRate, NOISE_LO, NOISE_HI),
+          // 留一位小数。这是个分贝读数，后面十几位没有意义，只会让接口难读。
+          idleDb: round1(idleDb),
+          openBelowDb: idleDb === undefined ? undefined : round1(idleDb - cfg.openMarginDb),
+          closeAboveDb: idleDb === undefined ? undefined : round1(idleDb - cfg.closeMarginDb),
+          noiseDb: round1(bandEnergyDb(samples, cfg.sampleRate, NOISE_LO, NOISE_HI)),
           open: detector.isOpen,
           lastOpenAt,
           at: Math.round(Date.now() / 1000),
