@@ -50,7 +50,7 @@ cd web && npm install && npm run dev
 cd public && npm install && npm run dev
 ```
 
-`npm test` 在 `api/`、`daemon/` 和 `web/` 下各自可跑，`web/` 那个连 `core/` 的测试一起跑，界面部分用 vitest 加 jsdom。根目录的 `npm run verify` 把类型检查、测试、lint 和构建全跑一遍，CI 跑的就是这一条。
+`npm test` 在 `api/`、`daemon/` 和 `web/` 下各自可跑，`web/` 那个连 `core/` 的测试一起跑，界面部分用 vitest 加 jsdom。根目录的 `npm run verify` 把类型检查、测试、lint、构建和冒烟全跑一遍，CI 跑的就是这一条。冒烟那一步（`npm run smoke`）把真正的 `api/src/index.ts` 起到一个端口上打一遍，因为别的测试都是直接调函数，从不经过入口。
 
 装到常驻的机器上走 `infra/install.sh`，它把 `api` 和 `daemon` 做成两个 LaunchAgent，步骤见 [docs/deployment.md](docs/deployment.md)。
 
@@ -140,8 +140,10 @@ cd public && npm install && npm run dev
 
 `npm test` works in `api/`, `daemon/` and `web/`; the one in `web/` runs the
 `core/` tests too, and the UI ones under vitest with jsdom. `npm run verify` at
-the root runs typecheck, tests, lint and both builds, and is the same command
-CI runs.
+the root runs typecheck, tests, lint, both builds and the smoke test, and is
+the same command CI runs. The smoke step (`npm run smoke`) starts the real
+`api/src/index.ts` on a port and exercises it, since every other test calls
+functions directly and never goes through the entrypoint.
 
 To install on the machine it lives on, `infra/install.sh` sets `api` and
 `daemon` up as two LaunchAgents. The steps are in

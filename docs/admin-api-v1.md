@@ -27,6 +27,7 @@
 | 状态码 | 什么时候 |
 |---|---|
 | `401` | 没有会话，或者口令不对 |
+| `429` | 登录试得太频繁。一个来源五分钟内最多十次，`Retry-After` 是还要等的秒数。只有一个口令，猜中一次就是全部，而监听地址可以配到局域网 |
 | `404` | 要删的通联不存在 |
 | `409` | 段的 id 对不上。两次请求之间又入库了更早的发射，聚类边界变了，刷新后重试 |
 | `422` | 草稿还缺必填字段，`missing` 里是字段名 |
@@ -66,6 +67,41 @@
 | `DELETE /api/qsos/:id` | 无 | `204`，或 `404` |
 
 `POST` 是手工补录，写进去的记录没有 `clusterId`，也不动 `activity` 表，因为没有任何东西观测到它。
+`Qso` 和 `QsoDraft` 只差几个必填项，草稿允许缺字段，缺了会回 `422` 并在 `missing` 里点名。一条完整的记录长这样：
+
+```json
+{
+  "id": "251c7bd8-5753-4339-a155-841bb96bfccf",
+  "call": "BD7KLO",
+  "startAt": 1789465773,
+  "freqMhz": 439.525,
+  "band": "70cm",
+  "mode": "FM",
+  "rstSent": "59",
+  "rstRcvd": "59",
+  "gridsquare": "OL72",
+  "qth": "深圳",
+  "myGridsquare": "OM24",
+  "myQth": "成都",
+  "myDevice": "Quansheng UV-K6",
+  "myAntenna": "Nagoya NA-771",
+  "myPower": "5W",
+  "myHeightM": 30,
+  "note": "中继信号很好",
+  "clusterId": "a3",
+  "createdAt": 1789465800
+}
+```
+
+`id`、`createdAt` 和 `clusterId` 由服务端定，请求体里带了也不作数。手工补录只要必填的那几项：
+
+```bash
+curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
+  -H 'content-type: application/json' \
+  -d '{"call":"BD7KLO","startAt":1789465773,"freqMhz":439.525,
+       "band":"70cm","mode":"FM","rstSent":"59","rstRcvd":"59"}'
+```
+
 
 `PUT` 改一条已经入库的。`id`、`createdAt` 和 `clusterId` 保持原样，其余整份替换。`clusterId` 从库里读，请求体里的那个不作数：它是这条记录和当初那几次发射的唯一联系，删了重录就断了，而改一个打错的报告不该把来源一起丢掉。
 
@@ -107,7 +143,7 @@ Ingest carries its own bearer token and ignores the session. See the
 | Method and path | Request | Response |
 |---|---|---|
 | `GET /api/session` | none | `{"signedIn": boolean}` |
-| `POST /api/session` | `{"password": string}` | `{"signedIn": true}` and a cookie; a wrong password gives `401` and no cookie |
+| `POST /api/session` | `{"password": string}` | `{"signedIn": true}` and a cookie; a wrong password gives `401` and no cookie; too many attempts give `429` |
 | `DELETE /api/session` | none | `{"signedIn": false}` and clears the cookie |
 
 The password is stored as an scrypt hash in `adminPasswordHash`. See
@@ -115,12 +151,14 @@ The password is stored as an scrypt hash in `adminPasswordHash`. See
 
 ## Errors
 
-Failures are `{"error": string}`. A `422` also carries `missing`, naming the
-fields that are still absent.
+Failures are `{"error": string}`, including anything uncaught — no route falls
+through to a plain-text body. A `422` also carries `missing`, naming the fields
+that are still absent.
 
 | Status | When |
 |---|---|
 | `401` | No session, or the wrong password |
+| `429` | Too many login attempts. Ten per source per five minutes; `Retry-After` gives the seconds to wait. There is one password and guessing it once is everything, and the listen address can be on the LAN |
 | `404` | The contact to edit or delete does not exist |
 | `409` | The cluster id no longer matches. An earlier transmission arrived between the two requests and moved the boundary; refresh and retry |
 | `422` | The draft is missing required fields, named in `missing` |
@@ -168,6 +206,44 @@ Deleting a contact releases its transmissions back into the queue.
 
 `POST` is manual entry. What it writes carries no `clusterId` and touches no
 `activity` row, because nothing observed it.
+`Qso` and `QsoDraft` differ only in which fields are required; a draft may be
+incomplete, and what is missing comes back in `missing` with a `422`. A
+complete record:
+
+```json
+{
+  "id": "251c7bd8-5753-4339-a155-841bb96bfccf",
+  "call": "BD7KLO",
+  "startAt": 1789465773,
+  "freqMhz": 439.525,
+  "band": "70cm",
+  "mode": "FM",
+  "rstSent": "59",
+  "rstRcvd": "59",
+  "gridsquare": "OL72",
+  "qth": "深圳",
+  "myGridsquare": "OM24",
+  "myQth": "成都",
+  "myDevice": "Quansheng UV-K6",
+  "myAntenna": "Nagoya NA-771",
+  "myPower": "5W",
+  "myHeightM": 30,
+  "note": "中继信号很好",
+  "clusterId": "a3",
+  "createdAt": 1789465800
+}
+```
+
+`id`, `createdAt` and `clusterId` are set by the server and ignored if sent.
+Manual entry needs only the required fields:
+
+```bash
+curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
+  -H 'content-type: application/json' \
+  -d '{"call":"BD7KLO","startAt":1789465773,"freqMhz":439.525,
+       "band":"70cm","mode":"FM","rstSent":"59","rstRcvd":"59"}'
+```
+
 
 `PUT` edits a row already in the log. `id`, `createdAt` and `clusterId` stay
 and everything else is replaced. `clusterId` is read from the stored row, not

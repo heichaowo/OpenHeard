@@ -10,6 +10,7 @@
     "test": "npm test --prefix api && npm test --prefix daemon && npm test --prefix web",
     "lint": "npm run lint --prefix web",
     "build": "npm run build --prefix web && npm run build --prefix public",
-    "verify": "npm run typecheck && npm run test && npm run lint && npm run build"
+    "verify": "npm run typecheck && npm run test && npm run lint && npm run build && npm run smoke",
+    "smoke": "node scripts/smoke.mjs"
   }
 }

@@ -76,6 +76,8 @@ infra/install.sh ~/OpenHeard/openheard.config.json
 
 `install.sh` 每次都先验配置、再备份、最后才装，所以升级不用额外动作。备份失败就停下来，不往下走。
 
+头一次装的时候健康检查是通过的，那时还一次都没轮询过，这不算问题。等过了最慢那条查询间隔的三倍还没轮询成功，`/health` 才开始回 503。
+
 ## 数据库
 
 schema 版本记在 `PRAGMA user_version` 里。api 开库时把落后的迁移补上，跑完把版本号写进 `api.log`。库的版本比程序新就不开库，因为旧代码会按旧的理解读新表。
@@ -89,6 +91,8 @@ node api/src/backup.ts ~/OpenHeard/openheard.config.json
 ```
 
 缺省写到数据库同级的 `backups/`，文件名带 UTC 时刻。第二个参数换目标目录。旧备份不自动删，自己清。
+
+写完当场验一遍：能打开、`integrity_check` 通过、四张表的行数和 schema 版本都和源库对得上。验不过就退出 1 并说明哪一项不对，`install.sh` 会停在这里不往下装。`VACUUM INTO` 没报错不等于那个文件能用，而备份坏没坏，等到要恢复那天才发现就太晚了。
 
 恢复要在服务停着的时候做：
 
@@ -212,6 +216,10 @@ infra/install.sh ~/OpenHeard/openheard.config.json
 `install.sh` validates the config, then backs up, then installs, so an upgrade
 needs nothing extra. A failed backup stops it before anything is installed.
 
+On a first install the health check passes even though nothing has been polled
+yet, which is not a problem. `/health` only starts answering 503 once three
+times the slowest query interval has gone by with no successful poll.
+
 ## The database
 
 The schema version lives in `PRAGMA user_version`. The API applies whatever
@@ -233,6 +241,13 @@ node api/src/backup.ts ~/OpenHeard/openheard.config.json
 It writes to `backups/` next to the database by default, named with a UTC
 timestamp. A second argument changes the directory. Old backups are never
 deleted for you.
+
+Each backup is verified as soon as it is written: it opens, `integrity_check`
+passes, and the four table counts and the schema version match the source. A
+failure exits 1 naming what did not match, and `install.sh` stops there without
+installing anything. `VACUUM INTO` returning without an error is not the same
+as the file being usable, and finding out on the day you need to restore is too
+late.
 
 Restoring is done with the services stopped:
 

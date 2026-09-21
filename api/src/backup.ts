@@ -9,6 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { loadConfig } from './config.ts';
+import { tableCounts, verifyBackup } from './verify-backup.ts';
 import { userVersion } from './migrations.ts';
 
 const [configPath, outDir] = process.argv.slice(2);
@@ -41,8 +42,22 @@ for (let n = 2; existsSync(out); n++) out = join(dir, `openheard-${stamp}-${n}.d
 // 开成可读写。VACUUM INTO 不动源库的内容，而只读连接恢复不了崩溃留下的 -wal。
 const db = new DatabaseSync(dbPath);
 const version = userVersion(db);
+const before = tableCounts(db);
 db.exec(`VACUUM INTO '${out.replaceAll("'", "''")}'`);
 db.close();
 
+const problems = verifyBackup(out, { version, counts: before });
+if (problems.length > 0) {
+  console.error(`备份验不过：${out}`);
+  for (const p of problems) console.error(`  ${p}`);
+  process.exit(1);
+}
+
 console.log(`备份好了：${out}`);
 console.log(`  ${(statSync(out).size / 1024).toFixed(0)} KB，第 ${version} 版 schema`);
+console.log(
+  `  验过：integrity_check ok，` +
+    Object.entries(before)
+      .map(([t, n]) => `${t} ${n}`)
+      .join('，'),
+);

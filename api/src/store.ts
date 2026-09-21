@@ -70,6 +70,8 @@ export interface PublicSource {
 }
 
 export function createStore(db: DatabaseSync, config: Config) {
+  // 进程起来的时刻。健康检查靠它区分「刚装好还没轮询」和「轮询挂了」。
+  const startedAt = nowS();
   /** 重新聚一次，拿到当前的待确认队列。 */
   const clusters = (): Cluster[] => {
     const since = nowS() - config.pendingWindowDays * 86400;
@@ -162,11 +164,11 @@ export function createStore(db: DatabaseSync, config: Config) {
       pruneActivities(db, nowS() - config.activityRetentionDays * 86400);
     },
 
-    health: (): Health => checkHealth(db, config, nowS()),
+    health: (): Health => checkHealth(db, config, nowS(), startedAt),
 
     // 运维页一次拿齐，免得开三个请求各自过期。
     ops: () => ({
-      health: checkHealth(db, config, nowS()),
+      health: checkHealth(db, config, nowS(), startedAt),
       machine: machine(),
       polls: selectPollLog(db, 40),
       activities: activityCounts(db),

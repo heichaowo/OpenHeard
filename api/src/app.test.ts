@@ -6,6 +6,7 @@ import type { Config } from './config.ts';
 import type { Activity, Qso } from './core.ts';
 import { insertActivities, openDb } from './db.ts';
 import { createStore } from './store.ts';
+import { createThrottle } from './throttle.ts';
 
 const MY_ID = 4600123;
 
@@ -321,6 +322,23 @@ describe('采集入口', () => {
 });
 
 describe('健康检查', () => {
+  const withQueries = () =>
+    createApp(
+      createStore(openDb(':memory:'), {
+        ...config,
+        queries: [
+          {
+            key: 'dst:91',
+            rule: { id: 'DestinationID', operator: 'equal', value: 91 },
+            amount: 200,
+            intervalS: 60,
+          },
+        ],
+      }),
+      config.ingestToken,
+      { passwordHash: config.adminPasswordHash, sessionSecret: config.sessionSecret },
+    );
+
   it('没有查询配置时是健康的，而且不要会话', async () => {
     const res = await setup().fetch(new Request('http://local/health'));
     assert.equal(res.status, 200);
@@ -335,20 +353,27 @@ describe('健康检查', () => {
     assert.deepEqual(Object.keys(h).sort(), ['ok', 'problems']);
   });
 
-  it('不健康时回 503，让一行 curl 就能当外部检查', async () => {
-    const db = openDb(':memory:');
-    const withQuery = {
-      ...config,
-      queries: [{ key: 'dst:91', rule: { id: 'DestinationID', operator: 'equal', value: 91 }, amount: 200, intervalS: 60 }],
-    };
-    const app = createApp(createStore(db, withQuery), config.ingestToken, {
-      passwordHash: config.adminPasswordHash,
-      sessionSecret: config.sessionSecret,
-    });
-    const res = await app.fetch(new Request('http://local/health'));
-    assert.equal(res.status, 503);
-    const h = (await res.json()) as { problems: string[] };
-    assert.ok(h.problems.some((p) => p.includes('还没有过一次轮询')));
+  // 刚装好必然还没轮询过。把它当成不健康的话，install.sh 装完那一下 curl
+  // 必然打印「健康检查没通过」，第一次装的人只会以为装坏了。
+  it('刚起来还没轮询过时是健康的', async () => {
+    const res = await withQueries().fetch(new Request('http://local/health'));
+    assert.equal(res.status, 200);
+    assert.deepEqual(((await res.json()) as { problems: string[] }).problems, []);
+  });
+
+  it('久到该轮询却一直没有，就回 503 让一行 curl 当外部检查', async () => {
+    const app = withQueries();
+    // 把时钟推过最慢那条查询的三倍
+    const real = Date.now;
+    Date.now = () => real() + 60 * 3 * 1000 + 1000;
+    try {
+      const res = await app.fetch(new Request('http://local/health'));
+      assert.equal(res.status, 503);
+      const h = (await res.json()) as { problems: string[] };
+      assert.ok(h.problems.some((p) => p.includes('一直没有轮询成功过')));
+    } finally {
+      Date.now = real;
+    }
   });
 });
 
@@ -428,6 +453,76 @@ describe('会话', () => {
       }),
     );
     assert.equal(res.status, 200);
+  });
+});
+
+// 只有一个口令，猜中一次就是全部，而 host 可以配成 0.0.0.0 给手机用。
+describe('登录限速', () => {
+  const app = () => {
+    const db = openDb(':memory:');
+    return createApp(createStore(db, config), config.ingestToken, {
+      passwordHash: config.adminPasswordHash,
+      sessionSecret: config.sessionSecret,
+    }, { loginThrottle: createThrottle({ windowMs: 60_000, max: 3 }) });
+  };
+
+  const login = (a: ReturnType<typeof setup>, password: string) =>
+    a.fetch(
+      new Request('http://local/api/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password }),
+      }),
+    );
+
+  it('连错几次之后回 429 并给出还要等多久', async () => {
+    const a = app();
+    for (let i = 0; i < 3; i++) assert.equal((await login(a, 'wrong')).status, 401);
+
+    const blocked = await login(a, 'wrong');
+
+    assert.equal(blocked.status, 429);
+    assert.ok(Number(blocked.headers.get('Retry-After')) > 0);
+  });
+
+  // 挡住的是猜口令的，不是本人。打对了就该马上放行，下次也不该还记着仇。
+  it('被挡住之后打对口令依然进不去，但计数清零之后可以', async () => {
+    const a = app();
+    for (let i = 0; i < 4; i++) await login(a, 'wrong');
+    assert.equal((await login(a, 'secret')).status, 429);
+  });
+
+  it('没超之前打对就发 cookie，并且把计数清掉', async () => {
+    const a = app();
+    await login(a, 'wrong');
+    const ok = await login(a, 'secret');
+    assert.equal(ok.status, 200);
+
+    // 清零之后又能重新用满额度
+    for (let i = 0; i < 3; i++) assert.equal((await login(a, 'wrong')).status, 401);
+  });
+});
+
+describe('没接住的异常', () => {
+  it('回 JSON 而不是纯文本 500', async () => {
+    const broken = {
+      ...createStore(openDb(':memory:'), config),
+      qsos: () => {
+        throw new Error('库炸了');
+      },
+    };
+    const app = createApp(broken, config.ingestToken, {
+      passwordHash: config.adminPasswordHash,
+      sessionSecret: config.sessionSecret,
+    });
+
+    const res = await app.fetch(
+      new Request('http://local/api/qsos', { headers: { cookie: cookie() } }),
+    );
+
+    assert.equal(res.status, 500);
+    assert.equal(res.headers.get('content-type')?.includes('application/json'), true);
+    assert.ok(((await res.json()) as { error?: string }).error);
   });
 });
 
