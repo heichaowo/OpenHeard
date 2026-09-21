@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { App, Alert, Button, Card, Form, Input, InputNumber, Select, Space, Typography } from 'antd'
+import { App, Alert, Button, Card, Form, Grid, Input, InputNumber, Select, Space, Typography } from 'antd'
 import { api, errorText } from '../api'
 import type { Settings } from '../api'
 import { AsyncContent } from '../components/AsyncContent'
@@ -19,6 +19,7 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | undefined>()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const wide = Grid.useBreakpoint().md ?? true
 
   const load = useCallback(async () => {
     try {
@@ -60,9 +61,11 @@ export default function SettingsPage() {
         title="设置"
         note="改完直接存，不用登录到机器上。守护进程盯着配置文件，换频率大约要几秒重新校准静噪。"
         actions={
-          <Button type="primary" loading={saving} onClick={() => form.submit()}>
-            保存
-          </Button>
+          wide ? (
+            <Button type="primary" loading={saving} onClick={() => form.submit()}>
+              保存
+            </Button>
+          ) : undefined
         }
       />
       <AsyncContent loading={loading} error={error} empty={settings === undefined} onRetry={load}>
@@ -220,6 +223,14 @@ export default function SettingsPage() {
           </Card>
         </Form>
       </AsyncContent>
+      {/* 手机上表单很长，保存按钮放顶上的话填完要一路滚回去。 */}
+      {!wide && settings !== undefined && (
+        <div className="sticky-save">
+          <Button type="primary" block size="large" loading={saving} onClick={() => form.submit()}>
+            保存
+          </Button>
+        </div>
+      )}
     </>
   )
 }

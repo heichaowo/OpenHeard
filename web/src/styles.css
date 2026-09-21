@@ -306,3 +306,40 @@ select {
 .gate-card {
   inline-size: min(380px, 100%);
 }
+
+/* ---- 待确认队列在手机上的卡片 ---- */
+
+.pending-card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-block-end: 6px;
+}
+
+.pending-card-call {
+  font-size: 20px;
+  font-weight: 600;
+  margin-block-end: 8px;
+}
+
+/* 按钮排成一行占满宽度，站着单手点的时候不用瞄。 */
+.pending-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.pending-card-actions > * {
+  flex: 1;
+}
+
+/* 手机上贴着底边的保存条。表单长，填完就地存，不用滚回顶上。 */
+.sticky-save {
+  position: sticky;
+  inset-block-end: 0;
+  margin-block-start: 16px;
+  margin-inline: -16px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: var(--ant-color-bg-container);
+  border-block-start: 1px solid var(--ant-color-border-secondary);
+}

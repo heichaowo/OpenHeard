@@ -70,6 +70,13 @@ export const fmt = (unix: number, zone: Zone) =>
 export const fmtMin = (unix: number, zone: Zone) =>
   dayjs.unix(unix).tz(zone).format('YYYY-MM-DD HH:mm')
 
+/** 手机上用的短式。整串 2026-09-14 14:13:51 在 375 像素宽里要占掉半行。 */
+export const fmtShort = (unix: number, zone: Zone) => {
+  const t = dayjs.unix(unix).tz(zone)
+  const today = dayjs().tz(zone)
+  return t.isSame(today, 'day') ? t.format('HH:mm') : t.format('MM-DD HH:mm')
+}
+
 /** 此刻，用这个时区表示。给选择器当初值。 */
 export const nowIn = (zone: Zone) => dayjs().tz(zone)
 

@@ -1,5 +1,18 @@
 import { useState } from 'react'
-import { App, Button, Descriptions, Drawer, Form, Popconfirm, Space, Table, Tag, Typography } from 'antd'
+import {
+  App,
+  Button,
+  Collapse,
+  Descriptions,
+  Drawer,
+  Form,
+  List,
+  Popconfirm,
+  Space,
+  Table,
+  Tag,
+  Typography,
+} from 'antd'
 import type { TableColumnsType } from 'antd'
 import { Card, Grid } from 'antd'
 import { AsyncContent } from '../components/AsyncContent'
@@ -26,6 +39,34 @@ const ORIGIN_LABELS: Record<Activity['origin'], string> = {
 const originOf = (row: PendingRow) => {
   const first = row.cluster.activities[0]
   return first ? ORIGIN_LABELS[first.origin] : '—'
+}
+
+/** 手机上逐次发射的样子。表格在这个宽度里塞不下，何况还有个播放器。 */
+function ActivityList({ activities }: { activities: Activity[] }) {
+  const time = useTime()
+  const { recordings } = useStore()
+  return (
+    <Space direction="vertical" size={10} style={{ width: '100%' }}>
+      {activities.map((a) => (
+        <div key={a.id}>
+          <Space size={8} wrap>
+            <Typography.Text className="mono">{time.atShort(a.startAt)}</Typography.Text>
+            <Typography.Text type="secondary">{a.durationS.toFixed(1)} 秒</Typography.Text>
+            <Tag color={a.mine ? 'blue' : 'default'}>{a.mine ? '本台' : '对方'}</Tag>
+            {a.callsign && <Typography.Text strong>{a.callsign}</Typography.Text>}
+          </Space>
+          {recordings.has(a.id) && (
+            <audio
+              controls
+              preload="none"
+              src={`/api/recordings/${encodeURIComponent(a.id)}`}
+              style={{ display: 'block', width: '100%', height: 32, marginTop: 6 }}
+            />
+          )}
+        </div>
+      ))}
+    </Space>
+  )
 }
 
 function ActivityTable({ activities }: { activities: Activity[] }) {
@@ -169,6 +210,89 @@ export default function PendingQueue() {
     }
   }
 
+  /**
+   * 手机上的一段一张卡。
+   *
+   * 表格在 375 像素宽里要横滚 900 像素，屏幕上只剩时间和信道，而确认、忽略
+   * 和呼号全在看不见的右边。这一页存在的意义就是那几个按钮，站在楼下拿手机
+   * 时更是只有这几个按钮要紧。
+   */
+  const cards = (
+    <List
+      dataSource={pending}
+      split={false}
+      renderItem={(row) => {
+        const ready = row.missing.length === 0
+        const busy = busyId === row.cluster.id
+        return (
+          <List.Item style={{ padding: '0 0 12px' }}>
+            <Card size="small" style={{ width: '100%' }}>
+              <div className="pending-card-top">
+                <Typography.Text type="secondary">
+                  {time.atShort(row.cluster.startAt)}
+                </Typography.Text>
+                <Space size={4}>
+                  <Tag>{row.draft.mode}</Tag>
+                  <Typography.Text type="secondary" ellipsis>
+                    {row.cluster.activities[0]?.channel ?? originOf(row)}
+                  </Typography.Text>
+                </Space>
+              </div>
+
+              <div className="pending-card-call">
+                {row.draft.call ?? <Tag color="orange">对方呼号待补</Tag>}
+              </div>
+
+              <Space size={4} wrap style={{ marginBottom: 12 }}>
+                {ready ? (
+                  <Tag color="green">可直接入库</Tag>
+                ) : (
+                  row.missing.map((k) => (
+                    <Tag key={k} color="orange">
+                      还缺{LABELS[k] ?? k}
+                    </Tag>
+                  ))
+                )}
+                <Typography.Text type="secondary">
+                  {row.cluster.activities.length} 次 /{' '}
+                  {Math.round(row.cluster.endAt - row.cluster.startAt)} 秒
+                </Typography.Text>
+              </Space>
+
+              <div className="pending-card-actions">
+                <Button type="primary" block onClick={() => open(row)}>
+                  {ready ? '编辑' : '确认'}
+                </Button>
+                {ready && (
+                  <Button block loading={busy} disabled={busyId !== null && !busy} onClick={() => straightIn(row)}>
+                    直接入库
+                  </Button>
+                )}
+                <Popconfirm title="不记这次对话？" onConfirm={() => ignore(row.cluster.id).catch(fail)}>
+                  <Button block danger>
+                    忽略
+                  </Button>
+                </Popconfirm>
+              </div>
+
+              <Collapse
+                ghost
+                size="small"
+                items={[
+                  {
+                    key: 'acts',
+                    label: `逐次发射（${row.cluster.activities.length}）`,
+                    children: <ActivityList activities={row.cluster.activities} />,
+                  },
+                ]}
+              />
+            </Card>
+          </List.Item>
+        )
+      }}
+    />
+  )
+
   const columns: TableColumnsType<PendingRow> = [
     {
       title: `时间 ${time.label}`,
@@ -263,16 +387,20 @@ export default function PendingQueue() {
           emptyText="队列空了，没有等着确认的对话"
           onRetry={refresh}
         >
-          <Table
-            rowKey={(row) => row.cluster.id}
-            columns={columns}
-            dataSource={pending}
-            pagination={false}
-            scroll={{ x: 900 }}
-            expandable={{
-              expandedRowRender: (row) => <ActivityTable activities={row.cluster.activities} />,
-            }}
-          />
+          {wide ? (
+            <Table
+              rowKey={(row) => row.cluster.id}
+              columns={columns}
+              dataSource={pending}
+              pagination={false}
+              scroll={{ x: 900 }}
+              expandable={{
+                expandedRowRender: (row) => <ActivityTable activities={row.cluster.activities} />,
+              }}
+            />
+          ) : (
+            cards
+          )}
         </AsyncContent>
       </Card>
       <Drawer
