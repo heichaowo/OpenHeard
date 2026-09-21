@@ -100,6 +100,23 @@ export interface Machine {
   load1: number
 }
 
+/** 电台此刻的样子。守护进程每秒报一次，只在内存里。 */
+export interface Radio {
+  freqMhz: number
+  channel: string
+  gainDb: number
+  idleDb?: number
+  openBelowDb?: number
+  closeAboveDb?: number
+  /** 此刻 5–9 kHz 的能量。有载波时会塌下去。 */
+  noiseDb?: number
+  open: boolean
+  lastOpenAt?: number
+  at: number
+  ageS: number
+  fresh: boolean
+}
+
 export interface Ops {
   health: {
     ok: boolean
@@ -110,6 +127,8 @@ export interface Ops {
     freeBytes?: number
   }
   machine: Machine
+  /** 没配模拟守听、或者守护进程报不上来时没有这一项。 */
+  radio?: Radio
   polls: PollRow[]
   activities: { origin: string; n: number; latest: number }[]
   queries: { key: string; intervalS: number; amount: number }[]

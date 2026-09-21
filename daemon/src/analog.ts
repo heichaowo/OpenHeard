@@ -67,12 +67,44 @@ function wav(pcm: Int16Array, sampleRate: number): Buffer {
  * 门限不写死：开机先听一段静默，用它的高分位当基准，再按余量推出门限。
  * 各地噪声本底不同，写死一个常数等于把部署配置烤进代码。
  */
+/**
+ * 电台此刻的样子。每秒报一次，只放在内存里，不入库。
+ *
+ * 这些数原来只打到日志文件里，于是「天线听不见」和「没人在发」这两件事，
+ * 在界面上长得一模一样，要分开只能登录到机器上看日志。
+ */
+export interface RadioStatus {
+  freqMhz: number;
+  channel: string;
+  gainDb: number;
+  /** 开机校准出来的静默基准，dB。 */
+  idleDb?: number;
+  /** 低于它算静噪打开。 */
+  openBelowDb?: number;
+  /** 高于它算关。 */
+  closeAboveDb?: number;
+  /** 此刻 5–9 kHz 的能量。有载波时会塌下去。 */
+  noiseDb?: number;
+  /** 此刻静噪是不是开着。 */
+  open: boolean;
+  /** 最近一次静噪打开的时刻，Unix 秒 UTC。 */
+  lastOpenAt?: number;
+  at: number;
+}
+
+/** 电台状态往外报的间隔。比 50 毫秒一块稀疏得多，够看就行。 */
+const STATUS_MS = 1000;
+
 export function watchAnalog(
   cfg: AnalogConfig,
   onEvent: (activity: Activity, audio: Buffer) => void,
   onExit?: () => void,
+  onStatus?: (s: RadioStatus) => void,
 ): () => void {
   const blockN = Math.round(cfg.sampleRate * cfg.blockS);
+  let idleDb: number | undefined;
+  let lastOpenAt: number | undefined;
+  let lastStatus = 0;
   const child = spawn(cfg.rtlFmPath, [
     '-f', String(cfg.freqHz),
     '-M', 'fm',
@@ -113,6 +145,7 @@ export function watchAnalog(
         if (calibration.length * cfg.blockS < cfg.calibrateS) continue;
         const sorted = [...calibration].sort((a, b) => a - b);
         const idle = sorted[Math.floor(sorted.length * 0.9)]!;
+        idleDb = idle;
         detector = new SquelchDetector({
           sampleRate: cfg.sampleRate,
           openBelowDb: idle - cfg.openMarginDb,
@@ -127,6 +160,23 @@ export function watchAnalog(
 
       const wasOpen = detector.isOpen;
       const event = detector.push(samples, at, cfg.blockS);
+      if (!wasOpen && detector.isOpen) lastOpenAt = Math.round(at);
+
+      if (onStatus !== undefined && Date.now() - lastStatus >= STATUS_MS) {
+        lastStatus = Date.now();
+        onStatus({
+          freqMhz: cfg.freqHz / 1e6,
+          channel: cfg.channel,
+          gainDb: cfg.gainDb,
+          idleDb,
+          openBelowDb: idleDb === undefined ? undefined : idleDb - cfg.openMarginDb,
+          closeAboveDb: idleDb === undefined ? undefined : idleDb - cfg.closeMarginDb,
+          noiseDb: bandEnergyDb(samples, cfg.sampleRate, NOISE_LO, NOISE_HI),
+          open: detector.isOpen,
+          lastOpenAt,
+          at: Math.round(Date.now() / 1000),
+        });
+      }
 
       if (!detector.isOpen) {
         for (const v of samples) preroll.push(v);

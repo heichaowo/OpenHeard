@@ -632,6 +632,78 @@ describe('没接住的异常', () => {
 
 // 写完之后再读一次，必须是新值。漏掉一个字段的话，文件和电台都换了，
 // 而设置页还显示旧的那个，看起来就像「改了没生效」。
+// 没有这个的话，「天线听不见」和「没人在发」在界面上长得一模一样。
+describe('电台状态', () => {
+  const push = (app: ReturnType<typeof setup>, body: unknown) =>
+    app.fetch(
+      new Request('http://local/api/ingest/radio', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${config.ingestToken}` },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  const ops = async (app: ReturnType<typeof setup>) =>
+    (await (await get(app, '/api/ops')).json()) as {
+      radio?: { freqMhz: number; noiseDb: number; fresh: boolean; ageS: number; open: boolean };
+    };
+
+  const good = {
+    freqMhz: 438.5,
+    channel: '438.500 中继',
+    gainDb: 32.8,
+    idleDb: 90.6,
+    openBelowDb: 78.6,
+    closeAboveDb: 83.6,
+    noiseDb: 90.1,
+    open: false,
+    at: Math.floor(Date.now() / 1000),
+  };
+
+  it('没收到过状态时 ops 里就没有这一项', async () => {
+    assert.equal((await ops(setup())).radio, undefined);
+  });
+
+  it('推上来之后 ops 里读得到，并且是新鲜的', async () => {
+    const app = setup();
+    assert.equal((await push(app, good)).status, 204);
+
+    const r = (await ops(app)).radio;
+    assert.equal(r?.freqMhz, 438.5);
+    assert.equal(r?.noiseDb, 90.1);
+    assert.equal(r?.fresh, true);
+    assert.ok((r?.ageS ?? 99) < 5);
+  });
+
+  // 守护进程或者 rtl_fm 出事时状态就停在那里，界面要能看出来是停了。
+  it('太久没报就不算新鲜', async () => {
+    const app = setup();
+    await push(app, { ...good, at: Math.floor(Date.now() / 1000) - 60 });
+
+    const r = (await ops(app)).radio;
+    assert.equal(r?.fresh, false);
+    assert.ok((r?.ageS ?? 0) >= 60);
+  });
+
+  it('形状不对就当没收到，但不让请求失败', async () => {
+    const app = setup();
+    assert.equal((await push(app, { 乱七八糟: 1 })).status, 204);
+    assert.equal((await ops(app)).radio, undefined);
+  });
+
+  it('要 bearer token，不看会话', async () => {
+    const app = setup();
+    const res = await app.fetch(
+      new Request('http://local/api/ingest/radio', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: cookie() },
+        body: JSON.stringify(good),
+      }),
+    );
+    assert.equal(res.status, 401);
+  });
+});
+
 describe('设置读写', () => {
   const onDisk = () => {
     const dir = mkdtempSync(join(tmpdir(), 'openheard-cfg-'));

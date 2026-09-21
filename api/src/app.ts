@@ -10,6 +10,7 @@ import type { IngestRow, PollLog } from './db.ts';
 import { publicRoutes } from './public.ts';
 import { recordingRoutes } from './recordings.ts';
 import { StoreError } from './store.ts';
+import { createRadioState, parseRadio } from './radio.ts';
 import { createThrottle } from './throttle.ts';
 import type { Store } from './store.ts';
 
@@ -39,6 +40,7 @@ export function createApp(
   const nowS = () => Math.floor(Date.now() / 1000);
   const throttle =
     options.loginThrottle ?? createThrottle({ windowMs: LOGIN_WINDOW_MS, max: LOGIN_MAX });
+  const radio = createRadioState();
 
   // 采集入口是唯一的写入口，而且将来 SDR 那侧可能从另一个进程推过来。
   const ingest = new Hono()
@@ -49,6 +51,12 @@ export function createApp(
       await next();
     })
     .post('/activity', async (c) => c.json(store.ingest((await c.req.json()) as IngestRow[])))
+    // 电台状态。每秒一条，只留最新的一条在内存里，不入库。
+    .post('/radio', async (c) => {
+      const status = parseRadio(await c.req.json(), nowS());
+      if (status !== undefined) radio.set(status);
+      return c.body(null, 204);
+    })
     .post('/poll-log', async (c) => {
       store.logPoll((await c.req.json()) as PollLog);
       return c.body(null, 204);
@@ -103,7 +111,7 @@ export function createApp(
       }
       await next();
     })
-    .get('/ops', (c) => c.json(store.ops()))
+    .get('/ops', (c) => c.json({ ...store.ops(), radio: radio.view(nowS()) }))
     .get('/station', (c) => c.json(store.station()))
     .get('/pending', (c) => c.json(store.pending()))
     .get('/qsos', (c) => c.json(store.qsos()))

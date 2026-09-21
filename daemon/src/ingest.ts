@@ -58,6 +58,19 @@ export class Ingest {
    * 真正新增几行只有写入端知道（判重在那边做），所以从写入端的回应里取，
    * 填进这一批的 poll_log。取不到就留 0，但那时 ok 也会是 false。
    */
+  /**
+   * 报一次电台状态。不落盘、不补发，过期的状态没有价值。
+   *
+   * 推不上去就算了，下一秒还有一次。为它排队只会把真正要保住的采集行挤掉。
+   */
+  async radio(status: unknown): Promise<void> {
+    try {
+      await this.#post('/api/ingest/radio', status);
+    } catch {
+      // 静默。api 重启的那几秒里这里会连着失败，不值得刷日志。
+    }
+  }
+
   async #send(batch: Batch): Promise<void> {
     if (batch.rows.length > 0) {
       const body = (await this.#post('/api/ingest/activity', batch.rows)) as

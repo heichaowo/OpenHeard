@@ -24,6 +24,7 @@ token 不对回 `401`。
 |---|---|---|
 | `POST /api/ingest/activity` | `IngestRow[]` | `{"received": number, "written": number}` |
 | `POST /api/ingest/poll-log` | `PollLog` | `204` |
+| `POST /api/ingest/radio` | `RadioStatus` | `204` |
 
 ### IngestRow
 
@@ -48,6 +49,16 @@ token 不对回 `401`。
 | `ok`、`ms`、`errorMsg` | 这次成没成、处理这一批花了多久、失败原因 |
 
 `ms` 一律是处理耗时，模拟侧也一样。那次发射本身多长在 `Activity.durationS` 里，塞进 `ms` 会让运维页同一列有两种含义。
+
+### RadioStatus
+
+模拟守听每秒报一次此刻的样子：频率、信道、增益、校准出来的静默基准、开关门限、此刻 5–9 kHz 的能量、静噪开没开、最近一次打开的时刻。
+
+只留最新一条在内存里，不入库。它描述的是「现在」，重启之后本来就该重新问一次电台，而每秒一行会把库撑满。
+
+形状不对就当没收到，照样回 `204`。这条路上的东西不值得让请求失败，下一秒还有一条。推不上去守护进程也不补发，过期的状态没有价值。
+
+没有它的话，「天线听不见」和「没人在发」在界面上长得一模一样，要分开只能登录到机器上翻日志。`/api/ops` 里 `radio.fresh` 为假就说明守护进程或者接收机出事了。
 
 `fetched` 和 `parsed` 必须分开。来源改字段名时 `parsed` 掉到 0 而 `fetched` 不变，那和稳态下全是重复行的计数长得一样。
 
@@ -89,6 +100,7 @@ the start of the next round, with the file deleted only on success.
 |---|---|---|
 | `POST /api/ingest/activity` | `IngestRow[]` | `{"received": number, "written": number}` |
 | `POST /api/ingest/poll-log` | `PollLog` | `204` |
+| `POST /api/ingest/radio` | `RadioStatus` | `204` |
 
 ### IngestRow
 
@@ -117,6 +129,24 @@ analog side `mine` comes from MDC-1200, cannot be recomputed, and is stored.
 | `ok`, `ms`, `errorMsg` | Whether it worked, how long the batch took to handle, and why not |
 
 `ms` is always handling time, on the analog side too. How long the transmission itself lasted is `Activity.durationS`; putting it in `ms` would give one column on the ops page two meanings.
+
+### RadioStatus
+
+The analog watch reports itself once a second: frequency, channel, gain, the
+idle noise floor it calibrated, the open and close thresholds, the current
+5–9 kHz energy, whether the squelch is open, and when it last opened.
+
+Only the latest one is kept, in memory. It describes *now*; after a restart the
+radio should be asked again, and a row per second would fill the database.
+
+A malformed body is ignored and still answers `204`. Nothing on this path is
+worth failing a request over, and another one arrives a second later. The daemon
+does not spool these either — a stale status has no value.
+
+Without it, "the antenna hears nothing" and "nobody is transmitting" look
+identical in the UI and telling them apart means reading a log file over ssh.
+`radio.fresh` being false in `/api/ops` means the daemon or the receiver is in
+trouble.
 
 `fetched` and `parsed` have to stay apart. When a source renames a field,
 `parsed` falls to zero while `fetched` does not, and that reads exactly like a

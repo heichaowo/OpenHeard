@@ -121,6 +121,7 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
         console.error(`rtl_fm 停了，${RESTART_MS / 1000} 秒后重开`);
         setTimeout(spawn, RESTART_MS);
       },
+      (status) => void ingest.radio(status),
     );
     stop = handle;
     process.on("SIGTERM", handle);
