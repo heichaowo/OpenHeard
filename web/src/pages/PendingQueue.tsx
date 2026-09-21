@@ -241,7 +241,7 @@ export default function PendingQueue() {
     );
 
   const toolbar = pending.length > 0 && (
-    <div className="card-toolbar" style={{ marginBottom: 12 }}>
+    <div className="sweep-bar">
       <Button size="small" onClick={pickShort}>
         选中只按了一下的
       </Button>

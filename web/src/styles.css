@@ -367,3 +367,17 @@ select {
   background: var(--ant-color-bg-container);
   border-block-start: 1px solid var(--ant-color-border-secondary);
 }
+
+/* 待确认队列上方那一条批量操作。flush-card 把卡片内边距清成 0，这里自己补回来。 */
+.sweep-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-block-end: 1px solid var(--ant-color-border-secondary);
+}
+
+.sweep-bar .ant-btn {
+  flex: 0 0 auto;
+}
