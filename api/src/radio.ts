@@ -91,7 +91,13 @@ export function createRadioState() {
       if (latest === undefined) return undefined;
       // 两个进程的秒取整会差一拍，负数看着像出了错。
       const ageS = Math.max(0, now - latest.at);
-      return { ...latest, ageS, fresh: ageS <= STALE_S, closestDb };
+      return {
+        ...latest,
+        ageS,
+        fresh: ageS <= STALE_S,
+        // 分贝读数留一位，后面十几位是浮点噪声。
+        closestDb: closestDb === undefined ? undefined : Math.round(closestDb * 10) / 10,
+      };
     },
   };
 }

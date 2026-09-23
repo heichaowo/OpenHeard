@@ -131,8 +131,10 @@ function analogOf(raw: Record<string, unknown>): Config['analog'] {
     channel: a.channel,
     gainDb: typeof a.gainDb === 'number' ? a.gainDb : undefined,
     myUnitId: typeof a.myUnitId === 'string' ? a.myUnitId : typeof a.unitId === 'string' ? a.unitId : undefined,
-    openMarginDb: typeof a.openMarginDb === 'number' ? a.openMarginDb : undefined,
-    closeMarginDb: typeof a.closeMarginDb === 'number' ? a.closeMarginDb : undefined,
+    // 报生效值，不报「文件里没写」。设置页照着它填表，显示空白的话人会
+    // 以为没有这一项，而守护进程其实按缺省值在跑。缺省和 daemon 那边同一组。
+    openMarginDb: typeof a.openMarginDb === 'number' ? a.openMarginDb : 12,
+    closeMarginDb: typeof a.closeMarginDb === 'number' ? a.closeMarginDb : 7,
   };
 }
 
