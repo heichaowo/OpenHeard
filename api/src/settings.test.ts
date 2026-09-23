@@ -86,6 +86,23 @@ describe('checkSettings', () => {
     assert.ok(with_({ closeMarginDb: 'x' }).length > 0);
   });
 
+  // 只提交一个余量的话，它会和文件里原来那个凑成一对，而那一对从没验过。
+  it('只提交一个余量时，按合并之后的那一对验', () => {
+    const only = (o: Record<string, unknown>) =>
+      checkSettings({ ...ok, analog: { freqMhz: 145.5, channel: 'x', ...o } }, {
+        freqMhz: 145.5,
+        channel: 'x',
+        openMarginDb: 12,
+        closeMarginDb: 7,
+      });
+    // 只改打开，和原来的 close 7 凑成 8/7，差 1，不行
+    assert.ok(only({ openMarginDb: 8 }).length > 0);
+    // 只改打开到 10，和 7 凑成差 3，可以
+    assert.deepEqual(only({ openMarginDb: 10 }), []);
+    // 只改关闭到 11，和原来的 open 12 凑成差 1，不行
+    assert.ok(only({ closeMarginDb: 11 }).length > 0);
+  });
+
   it('unit id 要是十六进制', () => {
     assert.ok(checkSettings({ ...ok, analog: { ...ok.analog, myUnitId: 'XYZQ' } }).length > 0);
     assert.ok(checkSettings({ ...ok, analog: { ...ok.analog, myUnitId: '12345' } }).length > 0);

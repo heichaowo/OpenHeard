@@ -83,12 +83,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       refresh,
-      promote: async (clusterId, draft) => {
-        await api.promote(clusterId, draft)
+      promote: async (clusterId, draft, activityIds) => {
+        await api.promote(clusterId, draft, activityIds)
         await refresh()
       },
-      ignore: async (clusterId) => {
-        await api.ignore(clusterId)
+      ignore: async (clusterId, activityIds) => {
+        await api.ignore(clusterId, activityIds)
         await refresh()
       },
       ignoreMany: async (clusterIds) => {

@@ -137,6 +137,8 @@ export interface Ops {
     freeBytes?: number
   }
   machine: Machine
+  /** 录音占了多少。发射行按保留期裁时录音跟着删，但已入库的那些一直留着。 */
+  recordings: { files: number; bytes: number }
   /** 没配模拟守听、或者守护进程报不上来时没有这一项。 */
   radio?: Radio
   polls: PollRow[]
@@ -167,14 +169,19 @@ export const api = {
   pending: () => call<PendingItem[]>('/pending'),
   qsos: () => call<Qso[]>('/qsos'),
 
-  promote: (clusterId: string, draft: QsoDraft) =>
+  /** activityIds 只结算这一段里的这几次发射，不给就是整段。 */
+  promote: (clusterId: string, draft: QsoDraft, activityIds?: string[]) =>
     call<Qso>(`/pending/${encodeURIComponent(clusterId)}/promote`, {
       method: 'POST',
-      body: JSON.stringify(draft),
+      body: JSON.stringify(activityIds === undefined ? draft : { ...draft, activityIds }),
     }),
 
-  ignore: (clusterId: string) =>
-    call<void>(`/pending/${encodeURIComponent(clusterId)}`, { method: 'DELETE' }),
+  ignore: (clusterId: string, activityIds?: string[]) =>
+    call<void>(
+      `/pending/${encodeURIComponent(clusterId)}` +
+        (activityIds === undefined ? '' : `?activityIds=${activityIds.map(encodeURIComponent).join(',')}`),
+      { method: 'DELETE' },
+    ),
 
   ignoreMany: (clusterIds: string[]) =>
     call<{ ignored: number; missing: string[] }>('/pending/ignore', {

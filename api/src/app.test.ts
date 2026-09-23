@@ -166,6 +166,70 @@ describe('提升', () => {
   }
 });
 
+// 聚类按一个间隔阈值猜，会猜错。两段对话并成一段时，整段提升会把两边
+// 记成一条，整段忽略又把两边都丢掉。
+describe('只处理一段里的几次发射', () => {
+  const start = Math.floor(Date.now() / 1000) - 3600;
+  // 两段对话挨得太近被并成一段：本台和 A，接着本台和 B。
+  const merged = () =>
+    setup([
+      act('m1', { dmrId: MY_ID, startAt: start, talkgroup: 46001 }),
+      act('x1', { dmrId: 4616472, startAt: start + 10, talkgroup: 46001 }),
+      act('m2', { dmrId: MY_ID, startAt: start + 20, talkgroup: 46001 }),
+      act('x2', { dmrId: 4606502, startAt: start + 30, talkgroup: 46001 }),
+    ]);
+
+  const pendingOf = async (app: ReturnType<typeof setup>) =>
+    (await (await get(app, '/api/pending')).json()) as {
+      cluster: { id: string; activities: { id: string }[] };
+    }[];
+
+  it('提升时只结算挑中的那几次，剩下的回到队列', async () => {
+    const app = merged();
+    const [seg] = await pendingOf(app);
+    assert.equal(seg.cluster.activities.length, 4);
+
+    const res = await send(app, 'POST', `/api/pending/${seg.cluster.id}/promote`, {
+      ...complete,
+      activityIds: ['m1', 'x1'],
+    });
+    assert.equal(res.status, 200);
+
+    // 剩下那半边没被结算，重新聚类之后自己成一段
+    const after = await pendingOf(app);
+    assert.equal(after.length, 1);
+    assert.deepEqual(after[0].cluster.activities.map((a) => a.id).sort(), ['m2', 'x2']);
+  });
+
+  it('忽略也能只挑几次', async () => {
+    const app = merged();
+    const [seg] = await pendingOf(app);
+
+    const res = await send(app, 'DELETE', `/api/pending/${seg.cluster.id}?activityIds=x2`);
+    assert.equal(res.status, 204);
+
+    const after = await pendingOf(app);
+    assert.deepEqual(after[0].cluster.activities.map((a) => a.id).sort(), ['m1', 'm2', 'x1']);
+  });
+
+  it('不给就是整段，和以前一样', async () => {
+    const app = merged();
+    const [seg] = await pendingOf(app);
+    await send(app, 'POST', `/api/pending/${seg.cluster.id}/promote`, complete);
+    assert.equal((await pendingOf(app)).length, 0);
+  });
+
+  it('挑了不属于这一段的就 422', async () => {
+    const app = merged();
+    const [seg] = await pendingOf(app);
+    const res = await send(app, 'POST', `/api/pending/${seg.cluster.id}/promote`, {
+      ...complete,
+      activityIds: ['m1', '别的段的'],
+    });
+    assert.equal(res.status, 422);
+  });
+});
+
 describe('忽略', () => {
   it('整段离开队列，也不产生通联', async () => {
     const t = Math.floor(Date.now() / 1000) - 600;

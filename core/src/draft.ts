@@ -1,4 +1,5 @@
 import { bandOf, modeOf } from './band.ts';
+import { callFor } from './known-calls.ts';
 import type { Cluster, Qso, QsoDraft } from './types.ts';
 
 /** 本台的固定信息。属于部署配置，不是设计。 */
@@ -35,18 +36,27 @@ const REQUIRED: QsoField[] = [
  * 信号报告一律给 59。对方给我们的报告只在空中说出口，机器拿不到；
  * 我们给对方的报告要靠音频信噪比推 R，而阈值还没有实测数据。
  */
+/**
+ * @param known DMR ID 到呼号的对照，来自以前收过的行。BrandMeister 不是每条
+ *   都带 SourceCall，缺的那几条靠它补，否则人要为一个早就见过的 ID 重新打一遍。
+ */
 export function draftFromCluster(
   cluster: Cluster,
   defaults: StationDefaults = {},
+  known?: Map<number, string>,
 ): QsoDraft {
   const first = cluster.activities[0];
-  const other = cluster.activities.find((a) => !a.mine && a.callsign);
+  const other =
+    cluster.activities.find((a) => !a.mine && a.callsign) ??
+    (known === undefined
+      ? undefined
+      : cluster.activities.find((a) => !a.mine && callFor(known, a.dmrId) !== undefined));
   const freqMhz =
     cluster.activities.find((a) => a.freqMhz !== undefined)?.freqMhz ??
     defaults.networkFreqMhz;
 
   return {
-    call: other?.callsign,
+    call: other?.callsign ?? (known === undefined ? undefined : callFor(known, other?.dmrId)),
     startAt: cluster.startAt,
     freqMhz,
     band: freqMhz === undefined ? undefined : bandOf(freqMhz),

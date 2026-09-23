@@ -43,7 +43,21 @@ const originOf = (row: PendingRow) => {
 };
 
 /** 手机上逐次发射的样子。表格在这个宽度里塞不下，何况还有个播放器。 */
-function ActivityList({ activities }: { activities: Activity[] }) {
+/**
+ * 一段里的逐次发射。可以取消勾选。
+ *
+ * 聚类按一个间隔阈值猜，会猜错。两段对话被并成一段时，把不属于这次通联的
+ * 那几次取消掉，它们不会被结算，下一轮重新聚类自己会分出去。
+ */
+function ActivityList({
+  activities,
+  chosen,
+  onToggle,
+}: {
+  activities: Activity[];
+  chosen: string[];
+  onToggle: (id: string) => void;
+}) {
   const time = useTime();
   const { recordings } = useStore();
   return (
@@ -51,6 +65,10 @@ function ActivityList({ activities }: { activities: Activity[] }) {
       {activities.map((a) => (
         <div key={a.id}>
           <Space size={8} wrap>
+            <Checkbox
+              checked={chosen.includes(a.id)}
+              onChange={() => onToggle(a.id)}
+            />
             <Typography.Text className="mono">
               {time.atShort(a.startAt)}
             </Typography.Text>
@@ -173,12 +191,33 @@ export default function PendingQueue() {
   const [submitting, setSubmitting] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const [clearing, setClearing] = useState(false);
+  // 每一段里挑中了哪几次发射。没动过的段不在表里，就是整段。
+  const [subset, setSubset] = useState<Record<string, string[]>>({});
   const {
     recalledAt,
     onValuesChange,
     reset: resetRecall,
   } = useRecall(form, qsos);
   const time = useTime();
+
+  /** 这一段现在算哪几次发射。没挑过就是全部。 */
+  const chosen = (row: PendingRow) =>
+    subset[row.cluster.id] ?? row.cluster.activities.map((a) => a.id);
+
+  /** 挑过而且不是全部时才往后端传，否则保持「整段」这个语义。 */
+  const partOf = (row: PendingRow) => {
+    const ids = chosen(row);
+    return ids.length === row.cluster.activities.length ? undefined : ids;
+  };
+
+  const toggleActivity = (row: PendingRow, id: string) =>
+    setSubset((m) => {
+      const now = m[row.cluster.id] ?? row.cluster.activities.map((a) => a.id);
+      const next = now.includes(id)
+        ? now.filter((x) => x !== id)
+        : [...now, id];
+      return { ...m, [row.cluster.id]: next };
+    });
 
   const open = (row: PendingRow) => {
     setEditing(row);
@@ -272,7 +311,7 @@ export default function PendingQueue() {
   const straightIn = async (row: PendingRow) => {
     setBusyId(row.cluster.id);
     try {
-      await promote(row.cluster.id, row.draft);
+      await promote(row.cluster.id, row.draft, partOf(row));
       message.success(`${row.draft.call} 已入库`);
     } catch (e) {
       fail(e);
@@ -297,7 +336,7 @@ export default function PendingQueue() {
     }
     setSubmitting(true);
     try {
-      await promote(editing.cluster.id, draft);
+      await promote(editing.cluster.id, draft, partOf(editing));
       setEditing(null);
       message.success(`${draft.call} 已入库`);
     } catch (e) {
@@ -392,9 +431,16 @@ export default function PendingQueue() {
                 items={[
                   {
                     key: "acts",
-                    label: `逐次发射（${row.cluster.activities.length}）`,
+                    label:
+                      partOf(row) === undefined
+                        ? `逐次发射（${row.cluster.activities.length}）`
+                        : `逐次发射（挑中 ${chosen(row).length} / ${row.cluster.activities.length}）`,
                     children: (
-                      <ActivityList activities={row.cluster.activities} />
+                      <ActivityList
+                        activities={row.cluster.activities}
+                        chosen={chosen(row)}
+                        onToggle={(id) => toggleActivity(row, id)}
+                      />
                     ),
                   },
                 ]}
@@ -475,8 +521,12 @@ export default function PendingQueue() {
             {row.missing.length === 0 ? "编辑" : "确认"}
           </Button>
           <Popconfirm
-            title="不记这次对话？"
-            onConfirm={() => ignore(row.cluster.id).catch(fail)}
+            title={
+              partOf(row) === undefined
+                ? "不记这次对话？"
+                : `只忽略挑中的 ${chosen(row).length} 次发射？`
+            }
+            onConfirm={() => ignore(row.cluster.id, partOf(row)).catch(fail)}
           >
             <Button type="link" danger>
               忽略

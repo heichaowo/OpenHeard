@@ -16,8 +16,9 @@ export interface Store {
   error?: string
 
   /** 下面这些都会打到后端，失败时抛 ApiError，调用方负责显示。 */
-  promote: (clusterId: string, draft: QsoDraft) => Promise<void>
-  ignore: (clusterId: string) => Promise<void>
+  /** activityIds 只结算这一段里的这几次发射，不给就是整段。 */
+  promote: (clusterId: string, draft: QsoDraft, activityIds?: string[]) => Promise<void>
+  ignore: (clusterId: string, activityIds?: string[]) => Promise<void>
   /** 一次忽略好几段。一条一条调的话，剩下那些段的 id 会变，后面全会 409。 */
   ignoreMany: (clusterIds: string[]) => Promise<{ ignored: number; missing: string[] }>
   addQso: (draft: QsoDraft) => Promise<void>

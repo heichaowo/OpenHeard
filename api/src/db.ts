@@ -290,14 +290,22 @@ export function activityCounts(db: DatabaseSync): { origin: string; n: number; l
 }
 
 /** activity 有保留期，qso 没有。已经被提升或忽略引用的行不裁。 */
-export function pruneActivities(db: DatabaseSync, olderThan: number): number {
-  const r = db
-    .prepare(`
+/** 返回被删掉那些行的 id，调用方据此把对应的录音也删掉。 */
+export function pruneActivities(db: DatabaseSync, olderThan: number): string[] {
+  return withTx(db, () => {
+    const doomed = db
+      .prepare(`
+        SELECT id FROM activity WHERE start_at < ?
+          AND id NOT IN (SELECT activity_id FROM resolved_activity)
+      `)
+      .all(olderThan) as { id: string }[];
+    if (doomed.length === 0) return [];
+    db.prepare(`
       DELETE FROM activity WHERE start_at < ?
         AND id NOT IN (SELECT activity_id FROM resolved_activity)
-    `)
-    .run(olderThan);
-  return Number(r.changes);
+    `).run(olderThan);
+    return doomed.map((r) => r.id);
+  });
 }
 
 export function prunePollLog(db: DatabaseSync, olderThan: number): number {

@@ -35,7 +35,14 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 /** 业余 2m 和 70cm。和 core 的 bandOf 同一个范围。 */
 const inBand = (f: number) => (f >= 144 && f <= 148) || (f >= 420 && f <= 450);
 
-export function checkSettings(raw: unknown): string[] {
+const pickMargin = (submitted: unknown, existing: number | undefined, fallback: number) =>
+  typeof submitted === 'number' ? submitted : (existing ?? fallback);
+
+/**
+ * @param current 现在生效的那份。只提交一个余量时，要拿它和文件里原来那个
+ *   凑起来一起验，否则凑出来的组合从来没被验过。
+ */
+export function checkSettings(raw: unknown, current?: Config['analog']): string[] {
   if (!isObject(raw)) return ['设置的顶层不是对象'];
   const problems: string[] = [];
 
@@ -97,19 +104,20 @@ export function checkSettings(raw: unknown): string[] {
         problems.push('analog.myUnitId 要是 1 到 4 位十六进制，例如 6460');
       }
 
-      const open = a.openMarginDb;
-      const close = a.closeMarginDb;
-      for (const [k, v] of [
-        ['openMarginDb', open],
-        ['closeMarginDb', close],
-      ] as const) {
+      for (const k of ['openMarginDb', 'closeMarginDb'] as const) {
+        const v = a[k];
         if (v !== undefined && (typeof v !== 'number' || v <= 0 || v > 60)) {
           problems.push(`analog.${k} 要是 0 到 60 之间的数字`);
         }
       }
-      // 打开比关闭低，中间那段是回差。两个挨太近的话，信号刚过线就会开关抖个不停。
-      if (typeof open === 'number' && typeof close === 'number' && open - close < 2) {
-        problems.push('analog.openMarginDb 要比 closeMarginDb 至少大 2，中间那段是回差');
+      // 回差要按合并之后的值查，不能只看这次提交里带了什么。
+      // 只提交一个的话，它会和文件里原来那个凑成一对，而那一对从没验过。
+      const open = pickMargin(a.openMarginDb, current?.openMarginDb, 12);
+      const close = pickMargin(a.closeMarginDb, current?.closeMarginDb, 7);
+      if (open - close < 2) {
+        problems.push(
+          `静噪余量合起来讲不通：打开 ${open}，关闭 ${close}。打开要比关闭至少大 2，中间那段是回差`,
+        );
       }
     }
   }

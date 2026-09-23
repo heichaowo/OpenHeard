@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { ReadableStream } from 'node:stream/web';
 import { Readable } from 'node:stream';
@@ -12,6 +12,46 @@ import { Readable } from 'node:stream';
  *
  * 挂在会话后面：这是本台信道上的音频，不属于公开面。
  */
+/**
+ * 把这些发射的录音删掉。
+ *
+ * 每次静噪打开都写一个 wav，而在这之前没有任何东西删过它们。库里的发射行
+ * 按保留期裁，录音不跟着裁的话，这个目录会是整台机器上涨得最快的东西，
+ * 而且涨多快取决于信道上有多热闹，不是任何一项配置。
+ *
+ * 被提升或者忽略引用过的行不会被裁，所以它们的录音也留着。
+ */
+export function removeRecordings(dir: string | undefined, ids: string[]): number {
+  if (dir === undefined) return 0;
+  let gone = 0;
+  for (const id of ids) {
+    try {
+      rmSync(join(dir, `${id}.wav`));
+      gone += 1;
+    } catch {
+      // 本来就没有录音，或者已经删过了。
+    }
+  }
+  return gone;
+}
+
+/** 录音目录占了多少字节。运维页拿它提醒人磁盘的去向。 */
+export function recordingsSize(dir: string | undefined): { files: number; bytes: number } {
+  if (dir === undefined || !existsSync(dir)) return { files: 0, bytes: 0 };
+  let files = 0;
+  let bytes = 0;
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith('.wav')) continue;
+    files += 1;
+    try {
+      bytes += statSync(join(dir, f)).size;
+    } catch {
+      // 刚被删掉，忽略。
+    }
+  }
+  return { files, bytes };
+}
+
 export function recordingRoutes(dir: string | undefined) {
   return new Hono()
     // 哪些发射有录音。界面据此决定给哪几行放播放器，免得挨个探一次 404。

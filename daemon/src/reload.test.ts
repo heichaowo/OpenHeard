@@ -36,6 +36,20 @@ function setup(): { path: string; write: (next: unknown) => void } {
   };
 }
 
+/**
+ * 等到条件成立，而不是睡一个固定的时长。
+ *
+ * fs.watch 加上防抖走的是真实时钟，机器忙的时候那一下会晚到，睡死一个
+ * 时长就会偶发失败。偶发失败的测试比没有测试更糟。
+ */
+async function until(ok: () => boolean, timeoutMs = 6000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!ok()) {
+    if (Date.now() > deadline) return;
+    await sleep(50);
+  }
+}
+
 const start = (path: string) => {
   const r = loadConfig(path);
   assert.ok(r.ok);
@@ -53,7 +67,7 @@ describe('watchConfig', () => {
     const { seen, stop } = start(path);
 
     write({ ...base, analog: { ...base.analog, freqMhz: 145.5 } });
-    await sleep(900);
+    await until(() => seen.analog.length > 0);
     stop();
 
     assert.equal(seen.analog.length, 1);
@@ -69,7 +83,7 @@ describe('watchConfig', () => {
       ...base,
       queries: [{ ...base.queries[0], key: 'dst:91', rule: { id: 'DestinationID', operator: 'equal', value: 91 } }],
     });
-    await sleep(900);
+    await until(() => seen.queries.length > 0);
     stop();
 
     assert.equal(seen.queries.length, 1);
@@ -94,9 +108,9 @@ describe('watchConfig', () => {
     const { seen, stop } = start(path);
 
     writeFileSync(path, '{ 这不是 JSON');
-    await sleep(900);
+    await sleep(700);
     write({ ...base, analog: { ...base.analog, freqMhz: 439.525 } });
-    await sleep(900);
+    await until(() => seen.analog.length > 0);
     stop();
 
     // 坏的那次没生效，后面改好的那次照常生效

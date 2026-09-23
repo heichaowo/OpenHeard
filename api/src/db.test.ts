@@ -160,7 +160,8 @@ describe('裁剪', () => {
     );
     insertQso(db, qso('q1'));
     resolveActivities(db, ['a'], 'q1', 2);
-    assert.equal(pruneActivities(db, 500), 1); // 只裁掉 b
+    // 返回被裁掉那些行的 id，调用方据此把对应的录音也删掉
+    assert.deepEqual(pruneActivities(db, 500), ['b']);
     const ids = (db.prepare('SELECT id FROM activity ORDER BY id').all() as { id: string }[]).map(
       (r) => r.id,
     );

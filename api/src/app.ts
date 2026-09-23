@@ -119,8 +119,9 @@ export function createApp(
 
     .post('/pending/:clusterId/promote', async (c) => {
       try {
-        const draft = (await c.req.json()) as QsoDraft;
-        return c.json(store.promote(c.req.param('clusterId'), draft));
+        const body = (await c.req.json()) as QsoDraft & { activityIds?: string[] };
+        const { activityIds, ...draft } = body;
+        return c.json(store.promote(c.req.param('clusterId'), draft, activityIds));
       } catch (e) {
         const { status, body } = fail(e);
         return c.json(body, status);
@@ -137,7 +138,9 @@ export function createApp(
 
     .delete('/pending/:clusterId', (c) => {
       try {
-        store.ignore(c.req.param('clusterId'));
+        // 只忽略其中几次发射：?activityIds=a,b
+        const only = c.req.query('activityIds');
+        store.ignore(c.req.param('clusterId'), only === undefined ? undefined : only.split(','));
         return c.body(null, 204);
       } catch (e) {
         const { status, body } = fail(e);

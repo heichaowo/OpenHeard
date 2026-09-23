@@ -3,6 +3,7 @@ export * from './band.ts';
 export * from './callsign.ts';
 export * from './cluster.ts';
 export * from './draft.ts';
+export * from './known-calls.ts';
 export * from './recall.ts';
 export * from './queries.ts';
 export * from './zone.ts';

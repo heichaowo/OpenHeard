@@ -10,6 +10,7 @@ export {
   clusterActivities,
   draftFromCluster,
   isValidCallsign,
+  knownCalls,
   missingFields,
   modeOf,
   normalizeCallsign,

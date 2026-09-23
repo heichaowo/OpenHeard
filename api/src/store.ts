@@ -7,6 +7,7 @@ import type { Health } from './health.ts';
 import {
   clusterActivities,
   draftFromCluster,
+  knownCalls,
   missingFields,
   normalizeCallsign,
 } from './core.ts';
@@ -29,6 +30,7 @@ import {
   withTx,
 } from './db.ts';
 import type { IngestRow, PollLog, QsoChange } from './db.ts';
+import { recordingsSize, removeRecordings } from './recordings.ts';
 import { checkSettings, settingsOf, writeSettings } from './settings.ts';
 import type { Settings } from './settings.ts';
 
@@ -91,6 +93,15 @@ export function createStore(db: DatabaseSync, config: Config) {
     return c;
   };
 
+  /** 挑出这一段里的这几次发射。不给就是整段，给了就得真的属于这一段。 */
+  const subsetOf = (cluster: Cluster, ids?: string[]): string[] => {
+    const all = cluster.activities.map((a) => a.id);
+    if (ids === undefined || ids.length === 0) return all;
+    const outside = ids.filter((id) => !all.includes(id));
+    if (outside.length > 0) throw new StoreError(422, `这几次发射不在这一段里：${outside.join('、')}`);
+    return ids;
+  };
+
   const build = (draft: QsoDraft, clusterId?: string): Qso => {
     const call = draft.call === undefined ? undefined : normalizeCallsign(draft.call);
     const full = { ...draft, call, clusterId };
@@ -109,37 +120,50 @@ export function createStore(db: DatabaseSync, config: Config) {
 
     /** 写回配置文件并就地更新内存里那份。守护进程自己盯着文件，会跟着改。 */
     saveSettings: (next: unknown): Settings => {
-      const problems = checkSettings(next);
+      const problems = checkSettings(next, config.analog);
       if (problems.length > 0) throw new StoreError(422, problems.join('，'));
       writeSettings(config, next as Settings);
       // 用写完之后的 config，不要用请求体拼。拼出来的会掩盖没落盘的字段。
       return settingsOf(config, config.analog);
     },
 
-    pending: (): PendingItem[] =>
-      clusters().map((cluster) => ({
+    pending: (): PendingItem[] => {
+      // 对照表用整个保留期内的行来建，不只是队列里这几段。以前见过的呼号
+      // 才补得上，而队列里那几段本来就是缺呼号的那些。
+      const known = knownCalls(selectUnresolvedActivities(db, 0, config.dmrId));
+      return clusters().map((cluster) => ({
         cluster,
-        draft: draftFromCluster(cluster, config.station),
-      })),
+        draft: draftFromCluster(cluster, config.station, known),
+      }));
+    },
 
     qsos: () => selectQsos(db),
 
     qsoHistory: (id: string): QsoChange[] => selectQsoHistory(db, id),
 
-    promote: (clusterId: string, draft: QsoDraft): Qso => {
+    /**
+     * @param activityIds 只处理这一段里的这几次发射。不给就是整段。
+     *
+     * 聚类是按一个间隔阈值猜的，会猜错。两段对话被并成一段时，整段提升会把
+     * 两边的呼号和时长记成一条，整段忽略又把两边都丢掉。挑出属于这次通联的
+     * 那几次，剩下的下一轮重新聚类，自己会分出去。
+     */
+    promote: (clusterId: string, draft: QsoDraft, activityIds?: string[]): Qso => {
       const cluster = find(clusterId);
+      const ids = subsetOf(cluster, activityIds);
       const qso = build(draft, clusterId);
       return withTx(db, () => {
         insertQso(db, qso);
-        resolveActivities(db, cluster.activities.map((a) => a.id), qso.id, nowS());
+        resolveActivities(db, ids, qso.id, nowS());
         return qso;
       });
     },
 
-    ignore: (clusterId: string): void => {
+    ignore: (clusterId: string, activityIds?: string[]): void => {
       const cluster = find(clusterId);
+      const ids = subsetOf(cluster, activityIds);
       withTx(db, () => {
-        resolveActivities(db, cluster.activities.map((a) => a.id), null, nowS());
+        resolveActivities(db, ids, null, nowS());
       });
     },
 
@@ -201,7 +225,10 @@ export function createStore(db: DatabaseSync, config: Config) {
     logPoll: (p: PollLog): void => {
       insertPollLog(db, p);
       prunePollLog(db, nowS() - 30 * 86400);
-      pruneActivities(db, nowS() - config.activityRetentionDays * 86400);
+      // 发射行裁掉了，对应的录音就没有任何东西指向它了。不一起删的话
+      // 那个目录只涨不减，而且涨得比库里任何一张表都快。
+      const gone = pruneActivities(db, nowS() - config.activityRetentionDays * 86400);
+      if (gone.length > 0) removeRecordings(config.recordingsDir, gone);
     },
 
     health: (): Health => checkHealth(db, config, nowS(), startedAt),
@@ -210,6 +237,7 @@ export function createStore(db: DatabaseSync, config: Config) {
     ops: () => ({
       health: checkHealth(db, config, nowS(), startedAt),
       machine: machine(),
+      recordings: recordingsSize(config.recordingsDir),
       polls: selectPollLog(db, 40),
       activities: activityCounts(db),
       queries: config.queries.map((q) => ({ key: q.key, intervalS: q.intervalS, amount: q.amount })),

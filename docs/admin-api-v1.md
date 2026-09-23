@@ -46,8 +46,8 @@
 | 方法和路径 | 请求 | 响应 |
 |---|---|---|
 | `GET /api/pending` | 无 | `PendingItem[]` |
-| `POST /api/pending/:clusterId/promote` | `QsoDraft` | `Qso`，或 `409`、`422` |
-| `DELETE /api/pending/:clusterId` | 无 | `204`，或 `409` |
+| `POST /api/pending/:clusterId/promote` | `QsoDraft`，可带 `activityIds` | `Qso`，或 `409`、`422` |
+| `DELETE /api/pending/:clusterId` | 无，可带 `?activityIds=a,b` | `204`，或 `409` |
 | `POST /api/pending/ignore` | `{clusterIds: string[]}` | `{ignored, missing}` |
 
 `PendingItem` 是 `{cluster, draft}`。`cluster` 是按信道和间隔阈值算出来的一段对话，不入库，每次请求重算。`draft` 是机器能预填的部分。
@@ -57,6 +57,10 @@
 提升和忽略都落在段内每一条发射上，不落在 `cluster.id` 上。`cluster.id` 只够在一次请求往返里指认这一段，后到一条更早的发射或者改了阈值，它就变了。
 
 删掉一条通联会把它占住的发射放回队列。
+
+`activityIds` 只结算这一段里的这几次发射，不给就是整段。聚类按一个间隔阈值猜，会猜错：两段对话挨得近会被并成一段，这时整段提升会把两边记成一条，整段忽略又把两边都丢掉。挑出属于这次通联的那几次，剩下的没有被结算，下一轮重新聚类会自己分出去。
+
+挑的 id 必须真的属于这一段，否则回 `422`。
 
 ## 日志
 
@@ -211,7 +215,7 @@ table behind the quick-entry channel picker.
 |---|---|---|
 | `GET /api/pending` | none | `PendingItem[]` |
 | `POST /api/pending/:clusterId/promote` | `QsoDraft` | `Qso`, or `409`, `422` |
-| `DELETE /api/pending/:clusterId` | none | `204`, or `409` |
+| `DELETE /api/pending/:clusterId` | none, optionally `?activityIds=a,b` | `204`, or `409` |
 | `POST /api/pending/ignore` | `{clusterIds: string[]}` | `{ignored, missing}` |
 
 A `PendingItem` is `{cluster, draft}`. The cluster is a conversation derived
@@ -227,6 +231,15 @@ request round trip: a late-arriving earlier transmission, or a changed
 threshold, changes it.
 
 Deleting a contact releases its transmissions back into the queue.
+
+`activityIds` settles only those transmissions of the segment; without it the
+whole segment is settled. Clustering guesses from one gap threshold and gets it
+wrong: two conversations close together merge into one segment, where promoting
+the whole thing records both as a single contact and ignoring it discards both.
+Pick the transmissions that belong to this contact; the rest are left unsettled
+and separate on the next clustering.
+
+An id that does not belong to the segment gives `422`.
 
 ## Log
 

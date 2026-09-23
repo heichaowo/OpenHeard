@@ -293,6 +293,13 @@ export default function OpsPage() {
                     （macOS 的空闲值偏小，看趋势）
                   </Typography.Text>
                 </Descriptions.Item>
+                <Descriptions.Item label="录音占用">
+                  {ops.recordings.files} 个，{bytes(ops.recordings.bytes)}
+                  <Typography.Text type="secondary">
+                    {" "}
+                    （发射行过了保留期会连录音一起删，已入库的那些一直留着）
+                  </Typography.Text>
+                </Descriptions.Item>
                 <Descriptions.Item label="已经跑了">
                   {duration(ops.machine.uptimeS)}
                 </Descriptions.Item>
