@@ -200,6 +200,15 @@ export default function PendingQueue() {
   } = useRecall(form, qsos);
   const time = useTime();
 
+  /**
+   * 这一段里除了本台之外没有别人。
+   *
+   * 本台喊了一声没人应，这种段永远变不成通联，呼号不是「还没填」而是
+   * 根本不存在。和「还缺对方呼号」分开说，人才知道不用去填它。
+   */
+  const aloneIn = (row: PendingRow) =>
+    row.cluster.activities.every((a) => a.mine);
+
   /** 这一段现在算哪几次发射。没挑过就是全部。 */
   const chosen = (row: PendingRow) =>
     subset[row.cluster.id] ?? row.cluster.activities.map((a) => a.id);
@@ -279,10 +288,20 @@ export default function PendingQueue() {
         .map((r) => r.cluster.id),
     );
 
+  const pickAlone = () =>
+    setPicked(pending.filter(aloneIn).map((r) => r.cluster.id));
+
   const toolbar = pending.length > 0 && (
     <div className="sweep-bar">
       <Button size="small" onClick={pickShort}>
         选中只按了一下的
+      </Button>
+      <Button
+        size="small"
+        onClick={pickAlone}
+        disabled={!pending.some(aloneIn)}
+      >
+        选中没人回的（{pending.filter(aloneIn).length}）
       </Button>
       <Button
         size="small"
@@ -382,7 +401,12 @@ export default function PendingQueue() {
               </div>
 
               <div className="pending-card-call">
-                {row.draft.call ?? <Tag color="orange">对方呼号待补</Tag>}
+                {row.draft.call ??
+                  (aloneIn(row) ? (
+                    <Tag>只有本台，没人回</Tag>
+                  ) : (
+                    <Tag color="orange">对方呼号待补</Tag>
+                  ))}
               </div>
 
               <Space size={4} wrap style={{ marginBottom: 12 }}>
@@ -480,7 +504,9 @@ export default function PendingQueue() {
     {
       title: "对方呼号",
       key: "call",
-      render: (_, row) => row.draft.call ?? <Tag color="orange">待补</Tag>,
+      render: (_, row) =>
+        row.draft.call ??
+        (aloneIn(row) ? <Tag>没人回</Tag> : <Tag color="orange">待补</Tag>),
       width: 120,
     },
     {
