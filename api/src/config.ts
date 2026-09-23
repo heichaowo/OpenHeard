@@ -41,7 +41,14 @@ export interface Config {
    */
   recordingsDir?: string;
   /** 模拟守听里人能改的那几项。守护进程那边还会多读 recordingsDir。 */
-  analog?: { freqMhz: number; channel: string; gainDb?: number; myUnitId?: string };
+  analog?: {
+    freqMhz: number;
+    channel: string;
+    gainDb?: number;
+    myUnitId?: string;
+    openMarginDb?: number;
+    closeMarginDb?: number;
+  };
   /** 配置文件自己的路径。写设置的时候要写回这里。 */
   path: string;
 }
@@ -124,6 +131,8 @@ function analogOf(raw: Record<string, unknown>): Config['analog'] {
     channel: a.channel,
     gainDb: typeof a.gainDb === 'number' ? a.gainDb : undefined,
     myUnitId: typeof a.myUnitId === 'string' ? a.myUnitId : typeof a.unitId === 'string' ? a.unitId : undefined,
+    openMarginDb: typeof a.openMarginDb === 'number' ? a.openMarginDb : undefined,
+    closeMarginDb: typeof a.closeMarginDb === 'number' ? a.closeMarginDb : undefined,
   };
 }
 

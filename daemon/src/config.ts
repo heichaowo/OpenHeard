@@ -17,6 +17,16 @@ export interface AnalogConfig {
   gainDb: number;
   /** 本台的 MDC-1200 unit ID，十六进制字符串。没有就判不出哪次是本台。 */
   myUnitId?: string;
+  /**
+   * 静噪打开的余量，dB。噪声比静默基准低这么多就算有载波。
+   *
+   * 各地的噪声本底和天线不一样，这个数是按部署调的，写死在代码里等于
+   * 把一次部署的猜测烤进去。调大了弱信号永远打不开，调小了噪声起伏
+   * 就会伪造出一堆发射，把队列和磁盘塞满。
+   */
+  openMarginDb: number;
+  /** 静噪关闭的余量，dB。比打开那个小，中间那段是回差。 */
+  closeMarginDb: number;
   recordingsDir: string;
 }
 
@@ -82,6 +92,8 @@ export function loadConfig(path: string): ConfigResult {
           : typeof a.unitId === 'string'
             ? a.unitId
             : undefined,
+        openMarginDb: typeof a.openMarginDb === 'number' ? a.openMarginDb : 12,
+        closeMarginDb: typeof a.closeMarginDb === 'number' ? a.closeMarginDb : 7,
         recordingsDir: near(typeof a.recordingsDir === 'string' ? a.recordingsDir : './recordings'),
       };
     }

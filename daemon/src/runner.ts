@@ -67,12 +67,13 @@ export interface AnalogHandle {
 export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
   let current = cfg;
   let stop: (() => void) | undefined;
+  let restarts = 0;
   // 主动停的时候 rtl_fm 也会退出，onExit 会照样触发。不挡住的话会多开一份。
   let deliberate = false;
 
   const spawn = () => {
     const cfg = current;
-    const handle = watchAnalog(
+    const radio = watchAnalog(
       {
         freqHz: Math.round(cfg.freqMhz * 1e6),
         channel: cfg.channel,
@@ -80,8 +81,8 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
         sampleRate: 24000,
         blockS: 0.05,
         calibrateS: 5,
-        openMarginDb: 12,
-        closeMarginDb: 7,
+        openMarginDb: cfg.openMarginDb,
+        closeMarginDb: cfg.closeMarginDb,
         minDurationS: 0.3,
         prerollS: 0.6,
         myUnitId:
@@ -118,13 +119,26 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
       },
       () => {
         if (deliberate) return;
+        restarts += 1;
         console.error(`rtl_fm 停了，${RESTART_MS / 1000} 秒后重开`);
+        // 抢不到 USB 设备时 rtl_fm 根本不往 stdout 写东西，watchAnalog 的
+        // onStatus 一次也不会触发。不在这里主动报一次的话，界面上只会看到
+        // 「太久没有状态」，而原因仍然只在 daemon.err.log 里。
+        void ingest.radio({
+          freqMhz: cfg.freqMhz,
+          channel: cfg.channel,
+          gainDb: cfg.gainDb,
+          open: false,
+          lastError: radio.lastError(),
+          restarts,
+          at: nowS(),
+        });
         setTimeout(spawn, RESTART_MS);
       },
-      (status) => void ingest.radio(status),
+      (status) => void ingest.radio({ ...status, restarts }),
     );
-    stop = handle;
-    process.on("SIGTERM", handle);
+    stop = radio.stop;
+    process.on("SIGTERM", radio.stop);
   };
 
   spawn();

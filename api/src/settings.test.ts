@@ -75,6 +75,17 @@ describe('checkSettings', () => {
     assert.deepEqual(checkSettings({ ...ok, analog: { ...ok.analog, freqMhz: 439.525 } }), []);
   });
 
+  // 打开的门限比关闭的低，中间那段是回差。两个挨太近，信号刚过线就会开关抖个不停。
+  it('静噪余量要讲得通', () => {
+    const with_ = (o: Record<string, unknown>) =>
+      checkSettings({ ...ok, analog: { ...ok.analog, ...o } });
+    assert.deepEqual(with_({ openMarginDb: 8, closeMarginDb: 4 }), []);
+    assert.ok(with_({ openMarginDb: 8, closeMarginDb: 7 }).length > 0);
+    assert.ok(with_({ openMarginDb: 0 }).length > 0);
+    assert.ok(with_({ openMarginDb: 200 }).length > 0);
+    assert.ok(with_({ closeMarginDb: 'x' }).length > 0);
+  });
+
   it('unit id 要是十六进制', () => {
     assert.ok(checkSettings({ ...ok, analog: { ...ok.analog, myUnitId: 'XYZQ' } }).length > 0);
     assert.ok(checkSettings({ ...ok, analog: { ...ok.analog, myUnitId: '12345' } }).length > 0);

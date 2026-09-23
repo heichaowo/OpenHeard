@@ -17,6 +17,10 @@ export interface RadioStatus {
   noiseDb?: number;
   open: boolean;
   lastOpenAt?: number;
+  /** rtl_fm 最后说的那句话。它起不来的时候，唯一的线索就是这个。 */
+  lastError?: string;
+  /** rtl_fm 重开了多少次。一直涨说明它根本起不来。 */
+  restarts?: number;
   at: number;
 }
 
@@ -28,6 +32,13 @@ export interface RadioView extends RadioStatus {
   ageS: number;
   /** 还算不算新鲜。不新鲜说明守护进程或者 rtl_fm 出事了。 */
   fresh: boolean;
+  /**
+   * 这次守听里最接近打开门限的那一刻，差了多少 dB。
+   *
+   * 运维页 20 秒拉一次，看到的只是那一瞬。光看一个瞬时值答不了
+   * 「这个信号到底够不够得着门限」，得记住最接近的那次。换频率就重记。
+   */
+  closestDb?: number;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -50,15 +61,29 @@ export function parseRadio(raw: unknown, now: number): RadioStatus | undefined {
     noiseDb: num(raw.noiseDb),
     open: raw.open === true,
     lastOpenAt: num(raw.lastOpenAt),
+    lastError: typeof raw.lastError === 'string' ? raw.lastError.slice(0, 200) : undefined,
+    restarts: num(raw.restarts),
     at: num(raw.at) ?? now,
   };
 }
 
 export function createRadioState() {
   let latest: RadioStatus | undefined;
+  let closestDb: number | undefined;
+  let tunedTo: string | undefined;
 
   return {
     set(status: RadioStatus): void {
+      // 换了频率或者信道就重新记，上一个频点的最接近值说明不了这个频点。
+      const key = `${status.freqMhz}|${status.channel}`;
+      if (key !== tunedTo) {
+        tunedTo = key;
+        closestDb = undefined;
+      }
+      if (status.noiseDb !== undefined && status.openBelowDb !== undefined) {
+        const margin = status.noiseDb - status.openBelowDb;
+        if (closestDb === undefined || margin < closestDb) closestDb = margin;
+      }
       latest = status;
     },
     /** 没有守听、或者报不上来时是 undefined。 */
@@ -66,7 +91,7 @@ export function createRadioState() {
       if (latest === undefined) return undefined;
       // 两个进程的秒取整会差一拍，负数看着像出了错。
       const ageS = Math.max(0, now - latest.at);
-      return { ...latest, ageS, fresh: ageS <= STALE_S };
+      return { ...latest, ageS, fresh: ageS <= STALE_S, closestDb };
     },
   };
 }

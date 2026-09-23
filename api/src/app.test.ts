@@ -685,6 +685,46 @@ describe('电台状态', () => {
     assert.ok((r?.ageS ?? 0) >= 60);
   });
 
+  // 运维页 20 秒拉一次，看到的只是那一瞬。光看一个瞬时值答不了
+  // 「这个信号够不够得着门限」，得记住最接近的那一次。
+  it('记住这次守听里最接近门限的一刻', async () => {
+    const app = setup();
+    await push(app, { ...good, noiseDb: 90.1 }); // 差 11.5
+    await push(app, { ...good, noiseDb: 82.0 }); // 差 3.4，最接近
+    await push(app, { ...good, noiseDb: 89.0 }); // 差 10.4
+
+    const r = (await ops(app)).radio as { closestDb: number } | undefined;
+    assert.ok(r);
+    assert.equal(Math.round(r.closestDb * 10) / 10, 3.4);
+  });
+
+  it('换了频率就重新记，上个频点的最接近值说明不了这个', async () => {
+    const app = setup();
+    await push(app, { ...good, noiseDb: 82.0 });
+    await push(app, { ...good, freqMhz: 145.5, channel: '145.500 直频', noiseDb: 90.1 });
+
+    const r = (await ops(app)).radio as { closestDb: number } | undefined;
+    assert.equal(Math.round((r?.closestDb ?? 0) * 10) / 10, 11.5);
+  });
+
+  // 抢不到 USB 设备时 rtl_fm 不往 stdout 写东西，只有这条路能把原因带出来。
+  it('带上 rtl_fm 最后一句和重开次数', async () => {
+    const app = setup();
+    await push(app, {
+      freqMhz: 438.5,
+      channel: '438.500 中继',
+      gainDb: 32.8,
+      open: false,
+      lastError: 'rtl_fm: usb_claim_interface error -3',
+      restarts: 4,
+      at: Math.floor(Date.now() / 1000),
+    });
+
+    const r = (await ops(app)).radio as { lastError: string; restarts: number } | undefined;
+    assert.match(r?.lastError ?? '', /usb_claim_interface/);
+    assert.equal(r?.restarts, 4);
+  });
+
   it('形状不对就当没收到，但不让请求失败', async () => {
     const app = setup();
     assert.equal((await push(app, { 乱七八糟: 1 })).status, 204);

@@ -102,11 +102,12 @@ export function watchAnalog(
   onEvent: (activity: Activity, audio: Buffer) => void,
   onExit?: () => void,
   onStatus?: (s: RadioStatus) => void,
-): () => void {
+): { stop: () => void; lastError: () => string | undefined } {
   const blockN = Math.round(cfg.sampleRate * cfg.blockS);
   let idleDb: number | undefined;
   let lastOpenAt: number | undefined;
   let lastStatus = 0;
+  let lastError: string | undefined;
   const child = spawn(cfg.rtlFmPath, [
     '-f', String(cfg.freqHz),
     '-M', 'fm',
@@ -128,7 +129,10 @@ export function watchAnalog(
 
   child.stderr.on('data', (d: Buffer) => {
     const line = d.toString().trim();
-    if (line) console.error(`rtl_fm: ${line}`);
+    if (line) {
+      lastError = line;
+      console.error(`rtl_fm: ${line}`);
+    }
   });
 
   child.stdout.on('data', (chunk: Buffer) => {
@@ -144,6 +148,18 @@ export function watchAnalog(
 
       if (!detector) {
         calibration.push(bandEnergyDb(samples, cfg.sampleRate, NOISE_LO, NOISE_HI));
+        // 校准这 5 秒里也要报。不报的话换频率之后界面上还挂着旧频率，
+        // 而且 5 秒短于「太久没报」的门限，连不新鲜都看不出来。
+        if (onStatus !== undefined && Date.now() - lastStatus >= STATUS_MS) {
+          lastStatus = Date.now();
+          onStatus({
+            freqMhz: cfg.freqHz / 1e6,
+            channel: cfg.channel,
+            gainDb: cfg.gainDb,
+            open: false,
+            at: Math.round(Date.now() / 1000),
+          });
+        }
         if (calibration.length * cfg.blockS < cfg.calibrateS) continue;
         const sorted = [...calibration].sort((a, b) => a - b);
         const idle = sorted[Math.floor(sorted.length * 0.9)]!;
@@ -239,10 +255,13 @@ export function watchAnalog(
     if (!stopped) onExit?.();
   });
 
-  return () => {
-    stopped = true;
-    const last = detector?.flush();
-    if (last) console.error(`收尾时还有一次未闭合的发射，时长 ${last.durationS.toFixed(2)} 秒`);
-    child.kill();
+  return {
+    stop() {
+      stopped = true;
+      const last = detector?.flush();
+      if (last) console.error(`收尾时还有一次未闭合的发射，时长 ${last.durationS.toFixed(2)} 秒`);
+      child.kill();
+    },
+    lastError: () => lastError,
   };
 }

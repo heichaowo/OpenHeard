@@ -208,7 +208,8 @@ export default function OpsPage() {
                       type="warning"
                       showIcon
                       style={{ marginBottom: 12 }}
-                      message={`已经 ${ops.radio.ageS} 秒没有电台状态了，接收机可能掉了，看 daemon.err.log`}
+                      message={`已经 ${ops.radio.ageS} 秒没有电台状态了，接收机可能掉了`}
+                      description={ops.radio.lastError}
                     />
                   )}
                   <Descriptions size="small" column={1} bordered>
@@ -249,6 +250,18 @@ export default function OpsPage() {
                         （有载波时噪声会塌下去，所以是低于才算开）
                       </Typography.Text>
                     </Descriptions.Item>
+                    {ops.radio.lastError !== undefined && (
+                      <Descriptions.Item label="rtl_fm 最后一句">
+                        <span className="mono">{ops.radio.lastError}</span>
+                        {ops.radio.restarts !== undefined &&
+                          ops.radio.restarts > 0 && (
+                            <Typography.Text type="secondary">
+                              {" "}
+                              （重开过 {ops.radio.restarts} 次）
+                            </Typography.Text>
+                          )}
+                      </Descriptions.Item>
+                    )}
                     <Descriptions.Item label="最近一次静噪打开">
                       {ops.radio.lastOpenAt === undefined
                         ? "起来之后还没有过"

@@ -94,7 +94,7 @@ if (values['mdc-probe']) {
     console.error(`频率写错了：${values.analog}`);
     process.exit(2);
   }
-  const stop = watchAnalog(
+  const probe = watchAnalog(
     {
       freqHz: Math.round(mhz * 1e6),
       channel: `${mhz} MHz`,
@@ -113,7 +113,7 @@ if (values['mdc-probe']) {
     (a) => console.log(JSON.stringify(a)),
   );
   process.on('SIGINT', () => {
-    stop();
+    probe.stop();
     process.exit(0);
   });
 } else if (values.once || values.query) {

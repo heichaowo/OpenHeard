@@ -23,6 +23,10 @@ export interface AnalogSettings {
   gainDb?: number;
   /** 本台的 MDC-1200 unit ID，十六进制字符串。 */
   myUnitId?: string;
+  /** 静噪打开的余量，dB。缺省 12。 */
+  openMarginDb?: number;
+  /** 静噪关闭的余量，dB。缺省 7，要比打开那个小，中间是回差。 */
+  closeMarginDb?: number;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -91,6 +95,21 @@ export function checkSettings(raw: unknown): string[] {
       if (a.gainDb !== undefined && typeof a.gainDb !== 'number') problems.push('analog.gainDb 要是数字');
       if (a.myUnitId !== undefined && !/^[0-9a-fA-F]{1,4}$/.test(String(a.myUnitId))) {
         problems.push('analog.myUnitId 要是 1 到 4 位十六进制，例如 6460');
+      }
+
+      const open = a.openMarginDb;
+      const close = a.closeMarginDb;
+      for (const [k, v] of [
+        ['openMarginDb', open],
+        ['closeMarginDb', close],
+      ] as const) {
+        if (v !== undefined && (typeof v !== 'number' || v <= 0 || v > 60)) {
+          problems.push(`analog.${k} 要是 0 到 60 之间的数字`);
+        }
+      }
+      // 打开比关闭低，中间那段是回差。两个挨太近的话，信号刚过线就会开关抖个不停。
+      if (typeof open === 'number' && typeof close === 'number' && open - close < 2) {
+        problems.push('analog.openMarginDb 要比 closeMarginDb 至少大 2，中间那段是回差');
       }
     }
   }

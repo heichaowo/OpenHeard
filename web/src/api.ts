@@ -74,6 +74,10 @@ export interface AnalogSettings {
   gainDb?: number
   /** 本台的 MDC-1200 unit ID，十六进制字符串。 */
   myUnitId?: string
+  /** 静噪打开的余量，dB。缺省 12。 */
+  openMarginDb?: number
+  /** 静噪关闭的余量，dB。缺省 7。 */
+  closeMarginDb?: number
 }
 
 /** 人能在界面上改的那几项。dbPath、监听地址和三个密钥只在配置文件里改。 */
@@ -112,9 +116,15 @@ export interface Radio {
   noiseDb?: number
   open: boolean
   lastOpenAt?: number
+  /** rtl_fm 最后说的那句话。它起不来的时候唯一的线索。 */
+  lastError?: string
+  /** rtl_fm 重开了多少次。一直涨说明它根本起不来。 */
+  restarts?: number
   at: number
   ageS: number
   fresh: boolean
+  /** 这次守听里最接近打开门限的那一刻差了多少 dB。 */
+  closestDb?: number
 }
 
 export interface Ops {

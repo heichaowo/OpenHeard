@@ -68,9 +68,13 @@ openssl rand -hex 32                            # sessionSecret 和 ingestToken
 | `freqMhz`、`channel` | 是 | 守哪个频率，以及进 `Activity` 的信道名 |
 | `gainDb` | 否 | 调谐器增益，缺省 32.8 |
 | `myUnitId` | 否 | 本台的 MDC-1200 unit ID，**十六进制字符串**。缺了就判不出哪次发射是本台，队列会一直是空的。旧名 `unitId` 仍然认 |
+| `openMarginDb` | 否 | 静噪打开的余量，dB，缺省 12。噪声比静默基准低这么多就算有载波 |
+| `closeMarginDb` | 否 | 静噪关闭的余量，dB，缺省 7。要比打开那个至少小 2，中间那段是回差 |
 | `recordingsDir` | 否 | 每次发射的音频往这里写，缺省 `./recordings` |
 
 一次只守一个频率。一支接收机同时只能调谐一处，跳频期间漏掉的发射无法补回。
+
+两个余量按部署调。噪声本底和天线各地不一样，调大了弱信号永远打不开静噪，调小了噪声起伏就会伪造出发射，把队列和磁盘塞满。运维页上写着此刻的噪声离门限还差多少，以及这次守听里最接近的一刻差了多少，照着那两个数调。
 
 ---
 
@@ -164,7 +168,15 @@ src query reaches back 53 days, talkgroup 460 reaches 3.6 days, and 91 reaches
 | `freqMhz`, `channel` | yes | Which frequency to watch, and the channel name that goes into `Activity` |
 | `gainDb` | no | Tuner gain, default 32.8 |
 | `myUnitId` | no | Our MDC-1200 unit ID, **as a hex string**. Without it nothing is ever marked as ours and the queue stays empty. The old name `unitId` is still accepted |
+| `openMarginDb` | no | dB below the calibrated idle floor that counts as a carrier, default 12 |
+| `closeMarginDb` | no | dB for closing again, default 7. At least 2 below the open margin; the gap between them is the hysteresis |
 | `recordingsDir` | no | Where each transmission's audio is written, default `./recordings` |
 
 One frequency at a time. A single receiver tunes one place, and transmissions
 missed while hopping cannot be recovered.
+
+Both margins are tuned per deployment. Noise floors and antennas differ by
+site: too large and a weak signal never opens the squelch, too small and
+ordinary noise invents transmissions that fill the queue and the disk. The ops
+page shows how far the current noise is from the threshold and how close it has
+come during this watch; tune against those two numbers.
