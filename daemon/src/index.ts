@@ -137,6 +137,12 @@ if (values['mdc-probe']) {
   );
   const digital = start(queries, dmrId, ingest);
   const radio = analog ? startAnalog(analog, ingest) : undefined;
+  // launchd 停这个任务时发 SIGTERM。挂了监听，Node 就不再自己退出，
+  // 所以这里要明说退出，否则 launchd 要等 20 秒再补一个 SIGKILL。
+  process.once('SIGTERM', () => {
+    radio?.stop();
+    process.exit(0);
+  });
 
   // 界面改设置时 api 把配置文件写回去，这边看着文件跟着变，不用再开一条接口。
   watchConfig(path, result.config, {

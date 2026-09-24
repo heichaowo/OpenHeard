@@ -62,6 +62,8 @@ const RESTART_MS = 5000;
 export interface AnalogHandle {
   /** 换频率、增益、信道名或者 unit id。停掉当前这个再按新配置开一个。 */
   retune: (next: AnalogConfig) => void;
+  /** 停掉 rtl_fm，也不再自己重开。进程退出前调。 */
+  stop: () => void;
 }
 
 export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
@@ -70,6 +72,9 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
   let restarts = 0;
   // 主动停的时候 rtl_fm 也会退出，onExit 会照样触发。不挡住的话会多开一份。
   let deliberate = false;
+  // 掉了之后排着的那次重开。重调或停下时要撤掉它，否则它到点又开一份：
+  // 两个 rtl_fm 抢一个 USB 设备，同一次发射记成两行，而前一个再也停不掉。
+  let restartTimer: NodeJS.Timeout | undefined;
 
   const spawn = () => {
     const cfg = current;
@@ -133,12 +138,11 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
           restarts,
           at: nowS(),
         });
-        setTimeout(spawn, RESTART_MS);
+        restartTimer = setTimeout(spawn, RESTART_MS);
       },
       (status) => void ingest.radio({ ...status, restarts }),
     );
     stop = radio.stop;
-    process.on("SIGTERM", radio.stop);
   };
 
   spawn();
@@ -146,6 +150,7 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
   return {
     retune(next) {
       current = next;
+      clearTimeout(restartTimer);
       deliberate = true;
       stop?.();
       deliberate = false;
@@ -153,6 +158,11 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
         `换到 ${next.freqMhz} MHz（${next.channel}），重新校准要几秒`,
       );
       spawn();
+    },
+    stop() {
+      clearTimeout(restartTimer);
+      deliberate = true;
+      stop?.();
     },
   };
 }
