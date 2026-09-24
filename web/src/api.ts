@@ -25,12 +25,18 @@ export function setUnauthorizedHandler(fn: (() => void) | undefined) {
   onUnauthorized = fn
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
+async function call<T>(
+  path: string,
+  init?: RequestInit & { textBody?: boolean },
+): Promise<T> {
   let res: Response
   try {
+    const { textBody, ...rest } = init ?? {}
     res = await fetch(`/api${path}`, {
-      ...init,
-      headers: init?.body ? { 'content-type': 'application/json' } : undefined,
+      ...rest,
+      headers: init?.body
+        ? { 'content-type': textBody === true ? 'text/plain' : 'application/json' }
+        : undefined,
     })
   } catch {
     throw new ApiError(0, '连不上后端，确认 api 起来了没有')
@@ -163,6 +169,12 @@ export const api = {
   settings: () => call<Settings>('/settings'),
   saveSettings: (next: Settings) =>
     call<Settings>('/settings', { method: 'PUT', body: JSON.stringify(next) }),
+
+  importAdif: (text: string) =>
+    call<{ parsed: number; imported: number; skipped: number; problems: string[] }>(
+      '/qsos/import',
+      { method: 'POST', body: text, textBody: true },
+    ),
 
   qsoHistory: (id: string) => call<QsoChange[]>(`/qsos/${encodeURIComponent(id)}/history`),
   station: () => call<{ station: StationDefaults; channels: Channel[] }>('/station'),

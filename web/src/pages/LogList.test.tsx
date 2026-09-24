@@ -40,6 +40,7 @@ const store = (qsos: Qso[]): Store => ({
   addQso: vi.fn(),
   editQso,
   removeQso,
+  importAdif: vi.fn(),
   refresh: vi.fn(),
 })
 

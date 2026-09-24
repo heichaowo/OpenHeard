@@ -148,6 +148,17 @@ export function createApp(
       }
     })
 
+    // ADIF 文本直接当请求体，不走 multipart。一个人从浏览器传一个文件，
+    // 为它引一套表单解析不划算。
+    .post('/qsos/import', async (c) => {
+      try {
+        return c.json(store.importAdif(await c.req.text()));
+      } catch (e) {
+        const { status, body } = fail(e);
+        return c.json(body, status);
+      }
+    })
+
     .post('/qsos', async (c) => {
       try {
         const draft = (await c.req.json()) as QsoDraft;

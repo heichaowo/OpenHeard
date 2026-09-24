@@ -43,7 +43,8 @@ function download(name: string, text: string) {
 
 export default function LogList() {
   const { message, modal } = App.useApp();
-  const { qsos, editQso, removeQso, loading, error, refresh } = useStore();
+  const { qsos, editQso, removeQso, importAdif, loading, error, refresh } =
+    useStore();
   const wide = Grid.useBreakpoint().md ?? true;
   const [search, setSearch] = useState("");
   const [form] = Form.useForm<QsoFormValues>();
@@ -55,6 +56,7 @@ export default function LogList() {
     reset: resetRecall,
   } = useRecall(form, qsos);
   const [changes, setChanges] = useState<Record<string, QsoChange[]>>({});
+  const [importing, setImporting] = useState(false);
   const time = useTime();
 
   const rows = useMemo(() => {
@@ -109,6 +111,55 @@ export default function LogList() {
     } finally {
       setSaving(false);
     }
+  };
+
+  /**
+   * 从 .adi 文件导入。
+   *
+   * 判重在服务端做（呼号加分钟），所以同一份文件导两遍不会多出记录。
+   * 读不了的那几条会单独报出来，好的照样进。
+   */
+  const pickFile = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".adi,.adif,text/plain";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      setImporting(true);
+      try {
+        const r = await importAdif(await file.text());
+        const parts = [`读到 ${r.parsed} 条`, `进了 ${r.imported} 条`];
+        if (r.skipped > 0) parts.push(`${r.skipped} 条已经有了`);
+        if (r.problems.length > 0) parts.push(`${r.problems.length} 条读不了`);
+        if (r.problems.length > 0) {
+          modal.info({
+            title: parts.join("，"),
+            content: (
+              <Space direction="vertical" size={4}>
+                {r.problems.slice(0, 20).map((p) => (
+                  <Typography.Text key={p} type="secondary">
+                    {p}
+                  </Typography.Text>
+                ))}
+                {r.problems.length > 20 && (
+                  <Typography.Text type="secondary">
+                    还有 {r.problems.length - 20} 条
+                  </Typography.Text>
+                )}
+              </Space>
+            ),
+          });
+        } else {
+          message.success(parts.join("，"));
+        }
+      } catch (e) {
+        message.error(errorText(e));
+      } finally {
+        setImporting(false);
+      }
+    };
+    input.click();
   };
 
   const exportAdif = () => {
@@ -250,7 +301,14 @@ export default function LogList() {
       <PageHeader
         title="日志"
         note="正式记录。每一行都由人的判断产生，导出的 ADIF 以它为准。"
-        actions={<Button onClick={exportAdif}>导出 ADIF</Button>}
+        actions={
+          <Space>
+            <Button loading={importing} onClick={pickFile}>
+              导入 ADIF
+            </Button>
+            <Button onClick={exportAdif}>导出 ADIF</Button>
+          </Space>
+        }
       />
       <Card
         className="flush-card"

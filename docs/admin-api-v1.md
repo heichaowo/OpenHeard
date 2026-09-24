@@ -70,6 +70,7 @@
 | `GET /api/qsos/:id/history` | 无 | `{at, action, before}[]`，最近的在前 |
 | `POST /api/qsos` | `QsoDraft` | `Qso`，或 `422` |
 | `PUT /api/qsos/:id` | `QsoDraft` | `Qso`，或 `404`、`422` |
+| `POST /api/qsos/import` | ADIF 文本 | `{parsed, imported, skipped, problems}` |
 | `DELETE /api/qsos/:id` | 无 | `204`，或 `404` |
 
 `POST` 是手工补录，写进去的记录没有 `clusterId`，也不动 `activity` 表，因为没有任何东西观测到它。
@@ -114,6 +115,12 @@ curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
 改和删都会先把改之前那一行存进 `qso_history`，和改动同一个事务。`action` 是 `edit` 或 `delete`，`before` 是那一行当时的完整 JSON。自动来的通联删掉之后那几次发射会回到待确认队列，手工补录的删掉就只剩这一条痕迹。
 
 呼号入库前统一去空格转大写。时间一律 Unix 秒 UTC，界面显示的时区可选，接口不受影响。
+
+导入直接把 ADIF 文本当请求体，不走 multipart。一个人从浏览器传一个文件，为它引一套表单解析不划算。
+
+判重看呼号加上取整到分钟的时刻。ADIF 里的时刻常常只精确到分钟，而这台机器记到秒，比死时刻的话同一条每导一次就多一条。同一次导入里的重复也只进一条。
+
+读不了的记录跳过，好的照样进，`problems` 里每条一句话并指出是第几条。只认这套系统用得上的字段，`MODE` 不是 FM 或 DMR、频率不在 2m 或 70cm 段内的都跳过。导进来的记录不带 `clusterId`，它们没有任何观测支撑。
 
 ## 设置
 
@@ -249,6 +256,7 @@ An id that does not belong to the segment gives `422`.
 | `GET /api/qsos/:id/history` | none | `{at, action, before}[]`, newest first |
 | `POST /api/qsos` | `QsoDraft` | `Qso`, or `422` |
 | `PUT /api/qsos/:id` | `QsoDraft` | `Qso`, or `404` / `422` |
+| `POST /api/qsos/import` | ADIF text | `{parsed, imported, skipped, problems}` |
 | `DELETE /api/qsos/:id` | none | `204`, or `404` |
 
 `POST` is manual entry. What it writes carries no `clusterId` and touches no
@@ -306,6 +314,20 @@ only trace.
 Callsigns are stripped of spaces and upper-cased before storage. Times are
 Unix seconds UTC throughout; the display timezone is the operator's choice and
 does not reach the API.
+
+Import takes the ADIF text as the request body rather than multipart. One
+person uploading one file from a browser does not earn a form parser.
+
+Duplicates are keyed on callsign plus the time truncated to the minute. ADIF
+times are often only accurate to the minute while this machine records seconds,
+so an exact comparison would add a copy on every import. Duplicates within one
+file collapse too.
+
+Unreadable records are skipped and the readable ones still go in; `problems`
+carries a line each, naming the record number. Only the fields this system uses
+are read, and a record is skipped when `MODE` is neither FM nor DMR or the
+frequency is outside 2m and 70cm. Imported rows carry no `clusterId` — nothing
+observed them.
 
 ## Settings
 

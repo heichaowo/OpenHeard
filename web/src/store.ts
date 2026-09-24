@@ -25,6 +25,8 @@ export interface Store {
   /** 改一条已入库的。id、创建时间和来源聚类不动。 */
   editQso: (id: string, draft: QsoDraft) => Promise<void>
   removeQso: (id: string) => Promise<void>
+  /** 从 ADIF 文本导入。返回读了几条、进了几条、跳了几条。 */
+  importAdif: (text: string) => Promise<{ parsed: number; imported: number; skipped: number; problems: string[] }>
   refresh: () => Promise<void>
 }
 

@@ -8,3 +8,4 @@ export * from './recall.ts';
 export * from './queries.ts';
 export * from './zone.ts';
 export * from './adif.ts';
+export * from './adif-parse.ts';

@@ -108,6 +108,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await api.removeQso(id)
         await refresh()
       },
+      importAdif: async (text) => {
+        const r = await api.importAdif(text)
+        await refresh()
+        return r
+      },
     }),
     [station, channels, rows, qsos, recordings, loading, error, refresh],
   )

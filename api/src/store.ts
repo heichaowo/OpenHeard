@@ -8,6 +8,7 @@ import {
   clusterActivities,
   draftFromCluster,
   knownCalls,
+  parseAdif,
   missingFields,
   normalizeCallsign,
 } from './core.ts';
@@ -35,6 +36,14 @@ import { checkSettings, settingsOf, writeSettings } from './settings.ts';
 import type { Settings } from './settings.ts';
 
 const nowS = () => Math.floor(Date.now() / 1000);
+
+/**
+ * 判重用的键：呼号加上取整到分钟的时刻。
+ *
+ * ADIF 里的时刻常常只到分钟，而这台机器记到秒。比死时刻的话，同一条通联
+ * 每导一次就多一条。
+ */
+const dupKey = (call: string, startAt: number) => `${call}|${Math.floor(startAt / 60)}`;
 
 /**
  * 机器本身的几个数。
@@ -210,6 +219,47 @@ export function createStore(db: DatabaseSync, config: Config) {
       };
       updateQso(db, qso, nowS());
       return qso;
+    },
+
+    /**
+     * 从 ADIF 里导入。
+     *
+     * 判重靠呼号加时刻：同一个呼号、开始时间相差不到一分钟，就当是同一次通联。
+     * ADIF 里的时刻常常只精确到分钟，而这台机器记到秒，比死时刻会把同一条
+     * 反复导进来。导进来的记录不带 clusterId，它们没有任何观测支撑。
+     */
+    importAdif: (text: string): { parsed: number; imported: number; skipped: number; problems: string[] } => {
+      const { drafts, problems } = parseAdif(text);
+      const existing = selectQsos(db);
+      const seen = new Set<string>(existing.map((q) => dupKey(q.call, q.startAt)));
+
+      let imported = 0;
+      let skipped = 0;
+      const rejected = [...problems];
+
+      withTx(db, () => {
+        drafts.forEach((draft, i) => {
+          const call = draft.call === undefined ? undefined : normalizeCallsign(draft.call);
+          const key = call === undefined || draft.startAt === undefined
+            ? undefined
+            : dupKey(call, draft.startAt);
+          if (key !== undefined && seen.has(key)) {
+            skipped += 1;
+            return;
+          }
+          const missing = missingFields({ ...draft, call });
+          if (missing.length > 0) {
+            rejected.push(`第 ${i + 1} 条还缺 ${missing.join('、')}，跳过`);
+            return;
+          }
+          const qso = { ...draft, call, id: randomUUID(), createdAt: nowS() } as Qso;
+          insertQso(db, qso);
+          if (key !== undefined) seen.add(key);
+          imported += 1;
+        });
+      });
+
+      return { parsed: drafts.length, imported, skipped, problems: rejected };
     },
 
     removeQso: (id: string): void => {

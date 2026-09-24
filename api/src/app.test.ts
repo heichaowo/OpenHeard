@@ -378,6 +378,79 @@ describe('改一条已入库的通联', () => {
   });
 });
 
+describe('导入 ADIF', () => {
+  const adif = (...records: string[]) =>
+    `OpenHeard test <ADIF_VER:5>3.1.5 <EOH>\n${records.join('\n')}\n`;
+  const rec = (call: string, date = '20260915', time = '094933', freq = '439.525') =>
+    `<CALL:${call.length}>${call} <QSO_DATE:8>${date} <TIME_ON:6>${time} ` +
+    `<MODE:2>FM <FREQ:${freq.length}>${freq} <RST_SENT:2>59 <RST_RCVD:2>59 <EOR>`;
+
+  const post = (app: ReturnType<typeof setup>, text: string) =>
+    app.fetch(
+      new Request('http://local/api/qsos/import', {
+        method: 'POST',
+        headers: { cookie: cookie(), 'content-type': 'text/plain' },
+        body: text,
+      }),
+    );
+
+  it('导进来的记录在日志里读得到，不带 clusterId', async () => {
+    const app = setup();
+    const res = await post(app, adif(rec('BD7KLO'), rec('BA1AA', '20260914')));
+
+    assert.deepEqual(await res.json(), { parsed: 2, imported: 2, skipped: 0, problems: [] });
+    const all = (await (await get(app, '/api/qsos')).json()) as Qso[];
+    assert.equal(all.length, 2);
+    assert.equal(all.every((q) => q.clusterId === undefined), true);
+  });
+
+  // ADIF 的时刻常常只到分钟，而这台机器记到秒。比死时刻的话同一条会反复进来。
+  it('同一条导第二遍不会重复', async () => {
+    const app = setup();
+    await post(app, adif(rec('BD7KLO')));
+
+    const again = await post(app, adif(rec('BD7KLO')));
+
+    assert.deepEqual(await again.json(), { parsed: 1, imported: 0, skipped: 1, problems: [] });
+    assert.equal(((await (await get(app, '/api/qsos')).json()) as Qso[]).length, 1);
+  });
+
+  it('同一分钟内的秒数不同也算同一条', async () => {
+    const app = setup();
+    await post(app, adif(rec('BD7KLO', '20260915', '094900')));
+    const again = await post(app, adif(rec('BD7KLO', '20260915', '094959')));
+    assert.equal(((await again.json()) as { skipped: number }).skipped, 1);
+  });
+
+  it('同一次导入里的重复也只进一条', async () => {
+    const app = setup();
+    const res = await post(app, adif(rec('BD7KLO'), rec('BD7KLO')));
+    assert.deepEqual(await res.json(), { parsed: 2, imported: 1, skipped: 1, problems: [] });
+  });
+
+  it('读不了的那几条跳过，好的照样进，并说清楚哪条不行', async () => {
+    const app = setup();
+    const res = await post(app, adif('<CALL:6>BD7KLO <EOR>', rec('BA1AA')));
+
+    const body = (await res.json()) as { imported: number; problems: string[] };
+    assert.equal(body.imported, 1);
+    assert.equal(body.problems.length, 1);
+    assert.match(body.problems[0], /第 1 条/);
+  });
+
+  it('空文件不是错', async () => {
+    const res = await post(setup(), '');
+    assert.deepEqual(await res.json(), { parsed: 0, imported: 0, skipped: 0, problems: [] });
+  });
+
+  it('要会话', async () => {
+    const res = await setup().fetch(
+      new Request('http://local/api/qsos/import', { method: 'POST', body: adif(rec('BA1AA')) }),
+    );
+    assert.equal(res.status, 401);
+  });
+});
+
 describe('通联的改动留痕', () => {
   const history = async (app: ReturnType<typeof setup>, id: string) =>
     (await (await get(app, `/api/qsos/${id}/history`)).json()) as {

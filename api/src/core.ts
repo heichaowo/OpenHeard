@@ -14,6 +14,7 @@ export {
   missingFields,
   modeOf,
   normalizeCallsign,
+  parseAdif,
 } from '../../core/src/index.ts';
 
 export type {
