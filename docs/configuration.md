@@ -74,7 +74,7 @@ openssl rand -hex 32                            # sessionSecret 和 ingestToken
 
 一次只守一个频率。一支接收机同时只能调谐一处，跳频期间漏掉的发射无法补回。
 
-两个余量按部署调。噪声本底和天线各地不一样，调大了弱信号永远打不开静噪，调小了噪声起伏就会伪造出发射，把队列和磁盘塞满。运维页上写着此刻的噪声离门限还差多少，以及这次守听里最接近的一刻差了多少，照着那两个数调。
+两个余量按部署调。噪声本底和天线各地不一样，调大了弱信号永远打不开静噪，调小了噪声起伏就会伪造出发射，把队列和磁盘塞满。运维页上写着此刻的噪声离门限还差多少，以及这次守听里最接近的一刻差了多少，照着那两个数调。设置页上能直接改，清空一格就回到缺省值。
 
 ---
 
@@ -179,4 +179,5 @@ Both margins are tuned per deployment. Noise floors and antennas differ by
 site: too large and a weak signal never opens the squelch, too small and
 ordinary noise invents transmissions that fill the queue and the disk. The ops
 page shows how far the current noise is from the threshold and how close it has
-come during this watch; tune against those two numbers.
+come during this watch; tune against those two numbers. Both can be changed on
+the settings page, and clearing one returns it to its default.

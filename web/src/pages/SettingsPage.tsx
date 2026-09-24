@@ -14,9 +14,29 @@ import {
 } from "antd";
 import { api, errorText } from "../api";
 import type { Settings } from "../api";
+import type { FormRule } from "antd";
 import { AsyncContent } from "../components/AsyncContent";
 import { PageHeader } from "../components/PageHeader";
 import { useStore } from "../store";
+
+const filled = (v: unknown) => v !== undefined && v !== null && v !== "";
+
+/**
+ * 模拟守听那几格，填了任何一格，频率和信道名才必填。
+ *
+ * 没配过模拟守听的机器，这一栏整个空着是正常的。无条件必填的话，只改本台
+ * 信息也存不下去。
+ */
+const analogRequired =
+  (message: string): FormRule =>
+  ({ getFieldValue }) => ({
+    validator(_: unknown, value: unknown) {
+      const started = Object.values(getFieldValue("analog") ?? {}).some(filled);
+      return !started || filled(value)
+        ? Promise.resolve()
+        : Promise.reject(new Error(message));
+    },
+  });
 
 const MODES = [
   { value: "FM", label: "FM" },
@@ -104,7 +124,7 @@ export default function SettingsPage() {
               <Form.Item
                 name={["analog", "freqMhz"]}
                 label="频率 MHz"
-                rules={[{ required: true, message: "频率必填" }]}
+                rules={[analogRequired("频率必填")]}
                 extra="只能是 2m（144–148）或 70cm（420–450）"
               >
                 <InputNumber style={{ width: 140 }} step={0.0125} />
@@ -112,7 +132,7 @@ export default function SettingsPage() {
               <Form.Item
                 name={["analog", "channel"]}
                 label="信道名"
-                rules={[{ required: true, message: "信道名必填" }]}
+                rules={[analogRequired("信道名必填")]}
                 extra="进采集记录和发射行的那个名字"
               >
                 <Input style={{ width: 180 }} />
@@ -130,6 +150,20 @@ export default function SettingsPage() {
                 extra="十六进制，缺了就判不出哪次是本台"
               >
                 <Input style={{ width: 140 }} placeholder="6460" />
+              </Form.Item>
+              <Form.Item
+                name={["analog", "openMarginDb"]}
+                label="静噪打开余量 dB"
+                extra="缺省 12。调小听得到更弱的信号，也更容易被噪声误开"
+              >
+                <InputNumber style={{ width: 120 }} step={0.5} />
+              </Form.Item>
+              <Form.Item
+                name={["analog", "closeMarginDb"]}
+                label="静噪关闭余量 dB"
+                extra="缺省 7，要比打开余量小至少 2"
+              >
+                <InputNumber style={{ width: 120 }} step={0.5} />
               </Form.Item>
             </Space>
           </Card>

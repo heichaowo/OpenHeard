@@ -35,8 +35,24 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 /** 业余 2m 和 70cm。和 core 的 bandOf 同一个范围。 */
 const inBand = (f: number) => (f >= 144 && f <= 148) || (f >= 420 && f <= 450);
 
-const pickMargin = (submitted: unknown, existing: number | undefined, fallback: number) =>
-  typeof submitted === 'number' ? submitted : (existing ?? fallback);
+/**
+ * 表单里清空一格，antd 给的是 null，文本框给的是空串。两样都当「没填」，
+ * 回到缺省值。
+ */
+const given = (v: unknown) => v !== undefined && v !== null && v !== '';
+
+/**
+ * 没配过模拟守听时，表单照样会交一个各项都空的 analog 上来。它不是要开始配，
+ * 当成没交。否则保存本台信息也会被「频率必填」拦下。
+ */
+const blankAnalog = (a: unknown) => isObject(a) && !Object.values(a).some(given);
+
+const pickMargin = (submitted: unknown, existing: number | undefined, fallback: number) => {
+  if (typeof submitted === 'number') return submitted;
+  // 清空了就是要回到缺省值，不是保留文件里原来那个。
+  if (submitted === null || submitted === '') return fallback;
+  return existing ?? fallback;
+};
 
 /**
  * @param current 现在生效的那份。只提交一个余量时，要拿它和文件里原来那个
@@ -89,7 +105,7 @@ export function checkSettings(raw: unknown, current?: Config['analog']): string[
 
   problems.push(...checkQueries(raw.queries));
 
-  if (raw.analog !== undefined && raw.analog !== null) {
+  if (raw.analog !== undefined && raw.analog !== null && !blankAnalog(raw.analog)) {
     const a = raw.analog;
     if (!isObject(a)) {
       problems.push('analog 不是对象');
@@ -99,14 +115,14 @@ export function checkSettings(raw: unknown, current?: Config['analog']): string[
         problems.push('analog.freqMhz 要在 2m 或 70cm 段内');
       }
       if (typeof a.channel !== 'string' || a.channel === '') problems.push('analog.channel 必填');
-      if (a.gainDb !== undefined && typeof a.gainDb !== 'number') problems.push('analog.gainDb 要是数字');
-      if (a.myUnitId !== undefined && !/^[0-9a-fA-F]{1,4}$/.test(String(a.myUnitId))) {
+      if (given(a.gainDb) && typeof a.gainDb !== 'number') problems.push('analog.gainDb 要是数字');
+      if (given(a.myUnitId) && !/^[0-9a-fA-F]{1,4}$/.test(String(a.myUnitId))) {
         problems.push('analog.myUnitId 要是 1 到 4 位十六进制，例如 6460');
       }
 
       for (const k of ['openMarginDb', 'closeMarginDb'] as const) {
         const v = a[k];
-        if (v !== undefined && (typeof v !== 'number' || v <= 0 || v > 60)) {
+        if (given(v) && (typeof v !== 'number' || v <= 0 || v > 60)) {
           problems.push(`analog.${k} 要是 0 到 60 之间的数字`);
         }
       }
@@ -152,10 +168,15 @@ export function writeSettings(config: Config, next: Settings): void {
   );
   raw.channels = next.channels;
   raw.queries = next.queries;
-  if (next.analog !== undefined) {
+  if (next.analog !== undefined && next.analog !== null && !blankAnalog(next.analog)) {
     // recordingsDir 是路径，不在界面上改，保留文件里原来那个。
     const before = isObject(raw.analog) ? raw.analog : {};
-    raw.analog = { ...before, ...next.analog };
+    const merged: Record<string, unknown> = { ...before, ...next.analog };
+    // 清空的那一格去掉键，让缺省值生效。留着原来那个的话，清空等于没改。
+    for (const [k, v] of Object.entries(next.analog)) {
+      if (!given(v)) delete merged[k];
+    }
+    raw.analog = merged;
   }
 
   const tmp = `${config.path}.tmp`;

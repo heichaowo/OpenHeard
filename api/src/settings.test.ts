@@ -109,6 +109,32 @@ describe('checkSettings', () => {
     assert.deepEqual(checkSettings({ ...ok, analog: { ...ok.analog, myUnitId: '6460' } }), []);
   });
 
+  // antd 的数字框清空后给 null，文本框给空串。把它们当成填错了，整张表就存不了。
+  it('清空的可选项当没填，不拦', () => {
+    const cleared = { ...ok.analog, gainDb: null, myUnitId: '', openMarginDb: null, closeMarginDb: null };
+    assert.deepEqual(checkSettings({ ...ok, analog: cleared }), []);
+  });
+
+  it('清空一个余量就是回到缺省值，按缺省值去凑那一对', () => {
+    const clear = (k: string) =>
+      checkSettings({ ...ok, analog: { ...ok.analog, [k]: null } }, {
+        freqMhz: 145.5,
+        channel: 'x',
+        openMarginDb: 20,
+        closeMarginDb: 18,
+      });
+    // 关闭回到 7，和 20 差 13，可以
+    assert.deepEqual(clear('closeMarginDb'), []);
+    // 打开回到 12，和 18 凑不成回差
+    assert.ok(clear('openMarginDb').length > 0);
+  });
+
+  // 没配过模拟守听时，表单里那几格没填，照样会交一个空的 analog 上来。
+  it('一个全空的 analog 不算要开始配，不拦', () => {
+    assert.deepEqual(checkSettings({ ...ok, analog: {} }), []);
+    assert.deepEqual(checkSettings({ ...ok, analog: { freqMhz: null, channel: '' } }), []);
+  });
+
   it('查询走的是和配置同一套校验', () => {
     const bad = checkSettings({ ...ok, queries: [{ rule: { id: 'DestinationID', operator: 'equal', value: '46001' } }] });
     assert.ok(bad.some((p) => p.includes('必须是 JSON 数字')));
@@ -156,6 +182,26 @@ describe('writeSettings', () => {
     assert.equal(raw.dbPath, './openheard.db');
     assert.equal(raw.sessionSecret, 'y'.repeat(40));
     assert.equal((raw.analog as { recordingsDir: string }).recordingsDir, './rec');
+  });
+
+  it('清空的那一格去掉键，缺省值生效', () => {
+    const { path, config } = written({ analog: { ...base.analog, gainDb: 40 } });
+
+    writeSettings(config, { ...ok, analog: { ...ok.analog, gainDb: null } } as unknown as Settings);
+
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as { analog: Record<string, unknown> };
+    assert.equal('gainDb' in raw.analog, false);
+    assert.equal(raw.analog.recordingsDir, './rec');
+  });
+
+  it('没配过模拟守听时，全空的 analog 不写进文件', () => {
+    const { path, config } = written({ analog: undefined });
+
+    writeSettings(config, { ...ok, analog: {} } as unknown as Settings);
+
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    assert.equal(raw.analog, undefined);
+    assert.equal(config.analog, undefined);
   });
 
   it('权限还是 600，里面有密钥', () => {
