@@ -54,6 +54,44 @@ describe('adifRecords', () => {
   it('带类型的长度也认', () => {
     expect(adifRecords('<EOH><FREQ:7:N>439.525 <EOR>')[0].fields.get('FREQ')).toBe('439.525');
   });
+
+  // emoji 在 JS 里是两个码元，按码元数字节会把它算成 6 个字节。
+  it('四字节字符也按字节长度切', () => {
+    const recs = adifRecords('<EOH><COMMENT:6>😀ab<CALL:5>BA1AA<EOR>');
+    expect(recs[0].fields.get('COMMENT')).toBe('😀ab');
+    expect(recs[0].fields.get('CALL')).toBe('BA1AA');
+  });
+
+  // 长度多写一个字节、后面又紧贴着下一个标记，按长度切会吃掉下一个标记的 <。
+  it('长度多写了也不吞掉紧跟着的下一个字段', () => {
+    const recs = adifRecords('<EOH><CALL:6>BA1AA<QSO_DATE:8>20260915<EOR>');
+    expect(recs[0].fields.get('CALL')).toBe('BA1AA');
+    expect(recs[0].fields.get('QSO_DATE')).toBe('20260915');
+  });
+
+  it('值里有 < 时，长度对就照长度切', () => {
+    const recs = adifRecords('<EOH><COMMENT:19>signal < noise here<CALL:5>BA1AA<EOR>');
+    expect(recs[0].fields.get('COMMENT')).toBe('signal < noise here');
+    expect(recs[0].fields.get('CALL')).toBe('BA1AA');
+  });
+
+  it('值里有 < 时，长度错了也不把后面的字段搅乱', () => {
+    const recs = adifRecords('<EOH><COMMENT:9>signal < noise here<CALL:5>BA1AA<EOR>');
+    expect(recs[0].fields.get('COMMENT')).toBe('signal < noise here');
+    expect(recs[0].fields.get('CALL')).toBe('BA1AA');
+  });
+
+  it('没有头部时，值里写着 <eoh> 不当成头部结束', () => {
+    const recs = adifRecords('<CALL:5>BA1AA <COMMENT:13>ends at <eoh> <EOR>');
+    expect(recs.length).toBe(1);
+    expect(recs[0].fields.get('CALL')).toBe('BA1AA');
+    expect(recs[0].fields.get('COMMENT')).toBe('ends at <eoh>');
+  });
+
+  it('带 BOM 和 CRLF 的文件照样读', () => {
+    const recs = adifRecords('\uFEFFheader\r\n<eoh>\r\n<CALL:5>BA1AA\r\n<EOR>\r\n');
+    expect(recs[0].fields.get('CALL')).toBe('BA1AA');
+  });
 });
 
 describe('adifUnix', () => {
@@ -68,6 +106,18 @@ describe('adifUnix', () => {
   it('日期不成样子就没有', () => {
     expect(adifUnix('2026-09-15', '094933')).toBeUndefined();
     expect(adifUnix(undefined, '094933')).toBeUndefined();
+  });
+
+  it('只写到分钟的时间也认', () => {
+    expect(adifUnix('20260915', '0949')).toBe(adifUnix('20260915', '094900'));
+  });
+
+  // Date.UTC 会把 25 点顺延成第二天，读出来是一个错的时刻。
+  it('不存在的日期和时刻就没有，不顺延', () => {
+    expect(adifUnix('20260101', '259999')).toBeUndefined();
+    expect(adifUnix('20261301', '000000')).toBeUndefined();
+    expect(adifUnix('20260230', '000000')).toBeUndefined();
+    expect(adifUnix('20260915', '12')).toBeUndefined();
   });
 });
 
@@ -141,6 +191,14 @@ describe('parseAdif', () => {
     );
     expect(drafts[0].band).toBe('70cm');
     expect(drafts[0].freqMhz).toBeUndefined();
+  });
+
+  it('日期不存在的那条跳过，并说是日期不对', () => {
+    const { drafts, problems } = parseAdif(
+      '<EOH><CALL:5>BA1AA <QSO_DATE:8>20261301 <TIME_ON:4>1200 <MODE:2>FM <FREQ:7>439.525 <EOR>',
+    );
+    expect(drafts.length).toBe(0);
+    expect(problems[0]).toMatch(/日期或时间不存在.*20261301/);
   });
 
   it('没写报告时给 59', () => {

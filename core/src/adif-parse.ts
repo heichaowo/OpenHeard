@@ -8,8 +8,8 @@ import type { Mode, QsoDraft } from './types.ts';
  * 只认这套系统用得上的字段，别的原样跳过。这是为了把别处记的日志搬进来，
  * 不是要做一个通用的 ADIF 处理器。
  *
- * 长度按 UTF-8 字节数算，和写出去时一致。有些程序写的长度是错的，所以
- * 长度只用来定位，真正的边界还是下一个 `<`。
+ * 长度按 UTF-8 字节数算，和写出去时一致。有些程序写的长度是错的，所以按长度
+ * 切出来的值后面必须紧跟空白和下一个标记，不然就退回到「到下一个标记为止」。
  */
 
 export interface AdifRecord {
@@ -20,12 +20,11 @@ export interface AdifRecord {
 
 /** 把一份 ADIF 拆成一条条记录。头部（到 <EOH> 为止）跳过。 */
 export function adifRecords(text: string): AdifRecord[] {
-  const body = splitHeader(text);
   const out: AdifRecord[] = [];
   let fields = new Map<string, string>();
   let index = 0;
 
-  for (const tag of tags(body)) {
+  for (const tag of tags(text, headerEnd(text))) {
     if (tag.name === 'EOR') {
       if (fields.size > 0) {
         index += 1;
@@ -41,80 +40,94 @@ export function adifRecords(text: string): AdifRecord[] {
   return out;
 }
 
-function splitHeader(text: string): string {
-  const eoh = text.search(/<EOH>/i);
-  return eoh < 0 ? text : text.slice(eoh + 5);
+// 用同一个切分器找 <EOH>。直接搜字符串的话，没有头部的文件里某个字段的值
+// 恰好写着 <eoh>，前面的字段就全被当成头部丢了。
+function headerEnd(text: string): number {
+  for (const tag of tags(text, 0)) {
+    if (tag.name === 'EOH') return tag.end;
+  }
+  return 0;
 }
 
 interface Tag {
   name: string;
   value?: string;
+  /** 这个标记连同它的值在原文里结束的位置。 */
+  end: number;
 }
 
-function* tags(body: string): Generator<Tag> {
-  let i = 0;
-  while (i < body.length) {
-    const lt = body.indexOf('<', i);
-    if (lt < 0) return;
-    const gt = body.indexOf('>', lt);
-    if (gt < 0) return;
+// <NAME>、<NAME:len> 或 <NAME:len:TYPE>。名字里不会有空白和尖括号，所以
+// 值里的「信号 < 噪声」这种写法不会被当成标记。
+const TAG = /<([^\s<>:]+)(?::(\d+)(?::[^\s<>:]*)?)?>/g;
 
-    // <NAME:len> 或 <NAME:len:TYPE> 或 <EOR>
-    const [name, len] = body.slice(lt + 1, gt).split(':');
-    const upper = (name ?? '').toUpperCase();
-
-    if (len === undefined) {
-      yield { name: upper };
-      i = gt + 1;
+function* tags(text: string, from: number): Generator<Tag> {
+  const re = new RegExp(TAG.source, 'g');
+  re.lastIndex = from;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const name = m[1].toUpperCase();
+    const start = m.index + m[0].length;
+    if (m[2] === undefined) {
+      yield { name, end: start };
       continue;
     }
 
-    // 长度按字节数给，而 JS 的字符串按码元。先按字节切，切不出来就退回
-    // 「到下一个 < 为止」，因为有些程序写的长度是错的。
-    const rest = body.slice(gt + 1);
-    const want = Number(len);
-    const value = Number.isFinite(want) ? takeBytes(rest, want) : undefined;
-    const fallback = rest.slice(0, rest.indexOf('<') < 0 ? rest.length : rest.indexOf('<')).trim();
-    const picked = value ?? fallback;
-
-    yield { name: upper, value: picked };
-    i = gt + 1 + (value === undefined ? fallback.length : charsFor(rest, want));
+    const exact = endAfterBytes(text, start, Number(m[2]));
+    const trusted = exact !== undefined && text.slice(exact, nextTag(text, exact)).trim() === '';
+    const end = trusted ? exact : nextTag(text, start);
+    const raw = text.slice(start, end);
+    yield { name, value: trusted ? raw : raw.trim(), end };
+    re.lastIndex = end;
   }
 }
 
-const encoder = new TextEncoder();
+function nextTag(text: string, from: number): number {
+  const re = new RegExp(TAG.source, 'g');
+  re.lastIndex = from;
+  return re.exec(text)?.index ?? text.length;
+}
 
-/** 取前 n 个 UTF-8 字节对应的那段字符串。切不整齐就返回 undefined。 */
-function takeBytes(s: string, n: number): string | undefined {
-  if (n === 0) return '';
+/**
+ * 从 start 起数 n 个 UTF-8 字节，返回结束的位置。切不整齐就返回 undefined。
+ * 按码点走，因为 emoji 这类字符在 JS 里是两个码元，却是一个 4 字节的字符。
+ */
+function endAfterBytes(s: string, start: number, n: number): number | undefined {
   let bytes = 0;
-  for (let i = 0; i < s.length; i++) {
-    bytes += encoder.encode(s[i]).length;
-    if (bytes === n) return s.slice(0, i + 1);
-    if (bytes > n) return undefined;
+  let i = start;
+  while (bytes < n && i < s.length) {
+    const cp = s.codePointAt(i)!;
+    bytes += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+    i += cp > 0xffff ? 2 : 1;
   }
-  return undefined;
+  return bytes === n ? i : undefined;
 }
 
-function charsFor(s: string, n: number): number {
-  const taken = takeBytes(s, n);
-  return taken === undefined ? 0 : taken.length;
-}
-
-/** ADIF 的 YYYYMMDD + HHMMSS 一律是 UTC。 */
+/** ADIF 的 YYYYMMDD + HHMM 或 HHMMSS 一律是 UTC。 */
 export function adifUnix(date: string | undefined, time: string | undefined): number | undefined {
   if (date === undefined || !/^\d{8}$/.test(date)) return undefined;
+  if (time !== undefined && !/^\d{4}(\d{2})?$/.test(time)) return undefined;
   const t = (time ?? '000000').padEnd(6, '0');
-  if (!/^\d{6}$/.test(t)) return undefined;
-  const at = Date.UTC(
-    Number(date.slice(0, 4)),
-    Number(date.slice(4, 6)) - 1,
-    Number(date.slice(6, 8)),
-    Number(t.slice(0, 2)),
-    Number(t.slice(2, 4)),
-    Number(t.slice(4, 6)),
-  );
-  return Number.isFinite(at) ? Math.floor(at / 1000) : undefined;
+  const parts = [
+    date.slice(0, 4),
+    date.slice(4, 6),
+    date.slice(6, 8),
+    t.slice(0, 2),
+    t.slice(2, 4),
+    t.slice(4, 6),
+  ].map(Number);
+  const [y, mo, d, h, mi, s] = parts;
+  const at = new Date(Date.UTC(y, mo - 1, d, h, mi, s));
+  // Date.UTC 不拒绝 25 点或 13 月，它会顺延到下一天、下一年。读回来对不上
+  // 就说明原来那个日期不存在。
+  const back = [
+    at.getUTCFullYear(),
+    at.getUTCMonth() + 1,
+    at.getUTCDate(),
+    at.getUTCHours(),
+    at.getUTCMinutes(),
+    at.getUTCSeconds(),
+  ];
+  return back.every((v, i) => v === parts[i]) ? Math.floor(at.getTime() / 1000) : undefined;
 }
 
 /** ADIF 的模式回到我们这两个取值。别的模式这套系统产生不了，也存不下。 */
@@ -156,6 +169,15 @@ export function parseAdif(text: string): ParsedAdif {
     // 这套系统只记 2m 和 70cm，别的波段存不下也不该假装存下了。
     if (freqMhz !== undefined && bandOf(freqMhz) === undefined) {
       problems.push(`第 ${rec.index} 条的 ${freqMhz} MHz 不在 2m 或 70cm 段内，跳过`);
+      continue;
+    }
+
+    const date = f.get('QSO_DATE');
+    if (startAt === undefined && date !== undefined) {
+      const time = f.get('TIME_ON');
+      problems.push(
+        `第 ${rec.index} 条的日期或时间不存在（QSO_DATE ${date}${time === undefined ? '' : `，TIME_ON ${time}`}），跳过`,
+      );
       continue;
     }
 

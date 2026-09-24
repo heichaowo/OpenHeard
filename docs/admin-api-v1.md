@@ -122,6 +122,8 @@ curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
 
 读不了的记录跳过，好的照样进，`problems` 里每条一句话并指出是第几条。只认这套系统用得上的字段，`MODE` 不是 FM 或 DMR、频率不在 2m 或 70cm 段内的都跳过。导进来的记录不带 `clusterId`，它们没有任何观测支撑。
 
+字段长度按 UTF-8 字节数算。有些程序写的长度是错的。按长度切出来的值后面如果不是空白加下一个标记，就当长度写错了，改取到下一个标记为止。日期或时刻不存在的记录跳过，例如 25 点或 13 月，不顺延到下一天。
+
 ## 设置
 
 | 方法和路径 | 请求 | 响应 |
@@ -328,6 +330,12 @@ carries a line each, naming the record number. Only the fields this system uses
 are read, and a record is skipped when `MODE` is neither FM nor DMR or the
 frequency is outside 2m and 70cm. Imported rows carry no `clusterId` — nothing
 observed them.
+
+Field lengths count UTF-8 bytes. Some programs write wrong lengths: when the
+value cut by length is not followed by whitespace and the next tag, the length
+is taken as wrong and the value runs to the next tag instead. A record whose
+date or time does not exist, such as hour 25 or month 13, is skipped rather than
+rolled over into the next day.
 
 ## Settings
 
