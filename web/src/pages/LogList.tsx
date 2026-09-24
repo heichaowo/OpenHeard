@@ -56,6 +56,11 @@ export default function LogList() {
     reset: resetRecall,
   } = useRecall(form, qsos);
   const [changes, setChanges] = useState<Record<string, QsoChange[]>>({});
+  const loadChanges = (id: string) =>
+    api
+      .qsoHistory(id)
+      .then((h) => setChanges((m) => ({ ...m, [id]: h })))
+      .catch(() => setChanges((m) => ({ ...m, [id]: [] })));
   const [importing, setImporting] = useState(false);
   const time = useTime();
 
@@ -104,6 +109,8 @@ export default function LogList() {
     setSaving(true);
     try {
       await editQso(editing.id, draft);
+      // 拉过改动记录的那一行要重拉，否则展开还是改之前的次数和内容。
+      if (changes[editing.id] !== undefined) void loadChanges(editing.id);
       setEditing(null);
       message.success(`${draft.call} 已更新`);
     } catch (e) {
@@ -342,10 +349,7 @@ export default function LogList() {
                 // 改动历史要展开才知道有没有，所以每行都可展开。
                 onExpand: (open, q) => {
                   if (!open || changes[q.id] !== undefined) return;
-                  void api
-                    .qsoHistory(q.id)
-                    .then((h) => setChanges((m) => ({ ...m, [q.id]: h })))
-                    .catch(() => setChanges((m) => ({ ...m, [q.id]: [] })));
+                  void loadChanges(q.id);
                 },
                 expandedRowRender: (q) => (
                   <Space direction="vertical" size={2}>

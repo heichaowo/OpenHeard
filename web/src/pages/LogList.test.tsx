@@ -10,6 +10,12 @@ import type { Store } from '../store'
 import { ZONE_KEY } from '../theme'
 import LogList from './LogList'
 
+const qsoHistory = vi.hoisted(() => vi.fn())
+vi.mock('../api', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../api')>()
+  return { ...real, api: { ...real.api, qsoHistory } }
+})
+
 const qso = (over: Partial<Qso> = {}): Qso => ({
   id: 'q1',
   call: 'BD7KLO',
@@ -146,5 +152,27 @@ describe('LogList 的编辑抽屉', () => {
 
     // antd 的 Modal 把标题渲染两处，所以按数量断言。
     expect((await screen.findAllByText('丢掉刚改的内容？')).length).toBeGreaterThan(0)
+  })
+})
+
+describe('LogList 的改动记录', () => {
+  // 展开过一次就缓存了。改完不重拉的话，再展开看到的还是改之前的次数。
+  it('改完之后重拉那一行的改动记录', async () => {
+    qsoHistory.mockResolvedValue([])
+    editQso.mockResolvedValue(undefined)
+    const { container } = mount()
+
+    await userEvent.click(container.querySelector('.ant-table-row-expand-icon')!)
+    await waitFor(() => expect(qsoHistory).toHaveBeenCalledTimes(1))
+
+    const change = { at: 1_789_000_100, action: 'edit', before: { ...qso(), call: 'BD7KLO' } }
+    qsoHistory.mockResolvedValue([change])
+    await userEvent.click(button('编辑'))
+    await screen.findByDisplayValue('BD7KLO')
+    await userEvent.type(screen.getByLabelText('对方 QTH'), '深圳')
+    await userEvent.click(button('保存'))
+
+    await waitFor(() => expect(qsoHistory).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText(/改过 1 次/)).toBeInTheDocument()
   })
 })
