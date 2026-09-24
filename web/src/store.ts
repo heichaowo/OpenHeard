@@ -1,5 +1,13 @@
 import { createContext, use } from 'react'
-import type { Channel, PendingItem, Qso, QsoDraft, QsoField, StationDefaults } from '@core'
+import type {
+  Channel,
+  ClusterPick,
+  PendingItem,
+  Qso,
+  QsoDraft,
+  QsoField,
+  StationDefaults,
+} from '@core'
 
 export type PendingRow = PendingItem & { missing: QsoField[] }
 
@@ -16,11 +24,14 @@ export interface Store {
   error?: string
 
   /** 下面这些都会打到后端，失败时抛 ApiError，调用方负责显示。 */
-  /** activityIds 只结算这一段里的这几次发射，不给就是整段。 */
+  /**
+   * activityIds 只结算这一段里的这几次发射，不给就是整段。界面上一律给，
+   * 因为段会长：看的时候两次，点下去的时候可能已经三次了。
+   */
   promote: (clusterId: string, draft: QsoDraft, activityIds?: string[]) => Promise<void>
   ignore: (clusterId: string, activityIds?: string[]) => Promise<void>
   /** 一次忽略好几段。一条一条调的话，剩下那些段的 id 会变，后面全会 409。 */
-  ignoreMany: (clusterIds: string[]) => Promise<{ ignored: number; missing: string[] }>
+  ignoreMany: (picks: ClusterPick[]) => Promise<{ ignored: number; missing: string[] }>
   addQso: (draft: QsoDraft) => Promise<void>
   /** 改一条已入库的。id、创建时间和来源聚类不动。 */
   editQso: (id: string, draft: QsoDraft) => Promise<void>

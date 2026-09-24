@@ -20,7 +20,7 @@
 | `dmrId` | 是 | 本台在 radioid.net 的 7 位 ID。数字侧靠它判断一次发射是不是本台 |
 | `clusterGapS` | 是 | 聚类间隔阈值，秒。**没有缺省值**，这个数要来自对真实流量的实测。46001 组实测 p90 是 102 秒，取 120 秒 |
 | `pendingWindowDays` | 是 | 待确认队列只看这么多天内的发射 |
-| `activityRetentionDays` | 是 | `activity` 的保留期。`qso` 不裁 |
+| `activityRetentionDays` | 是 | `activity` 的保留期。`qso` 不裁。比 `pendingWindowDays` 短时按 `pendingWindowDays` 算，队列里还没处理的段不裁 |
 | `station` | 是 | 本台信息，见下 |
 | `channels` | 是 | 频谱表，可以是空数组 |
 | `queries` | 是 | BrandMeister 查询，至少一条 |
@@ -109,7 +109,7 @@ loop nobody can see.
 | `dmrId` | yes | Our 7-digit radioid.net ID. The digital side decides `mine` from it |
 | `clusterGapS` | yes | Clustering gap threshold in seconds. **No default**, because the number has to come from measuring real traffic. Measured on talkgroup 46001, p90 is 102 seconds, so 120 |
 | `pendingWindowDays` | yes | How far back the pending queue looks |
-| `activityRetentionDays` | yes | How long `activity` is kept. `qso` is never pruned |
+| `activityRetentionDays` | yes | How long `activity` is kept. `qso` is never pruned. When shorter than `pendingWindowDays`, `pendingWindowDays` applies, so nothing still waiting in the queue is pruned |
 | `station` | yes | Our own station, below |
 | `channels` | yes | The spectrum table, may be empty |
 | `queries` | yes | BrandMeister queries, at least one |

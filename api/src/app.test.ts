@@ -219,14 +219,66 @@ describe('只处理一段里的几次发射', () => {
     assert.equal((await pendingOf(app)).length, 0);
   });
 
-  it('挑了不属于这一段的就 422', async () => {
+  // 界面上拿的是一份快照，挑中的那几次可能已经被别处结算了。
+  it('挑了不在这一段里的就 409，什么都不结算', async () => {
     const app = merged();
     const [seg] = await pendingOf(app);
     const res = await send(app, 'POST', `/api/pending/${seg.cluster.id}/promote`, {
       ...complete,
       activityIds: ['m1', '别的段的'],
     });
-    assert.equal(res.status, 422);
+    assert.equal(res.status, 409);
+    assert.equal((await pendingOf(app))[0].cluster.activities.length, 4);
+  });
+
+  // 把勾全去掉再点确认。当成「不给就是整段」的话，另一边的发射也一起没了。
+  it('一次都没挑就 422，不当成整段', async () => {
+    const app = merged();
+    const [seg] = await pendingOf(app);
+
+    const promoted = await send(app, 'POST', `/api/pending/${seg.cluster.id}/promote`, {
+      ...complete,
+      activityIds: [],
+    });
+    const ignored = await send(app, 'DELETE', `/api/pending/${seg.cluster.id}?activityIds=`);
+
+    assert.equal(promoted.status, 422);
+    assert.notEqual(ignored.status, 204);
+    assert.equal((await pendingOf(app))[0].cluster.activities.length, 4);
+  });
+
+  // 打开抽屉到点确认之间，同一段又进来一条。段 id 跟着最早那条走，不会变。
+  it('带着打开时的那几次去结算，后来并进来的留在队列里', async () => {
+    const db = openDb(':memory:');
+    insertActivities(
+      db,
+      [
+        act('m1', { dmrId: MY_ID, startAt: start, talkgroup: 46001 }),
+        act('x1', { dmrId: 4616472, startAt: start + 10, talkgroup: 46001 }),
+      ].map((a) => ({ activity: a, raw: '{}' })),
+      1,
+    );
+    const app = createApp(createStore(db, config), config.ingestToken, {
+      passwordHash: config.adminPasswordHash,
+      sessionSecret: config.sessionSecret,
+    });
+    const [seg] = await pendingOf(app);
+    const seen = seg.cluster.activities.map((a) => a.id);
+
+    const late = act('x9', { dmrId: 4606502, startAt: start + 40, talkgroup: 46001 });
+    insertActivities(db, [{ activity: late, raw: '{}' }], 2);
+    assert.equal((await pendingOf(app))[0].cluster.id, seg.cluster.id);
+
+    const res = await send(app, 'POST', `/api/pending/${seg.cluster.id}/promote`, {
+      ...complete,
+      activityIds: seen,
+    });
+
+    assert.equal(res.status, 200);
+    const left = db.prepare(
+      'SELECT id FROM activity WHERE id NOT IN (SELECT activity_id FROM resolved_activity)',
+    ).all() as { id: string }[];
+    assert.deepEqual(left.map((r) => r.id), ['x9']);
   });
 });
 
@@ -251,43 +303,137 @@ describe('一次忽略好几段', () => {
       act('a3', { dmrId: MY_ID, startAt: start + 1200, talkgroup: 46001 }),
     ]);
 
+  type Seg = { cluster: { id: string; activities: { id: string }[] } };
+  const segs = async (app: ReturnType<typeof setup>) =>
+    (await (await get(app, '/api/pending')).json()) as Seg[];
+  const pickOf = (p: Seg) => ({
+    clusterId: p.cluster.id,
+    activityIds: p.cluster.activities.map((a) => a.id),
+  });
+
   it('三段一次忽略掉，队列空了', async () => {
     const app = three();
-    const before = (await (await get(app, '/api/pending')).json()) as { cluster: { id: string } }[];
+    const before = await segs(app);
     assert.equal(before.length, 3);
 
-    const res = await send(app, 'POST', '/api/pending/ignore', {
-      clusterIds: before.map((p) => p.cluster.id),
-    });
+    const res = await send(app, 'POST', '/api/pending/ignore', { picks: before.map(pickOf) });
 
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), { ignored: 3, missing: [] });
-    assert.equal(((await (await get(app, '/api/pending')).json()) as unknown[]).length, 0);
+    assert.equal((await segs(app)).length, 0);
   });
 
   it('只忽略给到的那几段，别的留着', async () => {
     const app = three();
-    const before = (await (await get(app, '/api/pending')).json()) as { cluster: { id: string } }[];
+    const before = await segs(app);
 
-    await send(app, 'POST', '/api/pending/ignore', { clusterIds: [before[0].cluster.id] });
+    await send(app, 'POST', '/api/pending/ignore', { picks: [pickOf(before[0])] });
 
-    assert.equal(((await (await get(app, '/api/pending')).json()) as unknown[]).length, 2);
+    assert.equal((await segs(app)).length, 2);
   });
 
-  it('认不出来的 id 单独报出来，不影响别的', async () => {
+  it('认不出来的段单独报出来，不影响别的', async () => {
     const app = three();
-    const before = (await (await get(app, '/api/pending')).json()) as { cluster: { id: string } }[];
+    const before = await segs(app);
 
     const res = await send(app, 'POST', '/api/pending/ignore', {
-      clusterIds: [before[0].cluster.id, '不存在'],
+      picks: [pickOf(before[0]), { clusterId: '不存在', activityIds: ['a1'] }],
     });
 
     assert.deepEqual(await res.json(), { ignored: 1, missing: ['不存在'] });
   });
 
-  it('传的不是字符串数组就 422', async () => {
-    assert.equal((await send(three(), 'POST', '/api/pending/ignore', { clusterIds: 'x' })).status, 422);
-    assert.equal((await send(three(), 'POST', '/api/pending/ignore', { clusterIds: [1] })).status, 422);
+  // 挑的时候只有本台一声，确认之前对方回了，并进同一段，段 id 不变。
+  it('挑完之后才并进来的回复不跟着忽略', async () => {
+    const db = openDb(':memory:');
+    const one = act('a1', { dmrId: MY_ID, startAt: start, talkgroup: 46001 });
+    insertActivities(db, [{ activity: one, raw: '{}' }], 1);
+    const app = createApp(createStore(db, config), config.ingestToken, {
+      passwordHash: config.adminPasswordHash,
+      sessionSecret: config.sessionSecret,
+    });
+    const [picked] = await segs(app);
+
+    const reply = act('r1', { dmrId: 4616472, startAt: start + 20, talkgroup: 46001 });
+    insertActivities(db, [{ activity: reply, raw: '{}' }], 2);
+    assert.equal((await segs(app))[0].cluster.id, picked.cluster.id);
+
+    const res = await send(app, 'POST', '/api/pending/ignore', { picks: [pickOf(picked)] });
+
+    assert.deepEqual(await res.json(), { ignored: 1, missing: [] });
+    const after = await segs(app);
+    assert.deepEqual(after.flatMap((p) => p.cluster.activities.map((a) => a.id)), []);
+    // 回复不是本台的，自己成不了一段，但它没有被标成忽略，还在库里等着。
+    const left = db.prepare(
+      'SELECT id FROM activity WHERE id NOT IN (SELECT activity_id FROM resolved_activity)',
+    ).all() as { id: string }[];
+    assert.deepEqual(left.map((r) => r.id), ['r1']);
+  });
+
+  it('一次都没挑的那段算认不出来，不整段忽略', async () => {
+    const app = three();
+    const before = await segs(app);
+
+    const res = await send(app, 'POST', '/api/pending/ignore', {
+      picks: [{ clusterId: before[0].cluster.id, activityIds: [] }],
+    });
+
+    assert.deepEqual(await res.json(), { ignored: 0, missing: [before[0].cluster.id] });
+    assert.equal((await segs(app)).length, 3);
+  });
+
+  it('传的形状不对就 422', async () => {
+    const bad = [
+      { picks: 'x' },
+      { picks: [1] },
+      { picks: [{ clusterId: 'a1' }] },
+      { picks: [{ clusterId: 'a1', activityIds: [1] }] },
+      // 旧的请求体。它按段 id 整段忽略，正是要去掉的那个行为。
+      { clusterIds: ['a1'] },
+    ];
+    for (const body of bad) {
+      assert.equal((await send(three(), 'POST', '/api/pending/ignore', body)).status, 422);
+    }
+  });
+});
+
+// 保留期是手改配置文件定的，没有东西拦着它比待确认窗口短。
+describe('裁剪不碰队列里的段', () => {
+  it('保留期比窗口短时，窗口里没处理的段还在', () => {
+    const db = openDb(':memory:');
+    const now = Math.floor(Date.now() / 1000);
+    insertActivities(
+      db,
+      [
+        act('d20', { dmrId: MY_ID, startAt: now - 20 * 86400 }),
+        act('d40', { dmrId: MY_ID, startAt: now - 40 * 86400 }),
+      ].map((a) => ({ activity: a, raw: '{}' })),
+      1,
+    );
+    const store = createStore(db, { ...config, activityRetentionDays: 14, pendingWindowDays: 30 });
+
+    store.logPoll({ queryKey: 'q', at: now, fetched: 0, parsed: 0, written: 0, ok: true, ms: 1 });
+
+    assert.deepEqual(
+      store.pending().map((p) => p.cluster.id),
+      ['d20'],
+    );
+    const ids = (db.prepare('SELECT id FROM activity').all() as { id: string }[]).map((r) => r.id);
+    assert.deepEqual(ids, ['d20']);
+  });
+});
+
+describe('请求体上限', () => {
+  it('超过上限回 413，不读进来', async () => {
+    const res = await setup().fetch(
+      new Request('http://local/api/qsos/import', {
+        method: 'POST',
+        headers: { cookie: cookie(), 'content-type': 'text/plain' },
+        body: 'x'.repeat(17 * 1024 * 1024),
+      }),
+    );
+    assert.equal(res.status, 413);
+    assert.match(((await res.json()) as { error: string }).error, /MB/);
   });
 });
 

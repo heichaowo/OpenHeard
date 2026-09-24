@@ -1,4 +1,4 @@
-import type { Channel, PendingItem, Qso, QsoDraft, StationDefaults } from '@core'
+import type { Channel, ClusterPick, PendingItem, Qso, QsoDraft, StationDefaults } from '@core'
 
 /** 后端回的错误。422 会带上还缺哪些字段。 */
 export class ApiError extends Error {
@@ -195,10 +195,10 @@ export const api = {
       { method: 'DELETE' },
     ),
 
-  ignoreMany: (clusterIds: string[]) =>
+  ignoreMany: (picks: ClusterPick[]) =>
     call<{ ignored: number; missing: string[] }>('/pending/ignore', {
       method: 'POST',
-      body: JSON.stringify({ clusterIds }),
+      body: JSON.stringify({ picks }),
     }),
 
   addQso: (draft: QsoDraft) =>

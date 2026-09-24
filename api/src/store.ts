@@ -12,7 +12,15 @@ import {
   missingFields,
   normalizeCallsign,
 } from './core.ts';
-import type { Channel, Cluster, PendingItem, Qso, QsoDraft, StationDefaults } from './core.ts';
+import type {
+  Channel,
+  Cluster,
+  ClusterPick,
+  PendingItem,
+  Qso,
+  QsoDraft,
+  StationDefaults,
+} from './core.ts';
 import {
   activityCounts,
   deleteQso,
@@ -105,9 +113,14 @@ export function createStore(db: DatabaseSync, config: Config) {
   /** 挑出这一段里的这几次发射。不给就是整段，给了就得真的属于这一段。 */
   const subsetOf = (cluster: Cluster, ids?: string[]): string[] => {
     const all = cluster.activities.map((a) => a.id);
-    if (ids === undefined || ids.length === 0) return all;
+    if (ids === undefined) return all;
+    // 空数组是「一次都没挑」。当成整段的话，界面上把勾全去掉再点确认，
+    // 会把整段连同不相干的那一边一起结算掉。
+    if (ids.length === 0) throw new StoreError(422, '一次发射都没挑');
     const outside = ids.filter((id) => !all.includes(id));
-    if (outside.length > 0) throw new StoreError(422, `这几次发射不在这一段里：${outside.join('、')}`);
+    if (outside.length > 0) {
+      throw new StoreError(409, `这几次发射已经不在这一段里，刷新后重试：${outside.join('、')}`);
+    }
     return ids;
   };
 
@@ -181,23 +194,28 @@ export function createStore(db: DatabaseSync, config: Config) {
      *
      * 一条一条调的话，每忽略一段就要重新聚类一次，剩下那些段的边界和 id 都会变，
      * 后面几条于是全部 409。这里在同一次聚类结果上一起解决，一个事务写完。
+     *
+     * 每段只结算挑的时候看到的那几次。挑完到确认之间，同一段里可能进来一条
+     * 回复，段 id 不变。按段 id 整段忽略的话，这条回复没人看过就一起丢了。
      */
-    ignoreMany: (clusterIds: string[]): { ignored: number; missing: string[] } => {
+    ignoreMany: (picks: ClusterPick[]): { ignored: number; missing: string[] } => {
       const all = clusters();
-      const found = clusterIds
-        .map((id) => all.find((c) => c.id === id))
-        .filter((c): c is Cluster => c !== undefined);
-      const missing = clusterIds.filter((id) => !all.some((c) => c.id === id));
-
-      if (found.length > 0) {
-        const at = nowS();
-        withTx(db, () => {
-          for (const c of found) {
-            resolveActivities(db, c.activities.map((a) => a.id), null, at);
-          }
-        });
+      const settle: string[] = [];
+      const missing: string[] = [];
+      for (const pick of picks) {
+        const c = all.find((x) => x.id === pick.clusterId);
+        const ids = c?.activities.map((a) => a.id) ?? [];
+        if (pick.activityIds.length === 0 || pick.activityIds.some((id) => !ids.includes(id))) {
+          missing.push(pick.clusterId);
+        } else {
+          settle.push(...pick.activityIds);
+        }
       }
-      return { ignored: found.length, missing };
+
+      if (settle.length > 0) {
+        withTx(db, () => resolveActivities(db, settle, null, nowS()));
+      }
+      return { ignored: picks.length - missing.length, missing };
     },
 
     // 手工录入没有任何观测，所以不带 clusterId，也不动 activity。
@@ -277,7 +295,10 @@ export function createStore(db: DatabaseSync, config: Config) {
       prunePollLog(db, nowS() - 30 * 86400);
       // 发射行裁掉了，对应的录音就没有任何东西指向它了。不一起删的话
       // 那个目录只涨不减，而且涨得比库里任何一张表都快。
-      const gone = pruneActivities(db, nowS() - config.activityRetentionDays * 86400);
+      // 保留期比待确认窗口短时按窗口算。队列里还没处理的段不能被裁掉，
+      // 人还要靠它和它的录音去判断。
+      const keepDays = Math.max(config.activityRetentionDays, config.pendingWindowDays);
+      const gone = pruneActivities(db, nowS() - keepDays * 86400);
       if (gone.length > 0) removeRecordings(config.recordingsDir, gone);
     },
 

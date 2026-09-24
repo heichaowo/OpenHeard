@@ -94,3 +94,9 @@ export interface PendingItem {
   cluster: Cluster;
   draft: QsoDraft;
 }
+
+/** 一段里挑中的那几次发射。结算按它们来，不按段 id 整段来，因为段会长。 */
+export interface ClusterPick {
+  clusterId: string;
+  activityIds: string[];
+}

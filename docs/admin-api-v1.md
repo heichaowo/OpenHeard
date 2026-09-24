@@ -29,8 +29,9 @@
 | `401` | 没有会话，或者口令不对 |
 | `429` | 登录试得太频繁。一个来源五分钟内最多十次，`Retry-After` 是还要等的秒数。只有一个口令，猜中一次就是全部，而监听地址可以配到局域网 |
 | `404` | 要删的通联不存在 |
-| `409` | 段的 id 对不上。两次请求之间又入库了更早的发射，聚类边界变了，刷新后重试 |
-| `422` | 草稿还缺必填字段，`missing` 里是字段名 |
+| `409` | 段的 id 对不上，或者挑的发射已经不在这一段里。两次请求之间又入库了更早的发射，或者别处已经结算了其中几次，刷新后重试 |
+| `413` | 请求体超过 16 MB |
+| `422` | 草稿还缺必填字段，`missing` 里是字段名。`activityIds` 是空数组也回这个 |
 | `503` | 配置有问题，`problems` 里是原因，此时每条路由都回这个 |
 
 ## 本台信息
@@ -47,8 +48,8 @@
 |---|---|---|
 | `GET /api/pending` | 无 | `PendingItem[]` |
 | `POST /api/pending/:clusterId/promote` | `QsoDraft`，可带 `activityIds` | `Qso`，或 `409`、`422` |
-| `DELETE /api/pending/:clusterId` | 无，可带 `?activityIds=a,b` | `204`，或 `409` |
-| `POST /api/pending/ignore` | `{clusterIds: string[]}` | `{ignored, missing}` |
+| `DELETE /api/pending/:clusterId` | 无，可带 `?activityIds=a,b` | `204`，或 `409`、`422` |
+| `POST /api/pending/ignore` | `{picks: {clusterId, activityIds}[]}` | `{ignored, missing}` |
 
 `PendingItem` 是 `{cluster, draft}`。`cluster` 是按信道和间隔阈值算出来的一段对话，不入库，每次请求重算。`draft` 是机器能预填的部分。
 
@@ -60,7 +61,11 @@
 
 `activityIds` 只结算这一段里的这几次发射，不给就是整段。聚类按一个间隔阈值猜，会猜错：两段对话挨得近会被并成一段，这时整段提升会把两边记成一条，整段忽略又把两边都丢掉。挑出属于这次通联的那几次，剩下的没有被结算，下一轮重新聚类会自己分出去。
 
-挑的 id 必须真的属于这一段，否则回 `422`。
+挑的 id 必须还在这一段里，否则回 `409`。空数组回 `422`，它的意思是一次都没挑，不是整段。
+
+界面一律带上 `activityIds`，即使挑的是整段。段 id 跟着最早那条发射走，段长了 id 不变。不带的话，人看过之后才并进来的发射也会一起结算。
+
+批量忽略也一样，每段带上选中那一刻看到的发射。选完到确认之间对方回了一句，这句不会跟着被忽略。挑的发射已经不在那一段里的，这一段算进 `missing`，不结算。
 
 ## 日志
 
@@ -205,8 +210,9 @@ that are still absent.
 | `401` | No session, or the wrong password |
 | `429` | Too many login attempts. Ten per source per five minutes; `Retry-After` gives the seconds to wait. There is one password and guessing it once is everything, and the listen address can be on the LAN |
 | `404` | The contact to edit or delete does not exist |
-| `409` | The cluster id no longer matches. An earlier transmission arrived between the two requests and moved the boundary; refresh and retry |
-| `422` | The draft is missing required fields, named in `missing` |
+| `409` | The cluster id no longer matches, or a picked transmission is no longer in the segment. An earlier transmission arrived between the two requests, or some of them were settled elsewhere; refresh and retry |
+| `413` | The request body is over 16 MB |
+| `422` | The draft is missing required fields, named in `missing`. Also an empty `activityIds` |
 | `503` | The config is broken. `problems` says why, and every route answers this |
 
 ## Station
@@ -223,9 +229,9 @@ table behind the quick-entry channel picker.
 | Method and path | Request | Response |
 |---|---|---|
 | `GET /api/pending` | none | `PendingItem[]` |
-| `POST /api/pending/:clusterId/promote` | `QsoDraft` | `Qso`, or `409`, `422` |
-| `DELETE /api/pending/:clusterId` | none, optionally `?activityIds=a,b` | `204`, or `409` |
-| `POST /api/pending/ignore` | `{clusterIds: string[]}` | `{ignored, missing}` |
+| `POST /api/pending/:clusterId/promote` | `QsoDraft`, optionally with `activityIds` | `Qso`, or `409`, `422` |
+| `DELETE /api/pending/:clusterId` | none, optionally `?activityIds=a,b` | `204`, or `409`, `422` |
+| `POST /api/pending/ignore` | `{picks: {clusterId, activityIds}[]}` | `{ignored, missing}` |
 
 A `PendingItem` is `{cluster, draft}`. The cluster is a conversation derived
 from the channel and the gap threshold; it is not stored and is recomputed per
@@ -248,7 +254,18 @@ the whole thing records both as a single contact and ignoring it discards both.
 Pick the transmissions that belong to this contact; the rest are left unsettled
 and separate on the next clustering.
 
-An id that does not belong to the segment gives `422`.
+An id that is no longer in the segment gives `409`. An empty array gives `422`:
+it means nothing was picked, not the whole segment.
+
+The UI always sends `activityIds`, even for the whole segment. The cluster id
+follows the earliest transmission, so it does not change when the segment
+grows. Without the ids, transmissions that joined after the operator looked
+would be settled with the rest.
+
+Bulk ignore works the same way: each segment carries the transmissions seen
+when it was picked. A reply that arrives between picking and confirming is not
+ignored with them. A segment whose picked transmissions are no longer in it is
+reported in `missing` and left alone.
 
 ## Log
 

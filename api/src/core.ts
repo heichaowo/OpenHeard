@@ -21,6 +21,7 @@ export type {
   Activity,
   Channel,
   Cluster,
+  ClusterPick,
   Mode,
   Origin,
   PendingItem,

@@ -3,9 +3,10 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { COOKIE, SESSION_DAYS, signSession, verifyPassword, verifySession } from './auth.ts';
-import type { QsoDraft } from './core.ts';
+import type { ClusterPick, QsoDraft } from './core.ts';
 import type { IngestRow, PollLog } from './db.ts';
 import { publicRoutes } from './public.ts';
 import { recordingRoutes } from './recordings.ts';
@@ -20,6 +21,21 @@ const fail = (e: unknown) => {
   }
   throw e;
 };
+
+const isPick = (x: unknown): x is ClusterPick => {
+  const p = x as Partial<ClusterPick> | null;
+  return (
+    typeof p?.clusterId === 'string' &&
+    Array.isArray(p.activityIds) &&
+    p.activityIds.every((id) => typeof id === 'string')
+  );
+};
+
+/**
+ * 请求体上限。最大的正常请求是导入 ADIF，五万条也不到 6 MB。
+ * 不设的话，一个几百 MB 的请求体会整个读进内存再去解析。
+ */
+const MAX_BODY_BYTES = 16 * 1024 * 1024;
 
 /** 登录口的限速：一个来源五分钟内最多十次。 */
 const LOGIN_WINDOW_MS = 5 * 60_000;
@@ -129,11 +145,11 @@ export function createApp(
     })
 
     .post('/pending/ignore', async (c) => {
-      const { clusterIds } = (await c.req.json()) as { clusterIds?: unknown };
-      if (!Array.isArray(clusterIds) || clusterIds.some((x) => typeof x !== 'string')) {
-        return c.json({ error: 'clusterIds 要是字符串数组' }, 422);
+      const { picks } = (await c.req.json()) as { picks?: unknown };
+      if (!Array.isArray(picks) || !picks.every(isPick)) {
+        return c.json({ error: 'picks 要是 {clusterId, activityIds} 数组' }, 422);
       }
-      return c.json(store.ignoreMany(clusterIds as string[]));
+      return c.json(store.ignoreMany(picks));
     })
 
     .delete('/pending/:clusterId', (c) => {
@@ -202,7 +218,17 @@ export function createApp(
       }
     });
 
-  const api = new Hono().route('/ingest', ingest).route('/session', session).route('/', guarded);
+  const api = new Hono()
+    .use(
+      '*',
+      bodyLimit({
+        maxSize: MAX_BODY_BYTES,
+        onError: (c) => c.json({ error: `请求体超过 ${MAX_BODY_BYTES / 1024 / 1024} MB` }, 413),
+      }),
+    )
+    .route('/ingest', ingest)
+    .route('/session', session)
+    .route('/', guarded);
 
   const app = new Hono()
     // 没接住的异常也回 JSON。带 try/catch 的路由回 {error}，而几个只读的 GET

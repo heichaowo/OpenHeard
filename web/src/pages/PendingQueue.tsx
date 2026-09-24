@@ -24,10 +24,11 @@ import type { QsoFormValues } from "../components/QsoFields";
 import { missingFields, normalizeCallsign } from "@core";
 import { ApiError, errorText } from "../api";
 import { confirmDiscard } from "../discard";
-import type { Activity, QsoDraft, QsoField } from "@core";
+import type { Activity, ClusterPick, QsoDraft, QsoField } from "@core";
 import { useRecall } from "../recall";
 import { useStore } from "../store";
 import type { PendingRow } from "../store";
+import { draftFor } from "../subset";
 import { useTime } from "../useTime";
 
 const ORIGIN_LABELS: Record<Activity["origin"], string> = {
@@ -42,9 +43,9 @@ const originOf = (row: PendingRow) => {
   return first ? ORIGIN_LABELS[first.origin] : "—";
 };
 
-/** 手机上逐次发射的样子。表格在这个宽度里塞不下，何况还有个播放器。 */
 /**
- * 一段里的逐次发射。可以取消勾选。
+ * 一段里的逐次发射，手机上用。可以取消勾选。表格在这个宽度里塞不下，
+ * 何况还有个播放器。
  *
  * 聚类按一个间隔阈值猜，会猜错。两段对话被并成一段时，把不属于这次通联的
  * 那几次取消掉，它们不会被结算，下一轮重新聚类自己会分出去。
@@ -185,11 +186,20 @@ export default function PendingQueue() {
     refresh,
   } = useStore();
   const wide = Grid.useBreakpoint().md ?? true;
-  const [editing, setEditing] = useState<PendingRow | null>(null);
+  // 打开抽屉那一刻的样子。15 秒一轮的刷新会让这一段长出新的发射，而段 id
+  // 不变。确认时只结算打开时看到的那几次，后来的那几次没人看过。
+  const [editing, setEditing] = useState<{
+    row: PendingRow;
+    ids: string[];
+    draft: QsoDraft;
+  } | null>(null);
   // 哪一行正在入库。楼下用手机弱网确认时，慢一点就会想再点一下。
   const [busyId, setBusyId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [picked, setPicked] = useState<string[]>([]);
+  // 段 id 到选中那一刻看到的那几次发射。道理同 editing：选完到确认之间
+  // 对方回了一句，这句不能跟着「没人回」一起被忽略。
+  const [picked, setPicked] = useState<Record<string, string[]>>({});
+  const pickedCount = Object.keys(picked).length;
   const [clearing, setClearing] = useState(false);
   // 每一段里挑中了哪几次发射。没动过的段不在表里，就是整段。
   const [subset, setSubset] = useState<Record<string, string[]>>({});
@@ -213,11 +223,17 @@ export default function PendingQueue() {
   const chosen = (row: PendingRow) =>
     subset[row.cluster.id] ?? row.cluster.activities.map((a) => a.id);
 
-  /** 挑过而且不是全部时才往后端传，否则保持「整段」这个语义。 */
-  const partOf = (row: PendingRow) => {
-    const ids = chosen(row);
-    return ids.length === row.cluster.activities.length ? undefined : ids;
-  };
+  /** 挑过而且不是全部。只管界面上怎么说，往后端传的一律是 chosen。 */
+  const narrowed = (row: PendingRow) =>
+    chosen(row).length !== row.cluster.activities.length;
+
+  const draftOf = (row: PendingRow) => draftFor(row, chosen(row));
+  const missingOf = (row: PendingRow) => missingFields(draftOf(row));
+
+  const ignoreTitle = (row: PendingRow) =>
+    narrowed(row)
+      ? `只忽略挑中的 ${chosen(row).length} 次发射？`
+      : "不记这次对话？";
 
   const toggleActivity = (row: PendingRow, id: string) =>
     setSubset((m) => {
@@ -229,19 +245,21 @@ export default function PendingQueue() {
     });
 
   const open = (row: PendingRow) => {
-    setEditing(row);
+    const ids = chosen(row);
+    const draft = draftFor(row, ids);
+    setEditing({ row, ids, draft });
     resetRecall();
     form.setFieldsValue({
-      call: row.draft.call ?? "",
-      rstSent: row.draft.rstSent,
-      rstRcvd: row.draft.rstRcvd,
+      call: draft.call ?? "",
+      rstSent: draft.rstSent,
+      rstRcvd: draft.rstRcvd,
       gridsquare: undefined,
       qth: undefined,
-      myQth: row.draft.myQth,
-      myDevice: row.draft.myDevice,
-      myAntenna: row.draft.myAntenna,
-      myPower: row.draft.myPower,
-      myHeightM: row.draft.myHeightM,
+      myQth: draft.myQth,
+      myDevice: draft.myDevice,
+      myAntenna: draft.myAntenna,
+      myPower: draft.myPower,
+      myHeightM: draft.myHeightM,
       note: undefined,
     });
   };
@@ -258,11 +276,14 @@ export default function PendingQueue() {
 
   // 数字侧一大半是一两秒的空按，永远不会变成通联。一条一条点忽略太熬人。
   const sweep = async () => {
-    if (picked.length === 0) return;
+    if (pickedCount === 0) return;
     setClearing(true);
     try {
-      const r = await ignoreMany(picked);
-      setPicked([]);
+      const picks: ClusterPick[] = Object.entries(picked).map(
+        ([clusterId, activityIds]) => ({ clusterId, activityIds }),
+      );
+      const r = await ignoreMany(picks);
+      setPicked({});
       message.success(
         `忽略了 ${r.ignored} 段` +
           (r.missing.length > 0 ? `，${r.missing.length} 段已经变了` : ""),
@@ -274,22 +295,27 @@ export default function PendingQueue() {
     }
   };
 
-  const toggle = (id: string) =>
-    setPicked((v) => (v.includes(id) ? v.filter((x) => x !== id) : [...v, id]));
+  const snapshot = (rows: PendingRow[]) =>
+    Object.fromEntries(rows.map((r) => [r.cluster.id, chosen(r)]));
+
+  const toggle = (row: PendingRow) =>
+    setPicked((m) => {
+      const { [row.cluster.id]: was, ...rest } = m;
+      return was === undefined ? { ...m, ...snapshot([row]) } : rest;
+    });
 
   const pickShort = () =>
     setPicked(
-      pending
-        .filter(
+      snapshot(
+        pending.filter(
           (r) =>
             r.cluster.activities.length === 1 &&
             r.cluster.endAt - r.cluster.startAt < 3,
-        )
-        .map((r) => r.cluster.id),
+        ),
+      ),
     );
 
-  const pickAlone = () =>
-    setPicked(pending.filter(aloneIn).map((r) => r.cluster.id));
+  const pickAlone = () => setPicked(snapshot(pending.filter(aloneIn)));
 
   const toolbar = pending.length > 0 && (
     <div className="sweep-bar">
@@ -305,33 +331,34 @@ export default function PendingQueue() {
       </Button>
       <Button
         size="small"
-        onClick={() => setPicked([])}
-        disabled={picked.length === 0}
+        onClick={() => setPicked({})}
+        disabled={pickedCount === 0}
       >
         取消选中
       </Button>
       <Popconfirm
-        title={`忽略选中的 ${picked.length} 段？`}
+        title={`忽略选中的 ${pickedCount} 段？`}
         onConfirm={sweep}
-        disabled={picked.length === 0}
+        disabled={pickedCount === 0}
       >
         <Button
           size="small"
           danger
           loading={clearing}
-          disabled={picked.length === 0}
+          disabled={pickedCount === 0}
         >
-          忽略选中（{picked.length}）
+          忽略选中（{pickedCount}）
         </Button>
       </Popconfirm>
     </div>
   );
 
   const straightIn = async (row: PendingRow) => {
+    const draft = draftOf(row);
     setBusyId(row.cluster.id);
     try {
-      await promote(row.cluster.id, row.draft, partOf(row));
-      message.success(`${row.draft.call} 已入库`);
+      await promote(row.cluster.id, draft, chosen(row));
+      message.success(`${draft.call} 已入库`);
     } catch (e) {
       fail(e);
     } finally {
@@ -355,7 +382,7 @@ export default function PendingQueue() {
     }
     setSubmitting(true);
     try {
-      await promote(editing.cluster.id, draft, partOf(editing));
+      await promote(editing.row.cluster.id, draft, editing.ids);
       setEditing(null);
       message.success(`${draft.call} 已入库`);
     } catch (e) {
@@ -377,16 +404,19 @@ export default function PendingQueue() {
       dataSource={pending}
       split={false}
       renderItem={(row) => {
-        const ready = row.missing.length === 0;
+        const draft = draftOf(row);
+        const missing = missingOf(row);
+        const ready = missing.length === 0;
         const busy = busyId === row.cluster.id;
+        const none = chosen(row).length === 0;
         return (
           <List.Item style={{ padding: "0 0 12px" }}>
             <Card size="small" style={{ width: "100%" }}>
               <div className="pending-card-top">
                 <Space size={8}>
                   <Checkbox
-                    checked={picked.includes(row.cluster.id)}
-                    onChange={() => toggle(row.cluster.id)}
+                    checked={picked[row.cluster.id] !== undefined}
+                    onChange={() => toggle(row)}
                   />
                   <Typography.Text type="secondary">
                     {time.atShort(row.cluster.startAt)}
@@ -401,7 +431,7 @@ export default function PendingQueue() {
               </div>
 
               <div className="pending-card-call">
-                {row.draft.call ??
+                {draft.call ??
                   (aloneIn(row) ? (
                     <Tag>只有本台，没人回</Tag>
                   ) : (
@@ -413,7 +443,7 @@ export default function PendingQueue() {
                 {ready ? (
                   <Tag color="green">可直接入库</Tag>
                 ) : (
-                  row.missing.map((k) => (
+                  missing.map((k) => (
                     <Tag key={k} color="orange">
                       还缺{LABELS[k] ?? k}
                     </Tag>
@@ -426,7 +456,12 @@ export default function PendingQueue() {
               </Space>
 
               <div className="pending-card-actions">
-                <Button type="primary" block onClick={() => open(row)}>
+                <Button
+                  type="primary"
+                  block
+                  disabled={none}
+                  onClick={() => open(row)}
+                >
                   {ready ? "编辑" : "确认"}
                 </Button>
                 {/* 位置固定。这一格 15 秒刷一次，按钮随数据出现或消失的话，
@@ -434,16 +469,19 @@ export default function PendingQueue() {
                 <Button
                   block
                   loading={busy}
-                  disabled={!ready || (busyId !== null && !busy)}
+                  disabled={!ready || none || (busyId !== null && !busy)}
                   onClick={() => straightIn(row)}
                 >
                   直接入库
                 </Button>
                 <Popconfirm
-                  title="不记这次对话？"
-                  onConfirm={() => ignore(row.cluster.id).catch(fail)}
+                  title={ignoreTitle(row)}
+                  disabled={none}
+                  onConfirm={() =>
+                    ignore(row.cluster.id, chosen(row)).catch(fail)
+                  }
                 >
-                  <Button block danger>
+                  <Button block danger disabled={none}>
                     忽略
                   </Button>
                 </Popconfirm>
@@ -455,9 +493,10 @@ export default function PendingQueue() {
                 items={[
                   {
                     key: "acts",
-                    label:
-                      partOf(row) === undefined
-                        ? `逐次发射（${row.cluster.activities.length}）`
+                    label: !narrowed(row)
+                      ? `逐次发射（${row.cluster.activities.length}）`
+                      : none
+                        ? "逐次发射（一次都没挑，挑几次才能确认或忽略）"
                         : `逐次发射（挑中 ${chosen(row).length} / ${row.cluster.activities.length}）`,
                     children: (
                       <ActivityList
@@ -505,7 +544,7 @@ export default function PendingQueue() {
       title: "对方呼号",
       key: "call",
       render: (_, row) =>
-        row.draft.call ??
+        draftOf(row).call ??
         (aloneIn(row) ? <Tag>没人回</Tag> : <Tag color="orange">待补</Tag>),
       width: 120,
     },
@@ -513,11 +552,11 @@ export default function PendingQueue() {
       title: "还缺",
       key: "missing",
       render: (_, row) =>
-        row.missing.length === 0 ? (
+        missingOf(row).length === 0 ? (
           <Tag color="green">可直接入库</Tag>
         ) : (
           <Space size={4}>
-            {row.missing.map((k) => (
+            {missingOf(row).map((k) => (
               <Tag key={k} color="orange">
                 {LABELS[k] ?? k}
               </Tag>
@@ -536,7 +575,7 @@ export default function PendingQueue() {
             type="link"
             loading={busyId === row.cluster.id}
             disabled={
-              row.missing.length > 0 ||
+              missingOf(row).length > 0 ||
               (busyId !== null && busyId !== row.cluster.id)
             }
             onClick={() => straightIn(row)}
@@ -544,15 +583,11 @@ export default function PendingQueue() {
             直接入库
           </Button>
           <Button type="link" onClick={() => open(row)}>
-            {row.missing.length === 0 ? "编辑" : "确认"}
+            {missingOf(row).length === 0 ? "编辑" : "确认"}
           </Button>
           <Popconfirm
-            title={
-              partOf(row) === undefined
-                ? "不记这次对话？"
-                : `只忽略挑中的 ${chosen(row).length} 次发射？`
-            }
-            onConfirm={() => ignore(row.cluster.id, partOf(row)).catch(fail)}
+            title={ignoreTitle(row)}
+            onConfirm={() => ignore(row.cluster.id, chosen(row)).catch(fail)}
           >
             <Button type="link" danger>
               忽略
@@ -582,8 +617,19 @@ export default function PendingQueue() {
             <Table
               rowKey={(row) => row.cluster.id}
               rowSelection={{
-                selectedRowKeys: picked,
-                onChange: (keys) => setPicked(keys as string[]),
+                selectedRowKeys: Object.keys(picked),
+                // 已经选中的留着当初那份，新选中的现拍一份。
+                onChange: (keys) =>
+                  setPicked((m) =>
+                    Object.fromEntries(
+                      pending
+                        .filter((r) => keys.includes(r.cluster.id))
+                        .map((r) => [
+                          r.cluster.id,
+                          m[r.cluster.id] ?? chosen(r),
+                        ]),
+                    ),
+                  ),
               }}
               columns={columns}
               dataSource={pending}
@@ -621,7 +667,7 @@ export default function PendingQueue() {
           <>
             <Descriptions size="small" column={1} bordered>
               <Descriptions.Item label={`时间 ${time.label}`}>
-                {time.at(editing.cluster.startAt)}
+                {time.at(editing.draft.startAt ?? editing.row.cluster.startAt)}
               </Descriptions.Item>
               <Descriptions.Item label="频率">
                 {editing.draft.freqMhz} MHz
@@ -633,7 +679,7 @@ export default function PendingQueue() {
                 {editing.draft.mode}
               </Descriptions.Item>
               <Descriptions.Item label="来源">
-                {originOf(editing)}
+                {originOf(editing.row)}
               </Descriptions.Item>
             </Descriptions>
             <Form

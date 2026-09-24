@@ -91,8 +91,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await api.ignore(clusterId, activityIds)
         await refresh()
       },
-      ignoreMany: async (clusterIds) => {
-        const r = await api.ignoreMany(clusterIds)
+      ignoreMany: async (picks) => {
+        const r = await api.ignoreMany(picks)
         await refresh()
         return r
       },
