@@ -89,6 +89,8 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
         openMarginDb: cfg.openMarginDb,
         closeMarginDb: cfg.closeMarginDb,
         minDurationS: 0.3,
+        trackS: 60,
+        maxOpenS: 300,
         prerollS: 0.6,
         myUnitId:
           cfg.myUnitId === undefined ? undefined : parseInt(cfg.myUnitId, 16),

@@ -105,6 +105,8 @@ if (values['mdc-probe']) {
       openMarginDb: 12,
       closeMarginDb: 7,
       minDurationS: 0.3,
+      trackS: 60,
+      maxOpenS: 300,
       prerollS: 0.6,
       myUnitId: values['unit-id'] === undefined ? undefined : parseInt(values['unit-id'], 16),
       recordingsDir: values.recordings ?? './recordings',
@@ -123,6 +125,12 @@ if (values['mdc-probe']) {
   }
   await once(values.query);
 } else {
+  // launchd 写的日志文件不带时间，排查只能靠行的先后去猜。只在服务模式下加：
+  // 探针模式往 stdout 写 JSON，加了前缀就没法接着用管道处理。
+  for (const k of ['log', 'error'] as const) {
+    const write = console[k].bind(console);
+    console[k] = (...args: unknown[]) => write(new Date().toISOString(), ...args);
+  }
   const path = values.config ?? process.env.OPENHEARD_CONFIG ?? './openheard.config.json';
   const result = loadConfig(path);
   if (!result.ok) {

@@ -76,6 +76,8 @@ openssl rand -hex 32                            # sessionSecret 和 ingestToken
 
 两个余量按部署调。噪声本底和天线各地不一样，调大了弱信号永远打不开静噪，调小了噪声起伏就会伪造出发射，把队列和磁盘塞满。运维页上写着此刻的噪声离门限还差多少，以及这次守听里最接近的一刻差了多少，照着那两个数调。设置页上能直接改，清空一格就回到缺省值。
 
+静默基准开机先听 5 秒定下。之后静噪关着时，每 60 秒按这 60 秒的噪声重定一次，所以门限跟着本底涨落。静噪开着超过 5 分钟就强制关掉。一次长过 5 分钟的发射记成几段，连着两段还没停就按它重定基准。守护进程每小时往 `daemon.log` 写一行小结：静噪开过几次、记下几次、噪声离开启门限最近差多少。
+
 ---
 
 # Configuration (English)
@@ -181,3 +183,12 @@ ordinary noise invents transmissions that fill the queue and the disk. The ops
 page shows how far the current noise is from the threshold and how close it has
 come during this watch; tune against those two numbers. Both can be changed on
 the settings page, and clearing one returns it to its default.
+
+The idle floor is set from the first 5 seconds after start. After that, while
+the squelch is closed, it is reset every 60 seconds from those 60 seconds, so
+the thresholds follow the floor as it drifts. A squelch open for more than 5
+minutes is forced closed. A transmission longer than that is recorded in
+5-minute pieces; after two pieces in a row the floor is reset from it. Once an
+hour the daemon writes a summary line to `daemon.log`: how often the squelch
+opened, how many transmissions were recorded, and how close the noise came to
+the open threshold.

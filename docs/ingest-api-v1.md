@@ -52,7 +52,7 @@ token 不对回 `401`。
 
 ### RadioStatus
 
-模拟守听每秒报一次此刻的样子：频率、信道、增益、校准出来的静默基准、开关门限、此刻 5–9 kHz 的能量、静噪开没开、最近一次打开的时刻。
+模拟守听每秒报一次此刻的样子：频率、信道、增益、此刻的静默基准、开关门限、此刻 5–9 kHz 的能量、静噪开没开、最近一次打开的时刻。
 
 只留最新一条在内存里，不入库。它描述的是「现在」，重启之后本来就该重新问一次电台，而每秒一行会把库撑满。
 
@@ -133,7 +133,7 @@ analog side `mine` comes from MDC-1200, cannot be recomputed, and is stored.
 ### RadioStatus
 
 The analog watch reports itself once a second: frequency, channel, gain, the
-idle noise floor it calibrated, the open and close thresholds, the current
+current idle noise floor, the open and close thresholds, the current
 5–9 kHz energy, whether the squelch is open, and when it last opened.
 
 Only the latest one is kept, in memory. It describes *now*; after a restart the
