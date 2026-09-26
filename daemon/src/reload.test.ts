@@ -50,6 +50,20 @@ async function until(ok: () => boolean, timeoutMs = 6000): Promise<void> {
   }
 }
 
+/**
+ * 写到看见通知为止。
+ *
+ * macOS 上 fs.watch 刚挂上的那一刻写进去的改动，机器忙的时候会漏掉，于是整个
+ * 测试干等到超时。线上不会这样，界面存设置总在守护进程起来很久之后。同样的
+ * 内容再写一遍不会多出一次通知，所以重写不影响「只通知一次」的断言。
+ */
+async function writeUntil(write: (next: unknown) => void, next: unknown, ok: () => boolean) {
+  for (let i = 0; i < 6 && !ok(); i++) {
+    write(next);
+    await until(ok, 1000);
+  }
+}
+
 const start = (path: string) => {
   const r = loadConfig(path);
   assert.ok(r.ok);
@@ -66,8 +80,7 @@ describe('watchConfig', () => {
     const { path, write } = setup();
     const { seen, stop } = start(path);
 
-    write({ ...base, analog: { ...base.analog, freqMhz: 145.5 } });
-    await until(() => seen.analog.length > 0);
+    await writeUntil(write, { ...base, analog: { ...base.analog, freqMhz: 145.5 } }, () => seen.analog.length > 0);
     stop();
 
     assert.equal(seen.analog.length, 1);
@@ -79,11 +92,14 @@ describe('watchConfig', () => {
     const { path, write } = setup();
     const { seen, stop } = start(path);
 
-    write({
-      ...base,
-      queries: [{ ...base.queries[0], key: 'dst:91', rule: { id: 'DestinationID', operator: 'equal', value: 91 } }],
-    });
-    await until(() => seen.queries.length > 0);
+    await writeUntil(
+      write,
+      {
+        ...base,
+        queries: [{ ...base.queries[0], key: 'dst:91', rule: { id: 'DestinationID', operator: 'equal', value: 91 } }],
+      },
+      () => seen.queries.length > 0,
+    );
     stop();
 
     assert.equal(seen.queries.length, 1);
@@ -109,8 +125,7 @@ describe('watchConfig', () => {
 
     writeFileSync(path, '{ 这不是 JSON');
     await sleep(700);
-    write({ ...base, analog: { ...base.analog, freqMhz: 439.525 } });
-    await until(() => seen.analog.length > 0);
+    await writeUntil(write, { ...base, analog: { ...base.analog, freqMhz: 439.525 } }, () => seen.analog.length > 0);
     stop();
 
     // 坏的那次没生效，后面改好的那次照常生效
