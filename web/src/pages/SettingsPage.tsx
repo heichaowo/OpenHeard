@@ -12,31 +12,86 @@ import {
   Space,
   Typography,
 } from "antd";
+import type { FormInstance } from "antd";
+import { MAX_CHANNELS, MAX_SPAN_HZ, bandOf, planTuning } from "@core";
 import { api, errorText } from "../api";
 import type { Settings } from "../api";
-import type { FormRule } from "antd";
 import { AsyncContent } from "../components/AsyncContent";
 import { PageHeader } from "../components/PageHeader";
 import { useStore } from "../store";
 
-const filled = (v: unknown) => v !== undefined && v !== null && v !== "";
+const filled = (v: unknown) =>
+  v !== undefined &&
+  v !== null &&
+  v !== "" &&
+  !(Array.isArray(v) && v.length === 0);
+
+type ChannelRow = { freqMhz?: number | null; channel?: string };
+
+/** 这几个频率里第一个不在 2m 或 70cm 的，没有就是 undefined。 */
+const outOfBand = (freqsHz: number[]) =>
+  freqsHz.find((f) => bandOf(f / 1e6) === undefined);
+
+/** 已经填了频率的那几行，换成 Hz。 */
+const freqsOf = (rows: ChannelRow[] | undefined) =>
+  (rows ?? [])
+    .map((r) => r?.freqMhz)
+    .filter((f): f is number => typeof f === "number")
+    .map((f) => Math.round(f * 1e6));
 
 /**
- * 模拟守听那几格，填了任何一格，频率和信道名才必填。
+ * 信道表整体讲不讲得通。每一行的必填由那一行自己管。
  *
- * 没配过模拟守听的机器，这一栏整个空着是正常的。无条件必填的话，只改本台
- * 信息也存不下去。
+ * 没配过模拟守听的机器，这一栏整个空着是正常的。别的几格都空、信道表也空，
+ * 就不拦，否则只改本台信息也存不下去。
  */
-const analogRequired =
-  (message: string): FormRule =>
-  ({ getFieldValue }) => ({
-    validator(_: unknown, value: unknown) {
-      const started = Object.values(getFieldValue("analog") ?? {}).some(filled);
-      return !started || filled(value)
-        ? Promise.resolve()
-        : Promise.reject(new Error(message));
-    },
-  });
+const checkChannels =
+  (form: FormInstance<Settings>) => async (_: unknown, rows?: ChannelRow[]) => {
+    const others = { ...(form.getFieldValue("analog") ?? {}), channels: [] };
+    const started = (rows ?? []).length > 0 || Object.values(others).some(filled);
+    if (!started) return;
+    if ((rows ?? []).length === 0) throw new Error("至少要有一个信道");
+    const names = (rows ?? []).map((r) => r?.channel).filter(filled);
+    if (new Set(names).size !== names.length) throw new Error("信道名不能重复");
+    const freqs = freqsOf(rows);
+    const off = outOfBand(freqs);
+    if (off !== undefined) throw new Error(`${off / 1e6} MHz 不在 2m 或 70cm 段内`);
+    if (freqs.length < (rows ?? []).length) return;
+    const plan = planTuning(freqs);
+    if (!plan.ok) throw new Error(plan.problem);
+  };
+
+/** 这组信道一支接收机怎么收。填的时候就看得见，不用存了才知道不行。 */
+function TuningHint({ rows }: { rows?: ChannelRow[] }) {
+  const freqs = freqsOf(rows);
+  if (freqs.length === 0) return null;
+  // 和存的时候 api 那边的校验一致。接收机收得下，不等于这是业余波段。
+  const off = outOfBand(freqs);
+  if (off !== undefined) {
+    return (
+      <Typography.Paragraph type="danger" style={{ marginTop: 8 }}>
+        {off / 1e6} MHz 不在 2m（144–148）或 70cm（420–450）段内。
+      </Typography.Paragraph>
+    );
+  }
+  const plan = planTuning(freqs);
+  const span = Math.max(...freqs) - Math.min(...freqs);
+  return (
+    <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>
+      一支接收机同时守最多 {MAX_CHANNELS} 个信道，最高和最低相差不超过{" "}
+      {MAX_SPAN_HZ / 1e6} MHz。
+      {plan.ok ? (
+        <>
+          {" "}
+          现在相差 {span / 1000} kHz，接收机调到 {plan.plan.centerHz / 1e6}{" "}
+          MHz，采样率 {plan.plan.sampleRate / 1e6} MHz。
+        </>
+      ) : (
+        <Typography.Text type="danger"> {plan.problem}</Typography.Text>
+      )}
+    </Typography.Paragraph>
+  );
+}
 
 const MODES = [
   { value: "FM", label: "FM" },
@@ -52,6 +107,9 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const wide = Grid.useBreakpoint().md ?? true;
+  const channelRows = Form.useWatch(["analog", "channels"], form) as
+    | ChannelRow[]
+    | undefined;
 
   const load = useCallback(async () => {
     try {
@@ -110,7 +168,20 @@ export default function SettingsPage() {
         empty={settings === undefined}
         onRetry={load}
       >
-        <Form form={form} layout="vertical" onFinish={save}>
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={save}
+          // 信道表整体的规则挂在 Form.List 上，改某一行时不会自己重跑。
+          // 不补这一下，信道名重复要点了保存才看得到。
+          onValuesChange={(changed: Partial<Settings>) => {
+            if (changed.analog?.channels !== undefined) {
+              form
+                .validateFields([["analog", "channels"]])
+                .catch(() => undefined);
+            }
+          }}
+        >
           <Card size="small" title="模拟守听" style={{ marginBottom: 16 }}>
             {settings?.analog === undefined && (
               <Alert
@@ -120,27 +191,63 @@ export default function SettingsPage() {
                 message="这台机器还没有配模拟守听。在这里填好保存，守护进程重启一次就会开始守听。"
               />
             )}
-            <Space wrap align="start">
-              <Form.Item
-                name={["analog", "freqMhz"]}
-                label="频率 MHz"
-                rules={[analogRequired("频率必填")]}
-                extra="只能是 2m（144–148）或 70cm（420–450）"
-              >
-                <InputNumber style={{ width: 140 }} step={0.0125} />
-              </Form.Item>
-              <Form.Item
-                name={["analog", "channel"]}
-                label="信道名"
-                rules={[analogRequired("信道名必填")]}
-                extra="进采集记录和发射行的那个名字"
-              >
-                <Input style={{ width: 180 }} />
-              </Form.Item>
+            <Typography.Paragraph type="secondary">
+              要守的信道。频率只能是 2m（144–148）或 70cm（420–450），信道名进采集记录和发射行。
+            </Typography.Paragraph>
+            <Form.List
+              name={["analog", "channels"]}
+              rules={[{ validator: checkChannels(form) }]}
+            >
+              {(fields, { add, remove }, { errors }) => (
+                <>
+                  {fields.map((field) => (
+                    <Space key={field.key} align="start" wrap>
+                      <Form.Item
+                        name={[field.name, "freqMhz"]}
+                        rules={[{ required: true, message: "频率必填" }]}
+                      >
+                        <InputNumber
+                          style={{ width: 140 }}
+                          step={0.0125}
+                          placeholder="438.500"
+                          aria-label="信道频率 MHz"
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        name={[field.name, "channel"]}
+                        rules={[{ required: true, message: "信道名必填" }]}
+                      >
+                        <Input
+                          style={{ width: 180 }}
+                          placeholder="438.500 中继"
+                          aria-label="信道名"
+                        />
+                      </Form.Item>
+                      <Button
+                        type="link"
+                        danger
+                        onClick={() => remove(field.name)}
+                      >
+                        删掉
+                      </Button>
+                    </Space>
+                  ))}
+                  <Button
+                    onClick={() => add({})}
+                    disabled={fields.length >= MAX_CHANNELS}
+                  >
+                    加一个信道
+                  </Button>
+                  <Form.ErrorList errors={errors} />
+                  <TuningHint rows={channelRows} />
+                </>
+              )}
+            </Form.List>
+            <Space wrap align="start" style={{ marginTop: 16 }}>
               <Form.Item
                 name={["analog", "gainDb"]}
                 label="增益 dB"
-                extra="缺省 32.8"
+                extra="缺省 32.8，收不到时先试 49.6"
               >
                 <InputNumber style={{ width: 120 }} step={0.1} />
               </Form.Item>

@@ -3,6 +3,7 @@ import { fetchHistory } from './brandmeister.ts';
 import type { Rule } from './brandmeister.ts';
 import { readFileSync } from 'node:fs';
 import { watchAnalog } from './analog.ts';
+import { planTuning } from './core.ts';
 import { decodeMdc } from './mdc.ts';
 import { loadConfig } from './config.ts';
 import { Ingest } from './ingest.ts';
@@ -19,7 +20,7 @@ const { values } = parseArgs({
     analog: { type: 'string' },
     gain: { type: 'string' },
     recordings: { type: 'string' },
-    'rtl-fm': { type: 'string' },
+    'rtl-sdr': { type: 'string' },
     'unit-id': { type: 'string' },
     'mdc-probe': { type: 'string' },
     config: { type: 'string' },
@@ -88,18 +89,21 @@ if (values['mdc-probe']) {
   }
 } else if (values.analog) {
   // 只守模拟信道，不连 API，用来在真信号上验证判决。
-  // 用法: node src/index.ts --analog 438.700 [--gain 32.8]
-  const mhz = Number(values.analog);
-  if (!Number.isFinite(mhz)) {
+  // 用法: node src/index.ts --analog 438.500,438.975 [--gain 49.6]
+  const mhz = values.analog.split(',').map(Number);
+  if (mhz.some((m) => !Number.isFinite(m))) {
     console.error(`频率写错了：${values.analog}`);
+    process.exit(2);
+  }
+  const plan = planTuning(mhz.map((m) => Math.round(m * 1e6)));
+  if (!plan.ok) {
+    console.error(`一支接收机收不下这几个信道：${plan.problem}`);
     process.exit(2);
   }
   const probe = watchAnalog(
     {
-      freqHz: Math.round(mhz * 1e6),
-      channel: `${mhz} MHz`,
+      channels: mhz.map((m) => ({ freqHz: Math.round(m * 1e6), channel: `${m} MHz` })),
       gainDb: Number(values.gain ?? '32.8'),
-      sampleRate: 24000,
       blockS: 0.05,
       calibrateS: 5,
       openMarginDb: 12,
@@ -110,7 +114,7 @@ if (values['mdc-probe']) {
       prerollS: 0.6,
       myUnitId: values['unit-id'] === undefined ? undefined : parseInt(values['unit-id'], 16),
       recordingsDir: values.recordings ?? './recordings',
-      rtlFmPath: values['rtl-fm'] ?? 'rtl_fm',
+      rtlSdrPath: values['rtl-sdr'] ?? 'rtl_sdr',
     },
     (a) => console.log(JSON.stringify(a)),
   );
@@ -141,7 +145,7 @@ if (values['mdc-probe']) {
   const ingest = new Ingest(apiUrl, ingestToken, spoolDir);
   console.log(
     `openheard-daemon 起来了，${queries.length} 条查询` +
-      `${analog ? `，守听 ${analog.freqMhz} MHz` : '，没配模拟守听'}，推给 ${apiUrl}`,
+      `${analog ? `，守听 ${analog.channels.map((c) => `${c.freqMhz} MHz`).join('、')}` : '，没配模拟守听'}，推给 ${apiUrl}`,
   );
   const digital = start(queries, dmrId, ingest);
   const radio = analog ? startAnalog(analog, ingest) : undefined;

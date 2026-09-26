@@ -148,7 +148,7 @@ curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
 | `GET /api/settings` | 无 | `Settings` |
 | `PUT /api/settings` | `Settings` | `Settings`，或 `422` |
 
-`Settings` 是配置里人能在界面上改的那部分：`station`、`channels`、`queries`，以及 `analog` 的 `freqMhz`、`channel`、`gainDb`、`myUnitId`。
+`Settings` 是配置里人能在界面上改的那部分：`station`、`channels`、`queries`，以及 `analog` 的 `channels`、`gainDb`、`myUnitId`、`openMarginDb`、`closeMarginDb`。`analog.channels` 是 `{freqMhz, channel}[]`，一支接收机收不下的一组回 `422` 并说明原因。
 
 改不了的留在文件里：`dbPath`、`host`、三个密钥、`recordingsDir`。它们要么一改就要重启整套，要么改错了就把自己关在门外。
 
@@ -173,7 +173,7 @@ curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
 
 | 方法和路径 | 响应 |
 |---|---|
-| `GET /api/ops` | 健康状态、机器负载和内存、最近 40 次采集、按来源分组的发射数、以及决定行为的配置值 |
+| `GET /api/ops` | 健康状态、机器负载和内存、最近 40 次采集、按来源分组的发射数、每个模拟信道此刻的电台状态 `radios`、以及决定行为的配置值 |
 
 不论健康与否都回 `200`，因为这一页的用途是把问题显示出来。要当外部监控用 `GET /health`，它不要会话，只回 `{"ok", "problems"}`，不健康时回 `503`。
 
@@ -391,8 +391,10 @@ rolled over into the next day.
 | `PUT /api/settings` | `Settings` | `Settings`, or `422` |
 
 `Settings` is the part of the config a person edits in the UI: `station`,
-`channels`, `queries`, and `analog`'s `freqMhz`, `channel`, `gainDb` and
-`myUnitId`.
+`channels`, `queries`, and `analog`'s `channels`, `gainDb`, `myUnitId`,
+`openMarginDb` and `closeMarginDb`. `analog.channels` is
+`{freqMhz, channel}[]`; a set one receiver cannot cover gives `422` with the
+reason.
 
 The rest stays in the file: `dbPath`, `host`, the three secrets, and
 `recordingsDir`. Each either needs the whole thing restarted or locks you out
@@ -430,7 +432,7 @@ probing each one for a 404.
 
 | Method and path | Response |
 |---|---|
-| `GET /api/ops` | Health, machine load and memory, the last 40 polls, activity counts by origin, and the config values that decide behaviour |
+| `GET /api/ops` | Health, machine load and memory, the last 40 polls, activity counts by origin, the current radio status of each analog channel as `radios`, and the config values that decide behaviour |
 
 It answers `200` whether healthy or not, because the page exists to display
 problems. For an external monitor use `GET /health`: no session, only

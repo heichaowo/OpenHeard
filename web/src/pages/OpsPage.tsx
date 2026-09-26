@@ -195,7 +195,7 @@ export default function OpsPage() {
 
             {/* 「天线听不见」和「没人在发」，不摆出这几个数就分不开。 */}
             <Card size="small" title="电台" style={{ marginBottom: 16 }}>
-              {ops.radio === undefined ? (
+              {ops.radios.length === 0 ? (
                 <Alert
                   type="info"
                   showIcon
@@ -203,71 +203,77 @@ export default function OpsPage() {
                 />
               ) : (
                 <>
-                  {!ops.radio.fresh && (
+                  {/* 几个信道由同一支接收机收，新鲜与否、最后一句话和重开次数是它的，不是哪个信道的。 */}
+                  {!ops.radios[0]!.fresh && (
                     <Alert
                       type="warning"
                       showIcon
                       style={{ marginBottom: 12 }}
-                      message={`已经 ${ops.radio.ageS} 秒没有电台状态了，接收机可能掉了`}
-                      description={ops.radio.lastError}
+                      message={`已经 ${ops.radios[0]!.ageS} 秒没有电台状态了，接收机可能掉了`}
+                      description={ops.radios[0]!.lastError}
                     />
                   )}
-                  <Descriptions size="small" column={1} bordered>
-                    <Descriptions.Item label="守听">
-                      {ops.radio.freqMhz} MHz（{ops.radio.channel}），增益{" "}
-                      {ops.radio.gainDb} dB
-                    </Descriptions.Item>
-                    <Descriptions.Item label="此刻">
-                      {ops.radio.open ? (
-                        <Tag color="green">静噪开着，正在收</Tag>
-                      ) : (
-                        <Tag>静默</Tag>
-                      )}
-                      {ops.radio.noiseDb !== undefined && (
-                        <span className="mono">
-                          {" "}
-                          {ops.radio.noiseDb.toFixed(1)} dB
-                        </span>
-                      )}
-                      {margin(ops.radio) !== undefined && (
-                        <Typography.Text type="secondary">
-                          {" "}
-                          （离开门限还差 {margin(ops.radio)!.toFixed(1)} dB）
-                        </Typography.Text>
-                      )}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="门限">
-                      静默基准 {ops.radio.idleDb?.toFixed(1) ?? "还在校准"}
-                      {ops.radio.openBelowDb !== undefined && (
-                        <>
-                          {" "}
-                          dB，开 &lt;{ops.radio.openBelowDb.toFixed(1)}，关 &gt;
-                          {ops.radio.closeAboveDb?.toFixed(1)}
-                        </>
-                      )}
-                      <Typography.Text type="secondary">
+                  <Typography.Paragraph type="secondary">
+                    一支接收机，增益 {ops.radios[0]!.gainDb} dB，守{" "}
+                    {ops.radios.length} 个信道。有载波时噪声会塌下去，所以是低于门限才算开。
+                    {ops.radios[0]!.lastError !== undefined && (
+                      <>
                         {" "}
-                        （有载波时噪声会塌下去，所以是低于才算开）
-                      </Typography.Text>
-                    </Descriptions.Item>
-                    {ops.radio.lastError !== undefined && (
-                      <Descriptions.Item label="rtl_fm 最后一句">
-                        <span className="mono">{ops.radio.lastError}</span>
-                        {ops.radio.restarts !== undefined &&
-                          ops.radio.restarts > 0 && (
-                            <Typography.Text type="secondary">
-                              {" "}
-                              （重开过 {ops.radio.restarts} 次）
-                            </Typography.Text>
-                          )}
-                      </Descriptions.Item>
+                        rtl_sdr 最后一句：
+                        <span className="mono">{ops.radios[0]!.lastError}</span>
+                        {(ops.radios[0]!.restarts ?? 0) > 0 &&
+                          `（重开过 ${ops.radios[0]!.restarts} 次）`}
+                      </>
                     )}
-                    <Descriptions.Item label="最近一次静噪打开">
-                      {ops.radio.lastOpenAt === undefined
-                        ? "起来之后还没有过"
-                        : `${time.at(ops.radio.lastOpenAt)}（${ago(ops.now, ops.radio.lastOpenAt)}）`}
-                    </Descriptions.Item>
-                  </Descriptions>
+                  </Typography.Paragraph>
+                  {ops.radios.map((r) => (
+                    <Descriptions
+                      key={`${r.freqMhz}|${r.channel}`}
+                      size="small"
+                      column={1}
+                      bordered
+                      style={{ marginBottom: 12 }}
+                      title={`${r.freqMhz} MHz（${r.channel}）`}
+                    >
+                      <Descriptions.Item label="此刻">
+                        {r.open ? (
+                          <Tag color="green">静噪开着，正在收</Tag>
+                        ) : (
+                          <Tag>静默</Tag>
+                        )}
+                        {r.noiseDb !== undefined && (
+                          <span className="mono"> {r.noiseDb.toFixed(1)} dB</span>
+                        )}
+                        {margin(r) !== undefined && (
+                          <Typography.Text type="secondary">
+                            {" "}
+                            （离开门限还差 {margin(r)!.toFixed(1)} dB）
+                          </Typography.Text>
+                        )}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="门限">
+                        静默基准 {r.idleDb?.toFixed(1) ?? "还在校准"}
+                        {r.openBelowDb !== undefined && (
+                          <>
+                            {" "}
+                            dB，开 &lt;{r.openBelowDb.toFixed(1)}，关 &gt;
+                            {r.closeAboveDb?.toFixed(1)}
+                          </>
+                        )}
+                        {r.closestDb !== undefined && (
+                          <Typography.Text type="secondary">
+                            {" "}
+                            （这次守听里最近差 {r.closestDb.toFixed(1)} dB）
+                          </Typography.Text>
+                        )}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="最近一次静噪打开">
+                        {r.lastOpenAt === undefined
+                          ? "起来之后还没有过"
+                          : `${time.at(r.lastOpenAt)}（${ago(ops.now, r.lastOpenAt)}）`}
+                      </Descriptions.Item>
+                    </Descriptions>
+                  ))}
                 </>
               )}
             </Card>

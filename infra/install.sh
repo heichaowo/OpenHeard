@@ -32,7 +32,7 @@ MAJOR="$("$NODE" -p 'process.versions.node.split(".")[0]')"
 echo "== 先验配置 =="
 "$NODE" "$REPO/api/src/check-config.ts" "$CONFIG" || die "配置不过，先改配置再装"
 
-command -v rtl_fm >/dev/null || echo "提醒：PATH 里没有 rtl_fm，模拟守听会起不来"
+command -v rtl_sdr >/dev/null || echo "提醒：PATH 里没有 rtl_sdr，模拟守听会起不来"
 
 # 没有构建产物的话，连上去只有接口，浏览器打开是一片 404。
 [ -f "$REPO/web/dist/index.html" ] || echo "提醒：没有 web/dist，管理端界面发不出来。跑 npm ci --prefix web && npm run build --prefix web"

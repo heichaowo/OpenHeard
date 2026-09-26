@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { checkQueries } from './core.ts';
+import { checkQueries, readAnalogChannels } from './core.ts';
 import type { Channel, StationDefaults } from './core.ts';
 
 /** searchHouse 的一条查询。每条规则单独发一次，不用 OR 合并。 */
@@ -42,8 +42,8 @@ export interface Config {
   recordingsDir?: string;
   /** 模拟守听里人能改的那几项。守护进程那边还会多读 recordingsDir。 */
   analog?: {
-    freqMhz: number;
-    channel: string;
+    /** 同一支接收机守的几个信道。 */
+    channels: { freqMhz: number; channel: string }[];
     gainDb?: number;
     myUnitId?: string;
     openMarginDb?: number;
@@ -103,6 +103,8 @@ export function loadConfig(path: string): ConfigResult {
 
   const queries = raw.queries;
   problems.push(...checkQueries(queries));
+  // 守护进程读到坏的信道表会直接退出。装机前的检查用的是这里，要在这里就拦下。
+  if (isObject(raw.analog)) problems.push(...readAnalogChannels(raw.analog).problems);
 
   if (problems.length > 0) return { ok: false, problems };
   return {
@@ -120,15 +122,18 @@ export function loadConfig(path: string): ConfigResult {
   };
 }
 
-/** analog 里人能在界面上改的那几项。校验在 daemon 那边做，这里只是读出来给界面。 */
+/**
+ * analog 里人能在界面上改的那几项，给界面读。
+ *
+ * 信道表写坏了在 loadConfig 里就报出来，这里只在读得通时给出值。
+ */
 function analogOf(raw: Record<string, unknown>): Config['analog'] {
   const a = raw.analog;
-  if (!isObject(a) || typeof a.freqMhz !== 'number' || typeof a.channel !== 'string') {
-    return undefined;
-  }
+  if (!isObject(a)) return undefined;
+  const { channels } = readAnalogChannels(a);
+  if (channels === undefined) return undefined;
   return {
-    freqMhz: a.freqMhz,
-    channel: a.channel,
+    channels,
     gainDb: typeof a.gainDb === 'number' ? a.gainDb : undefined,
     myUnitId: typeof a.myUnitId === 'string' ? a.myUnitId : typeof a.unitId === 'string' ? a.unitId : undefined,
     // 报生效值，不报「文件里没写」。设置页照着它填表，显示空白的话人会

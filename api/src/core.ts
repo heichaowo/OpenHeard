@@ -15,6 +15,7 @@ export {
   modeOf,
   normalizeCallsign,
   parseAdif,
+  readAnalogChannels,
 } from '../../core/src/index.ts';
 
 export type {

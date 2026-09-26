@@ -1,5 +1,5 @@
 /**
- * 电台此刻的样子。
+ * 电台此刻的样子，一个信道一条。一支接收机守几个信道，就报几条。
  *
  * 守护进程每秒报一次，只放在内存里。它描述的是「现在」，重启之后本来就该重新
  * 问一次电台，存进库里没有意义，而且每秒一行会把库撑满。
@@ -17,9 +17,9 @@ export interface RadioStatus {
   noiseDb?: number;
   open: boolean;
   lastOpenAt?: number;
-  /** rtl_fm 最后说的那句话。它起不来的时候，唯一的线索就是这个。 */
+  /** rtl_sdr 最后说的那句话。它起不来的时候，唯一的线索就是这个。 */
   lastError?: string;
-  /** rtl_fm 重开了多少次。一直涨说明它根本起不来。 */
+  /** rtl_sdr 重开了多少次。一直涨说明它根本起不来。 */
   restarts?: number;
   at: number;
 }
@@ -30,7 +30,7 @@ export const STALE_S = 10;
 export interface RadioView extends RadioStatus {
   /** 距离上一次报过去了多少秒。 */
   ageS: number;
-  /** 还算不算新鲜。不新鲜说明守护进程或者 rtl_fm 出事了。 */
+  /** 还算不算新鲜。不新鲜说明守护进程或者 rtl_sdr 出事了。 */
   fresh: boolean;
   /**
    * 这次守听里最接近打开门限的那一刻，差了多少 dB。
@@ -46,8 +46,16 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
-/** 收下一条状态。形状不对就当没收到，这条路上的东西不值得让请求失败。 */
-export function parseRadio(raw: unknown, now: number): RadioStatus | undefined {
+/**
+ * 收下一批状态，一个信道一条。形状不对的那条就当没收到，这条路上的东西
+ * 不值得让请求失败。以前只守一个信道时报的是单个对象，也照样认。
+ */
+export function parseRadio(raw: unknown, now: number): RadioStatus[] {
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list.map((r) => parseOne(r, now)).filter((r): r is RadioStatus => r !== undefined);
+}
+
+function parseOne(raw: unknown, now: number): RadioStatus | undefined {
   if (!isObject(raw)) return undefined;
   const freqMhz = num(raw.freqMhz);
   if (freqMhz === undefined || typeof raw.channel !== 'string') return undefined;
@@ -68,36 +76,44 @@ export function parseRadio(raw: unknown, now: number): RadioStatus | undefined {
 }
 
 export function createRadioState() {
-  let latest: RadioStatus | undefined;
-  let closestDb: number | undefined;
-  let tunedTo: string | undefined;
+  let latest: RadioStatus[] | undefined;
+  /** 每个信道这次守听里离门限最近的一刻。 */
+  let closest = new Map<string, number>();
+
+  const key = (s: RadioStatus) => `${s.freqMhz}|${s.channel}`;
 
   return {
-    set(status: RadioStatus): void {
-      // 换了频率或者信道就重新记，上一个频点的最接近值说明不了这个频点。
-      const key = `${status.freqMhz}|${status.channel}`;
-      if (key !== tunedTo) {
-        tunedTo = key;
-        closestDb = undefined;
+    /** 一批就是全部信道。换了信道表，不在新表里的那些连同最接近值一起丢掉。 */
+    set(list: RadioStatus[]): void {
+      if (list.length === 0) return;
+      const next = new Map<string, number>();
+      for (const s of list) {
+        // 同一个信道接着记。换了频率或者信道名就重新记，上一个频点的最接近值
+        // 说明不了这个频点。
+        let c = closest.get(key(s));
+        if (s.noiseDb !== undefined && s.openBelowDb !== undefined) {
+          const margin = s.noiseDb - s.openBelowDb;
+          if (c === undefined || margin < c) c = margin;
+        }
+        if (c !== undefined) next.set(key(s), c);
       }
-      if (status.noiseDb !== undefined && status.openBelowDb !== undefined) {
-        const margin = status.noiseDb - status.openBelowDb;
-        if (closestDb === undefined || margin < closestDb) closestDb = margin;
-      }
-      latest = status;
+      closest = next;
+      latest = list;
     },
-    /** 没有守听、或者报不上来时是 undefined。 */
-    view(now: number): RadioView | undefined {
-      if (latest === undefined) return undefined;
-      // 两个进程的秒取整会差一拍，负数看着像出了错。
-      const ageS = Math.max(0, now - latest.at);
-      return {
-        ...latest,
-        ageS,
-        fresh: ageS <= STALE_S,
-        // 分贝读数留一位，后面十几位是浮点噪声。
-        closestDb: closestDb === undefined ? undefined : Math.round(closestDb * 10) / 10,
-      };
+    /** 没有守听、或者从没报上来过时是空的。 */
+    view(now: number): RadioView[] {
+      return (latest ?? []).map((s) => {
+        // 两个进程的秒取整会差一拍，负数看着像出了错。
+        const ageS = Math.max(0, now - s.at);
+        const c = closest.get(key(s));
+        return {
+          ...s,
+          ageS,
+          fresh: ageS <= STALE_S,
+          // 分贝读数留一位，后面十几位是浮点噪声。
+          closestDb: c === undefined ? undefined : Math.round(c * 10) / 10,
+        };
+      });
     },
   };
 }

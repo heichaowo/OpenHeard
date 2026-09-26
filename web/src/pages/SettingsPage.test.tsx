@@ -54,20 +54,83 @@ describe('SettingsPage', () => {
     expect(saveSettings.mock.calls[0][0].station.myQth).toBe('克拉玛依区')
   })
 
-  it('模拟守听填了一格，频率和信道名就是必填', async () => {
+  it('模拟守听填了一格，就至少要有一个信道', async () => {
     mount(base)
     await userEvent.type(await screen.findByLabelText('本台 MDC unit ID'), '6460')
 
     await userEvent.click(screen.getByRole('button', { name: /^保\s*存$/ }))
 
-    expect(await screen.findByText('频率必填')).toBeInTheDocument()
+    expect(await screen.findByText('至少要有一个信道')).toBeInTheDocument()
+    expect(saveSettings).not.toHaveBeenCalled()
+  })
+
+  const one = { channels: [{ freqMhz: 438.5, channel: '438.500 中继' }], openMarginDb: 12, closeMarginDb: 7 }
+
+  // 一支接收机同时守 438.500 和 438.975。
+  it('加一个信道，当场说接收机怎么收，存的时候两个都带上', async () => {
+    mount({ ...base, analog: one })
+    await screen.findByDisplayValue('438.500 中继')
+
+    await userEvent.click(screen.getByRole('button', { name: /加一个信道/ }))
+    const freqs = screen.getAllByLabelText('信道频率 MHz')
+    const names = screen.getAllByLabelText('信道名')
+    await userEvent.type(freqs[1]!, '438.975')
+    await userEvent.type(names[1]!, '438.975')
+
+    expect(await screen.findByText(/接收机调到 438.753 MHz/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /^保\s*存$/ }))
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(saveSettings.mock.calls[0][0].analog.channels).toEqual([
+      { freqMhz: 438.5, channel: '438.500 中继' },
+      { freqMhz: 438.975, channel: '438.975' },
+    ])
+  })
+
+  // 信道表的规则挂在整张表上，改某一行时不会自己重跑，要专门补一下。
+  it('信道名重复不用等保存，填的时候就说', async () => {
+    mount({ ...base, analog: one })
+    await screen.findByDisplayValue('438.500 中继')
+
+    await userEvent.click(screen.getByRole('button', { name: /加一个信道/ }))
+    await userEvent.type(screen.getAllByLabelText('信道频率 MHz')[1]!, '438.975')
+    await userEvent.type(screen.getAllByLabelText('信道名')[1]!, '438.500 中继')
+
+    expect(await screen.findByText('信道名不能重复')).toBeInTheDocument()
+    expect(saveSettings).not.toHaveBeenCalled()
+  })
+
+  // 一支接收机收得下，不等于是业余波段。存的时候 api 会拒，提示不能先说行。
+  it('不在 2m 或 70cm 的频率，提示当场说不行', async () => {
+    mount({ ...base, analog: one })
+    await screen.findByDisplayValue('438.500 中继')
+
+    const freq = screen.getAllByLabelText('信道频率 MHz')[0]!
+    await userEvent.clear(freq)
+    await userEvent.type(freq, '100')
+
+    expect((await screen.findAllByText(/100 MHz 不在 2m/)).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/接收机调到/)).not.toBeInTheDocument()
+  })
+
+  it('一支接收机收不下就当场说出来，也存不了', async () => {
+    mount({ ...base, analog: one })
+    await screen.findByDisplayValue('438.500 中继')
+
+    await userEvent.click(screen.getByRole('button', { name: /加一个信道/ }))
+    await userEvent.type(screen.getAllByLabelText('信道频率 MHz')[1]!, '440.5')
+    await userEvent.type(screen.getAllByLabelText('信道名')[1]!, '远的')
+
+    expect((await screen.findAllByText(/最多 1.8 MHz/)).length).toBeGreaterThan(0)
+    await userEvent.click(screen.getByRole('button', { name: /^保\s*存$/ }))
+    await new Promise((r) => setTimeout(r, 50))
     expect(saveSettings).not.toHaveBeenCalled()
   })
 
   it('静噪余量在表单里，能改', async () => {
     mount({
       ...base,
-      analog: { freqMhz: 438.5, channel: '438.500 中继', openMarginDb: 12, closeMarginDb: 7 },
+      analog: one,
     })
     const open = await screen.findByLabelText('静噪打开余量 dB')
 

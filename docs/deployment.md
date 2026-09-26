@@ -4,7 +4,7 @@
 
 ## 为什么是 LaunchAgent
 
-守护进程要读 USB 上的接收机，要用 Homebrew 装的 `rtl_fm`，还要读家目录里的配置。以本人身份跑，这三件事都不用额外授权，安装也不用 sudo。
+守护进程要读 USB 上的接收机，要用 Homebrew 装的 `rtl_sdr`，还要读家目录里的配置。以本人身份跑，这三件事都不用额外授权，安装也不用 sudo。
 
 代价是要保持登录。Mac mini 开自动登录，重启后两个服务跟着起来。
 
@@ -53,7 +53,7 @@ tail -f ~/Library/Logs/openheard/daemon.log
 curl -s http://127.0.0.1:3000/health
 ```
 
-日志四个文件，`api.log`、`api.err.log`、`daemon.log`、`daemon.err.log`，都在 `~/Library/Logs/openheard`。`rtl_fm` 的输出走 `daemon.err.log`，它把采样率和缓冲区大小也写在那里，不是报错。
+日志四个文件，`api.log`、`api.err.log`、`daemon.log`、`daemon.err.log`，都在 `~/Library/Logs/openheard`。`rtl_sdr` 的输出走 `daemon.err.log`，它把找到的设备和调谐器也写在那里，不是报错。
 
 launchd 不轮转日志。日志长到碍事时自己截断。
 
@@ -138,10 +138,10 @@ infra/uninstall.sh
 
 ## 接收机被占住
 
-一支接收机同一时刻只能被一个进程认领。之前手工跑的 `rtl_fm` 没退干净，守护进程就起不来，`daemon.err.log` 里是 `usb_claim_interface error -3`。
+一支接收机同一时刻只能被一个进程认领。之前手工跑的 `rtl_sdr` 或 `rtl_fm` 没退干净，守护进程就起不来，`daemon.err.log` 里是 `usb_claim_interface error -3`。
 
 ```bash
-pkill -f rtl_fm
+pkill -f "rtl_sdr|rtl_fm"
 launchctl kickstart -k gui/$UID/uk.co.protocol7.openheard-daemon
 ```
 
@@ -154,7 +154,7 @@ Runs on one Mac mini as two LaunchAgents, `openheard-api` and
 
 ## Why LaunchAgent
 
-The daemon reads a USB receiver, runs `rtl_fm` from Homebrew, and reads a
+The daemon reads a USB receiver, runs `rtl_sdr` from Homebrew, and reads a
 config in the home directory. Running as the logged-in user makes all three
 work without extra authorisation, and installing needs no sudo.
 
@@ -211,8 +211,8 @@ curl -s http://127.0.0.1:3000/health
 ```
 
 Four log files, `api.log`, `api.err.log`, `daemon.log` and `daemon.err.log`,
-all under `~/Library/Logs/openheard`. `rtl_fm` writes to `daemon.err.log`,
-including its sample rate and buffer size, which are not errors.
+all under `~/Library/Logs/openheard`. `rtl_sdr` writes to `daemon.err.log`,
+including the device and tuner it found, which are not errors.
 
 launchd does not rotate these. Truncate them when they get in the way.
 
@@ -329,11 +329,11 @@ alone.
 
 ## Receiver already claimed
 
-One receiver can be claimed by one process at a time. An `rtl_fm` left over
-from a manual run keeps the daemon from starting, with
+One receiver can be claimed by one process at a time. An `rtl_sdr` or `rtl_fm`
+left over from a manual run keeps the daemon from starting, with
 `usb_claim_interface error -3` in `daemon.err.log`.
 
 ```bash
-pkill -f rtl_fm
+pkill -f "rtl_sdr|rtl_fm"
 launchctl kickstart -k gui/$UID/uk.co.protocol7.openheard-daemon
 ```

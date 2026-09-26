@@ -2,19 +2,23 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { AUDIO_RATE, Channelizer } from './channelizer.ts';
+import { planTuning } from './core.ts';
 import type { Activity } from './core.ts';
 import { SquelchDetector } from './detector.ts';
 import { decodeMdc } from './mdc.ts';
 
-export interface AnalogConfig {
-  /** 守哪个频率，Hz。一次只能守一个。 */
+export interface AnalogChannel {
   freqHz: number;
   /** 信道名，进 Activity。 */
   channel: string;
+}
+
+export interface AnalogConfig {
+  /** 要守的信道。同一支接收机收，最高和最低相差不超过 1.8 MHz，见 core 的 planTuning。 */
+  channels: AnalogChannel[];
   /** 调谐器增益，dB。 */
   gainDb: number;
-  /** rtl_fm 输出的音频采样率。 */
-  sampleRate: number;
   /** 判决块长，秒。 */
   blockS: number;
   /** 开机先听多久建立静默基准。 */
@@ -35,7 +39,7 @@ export interface AnalogConfig {
   prerollS: number;
   /** 每次发射的音频往这里写，留给以后的语音识别。空字符串就不写。 */
   recordingsDir: string;
-  rtlFmPath: string;
+  rtlSdrPath: string;
 }
 
 /** 幂等键要能重算，所以从信道和起始时刻推，不用随机数。 */
@@ -95,37 +99,26 @@ const round1 = (v: number | undefined) => (v === undefined ? undefined : Math.ro
 const LOG_IDLE_STEP_DB = 3;
 
 /**
- * 守一个模拟信道，把静噪开启变成发射事件。
+ * 一个信道的判决：静噪、前导和录音、每小时小结、MDC、发射事件。
  *
- * 解调交给 rtl_fm，这里只在它输出的音频上做判决。
+ * 喂进来的是这个信道鉴频后的音频，长短不定，这里切成 blockS 一块。
  * 门限不写死：先听一段静默，用它的高分位当基准，再按余量推出门限。静噪关着时
  * 基准跟着本底走，见 SquelchDetector。
  */
-export function watchAnalog(
+function listen(
   cfg: AnalogConfig,
+  ch: AnalogChannel,
+  startedAt: number,
   onEvent: (activity: Activity, audio: Buffer) => void,
-  onExit?: () => void,
-  onStatus?: (s: RadioStatus) => void,
-): { stop: () => void; lastError: () => string | undefined } {
-  const blockN = Math.round(cfg.sampleRate * cfg.blockS);
+) {
+  const rate = AUDIO_RATE;
+  const mhz = ch.freqHz / 1e6;
+  const blockN = Math.round(rate * cfg.blockS);
   let lastOpenAt: number | undefined;
-  let lastStatus = 0;
-  let lastError: string | undefined;
-  const child = spawn(cfg.rtlFmPath, [
-    '-f', String(cfg.freqHz),
-    '-M', 'fm',
-    '-s', String(cfg.sampleRate),
-    '-g', String(cfg.gainDb),
-    '-',
-  ]);
-
-  if (cfg.recordingsDir) mkdirSync(cfg.recordingsDir, { recursive: true });
-
-  let pending: Buffer = Buffer.alloc(0);
+  let rest = new Int16Array(0);
   let blockIndex = 0;
-  const startedAt = Date.now() / 1000;
   const detector = new SquelchDetector({
-    sampleRate: cfg.sampleRate,
+    sampleRate: rate,
     calibrateS: cfg.calibrateS,
     openMarginDb: cfg.openMarginDb,
     closeMarginDb: cfg.closeMarginDb,
@@ -138,8 +131,8 @@ export function watchAnalog(
   // 静噪开着时的音频，按下标写，长度从结构上封死。以前是 number[] 一直 push，
   // 静噪卡住 93 分钟后撞上 V8 数组的上限，整个守护进程崩掉。探测器到 maxOpenS
   // 会强制关，这里再多留前导和一块的余量。
-  const prerollN = Math.round(cfg.sampleRate * cfg.prerollS);
-  const captured = new Int16Array(Math.ceil(cfg.sampleRate * cfg.maxOpenS) + prerollN + blockN);
+  const prerollN = Math.round(rate * cfg.prerollS);
+  const captured = new Int16Array(Math.ceil(rate * cfg.maxOpenS) + prerollN + blockN);
   let capturedN = 0;
   const preroll = new Int16Array(prerollN);
   let prerollLen = 0;
@@ -176,152 +169,207 @@ export function watchAnalog(
   });
   let hour = freshHour();
 
+  const block = (pcm: Int16Array) => {
+    const at = startedAt + blockIndex * cfg.blockS;
+    blockIndex += 1;
+
+    const wasOpen = detector.isOpen;
+    const calibrating = detector.idleDb === undefined;
+    const openBelow = detector.openBelowDb;
+    const event = detector.push(pcm, at, cfg.blockS);
+    if (!wasOpen && detector.isOpen) lastOpenAt = Math.round(at);
+
+    const idle = detector.idleDb;
+    if (idle !== undefined && loggedIdle === undefined) {
+      console.log(
+        `${mhz} MHz 静默基准 ${idle.toFixed(1)} dB，门限 开<${detector.openBelowDb!.toFixed(1)} 关>${detector.closeAboveDb!.toFixed(1)}`,
+      );
+      loggedIdle = idle;
+    } else if (idle !== undefined && Math.abs(idle - loggedIdle!) >= LOG_IDLE_STEP_DB) {
+      console.log(
+        `${mhz} MHz 基准跟着本底移到 ${idle.toFixed(1)} dB，门限 开<${detector.openBelowDb!.toFixed(1)} 关>${detector.closeAboveDb!.toFixed(1)}`,
+      );
+      loggedIdle = idle;
+    }
+    if (event?.forced) {
+      console.error(
+        `${mhz} MHz 静噪开了 ${event.durationS.toFixed(0)} 秒没关，强制关掉，基准现在是 ${idle!.toFixed(1)} dB`,
+      );
+    }
+
+    if (!calibrating) {
+      hour.blocks += 1;
+      if (!wasOpen && openBelow !== undefined) {
+        hour.closest = Math.min(hour.closest, detector.noiseDb! - openBelow);
+      }
+      hour.idleLo = Math.min(hour.idleLo, idle!);
+      hour.idleHi = Math.max(hour.idleHi, idle!);
+      if (event) hour.events += 1;
+      if (hour.blocks >= hourBlocks) {
+        const c = detector.counts;
+        const opened = c.opened - hour.counts.opened;
+        console.log(
+          `过去一小时 ${mhz} MHz：静噪开 ${opened} 次，记下 ${hour.events} 次，` +
+            `太短没记 ${c.short - hour.counts.short} 次，强制关 ${c.forced - hour.counts.forced} 次。` +
+            (hour.closest > 0 ? `噪声离开启门限最近还差 ${hour.closest.toFixed(1)} dB。` : '') +
+            `基准 ${hour.idleLo.toFixed(1)} 到 ${hour.idleHi.toFixed(1)} dB`,
+        );
+        hour = freshHour();
+      }
+    }
+
+    // 强制关掉的那一块还压着载波，属于这次发射，不是下一次的前导。
+    if (!detector.isOpen && !event?.forced) {
+      keep(pcm);
+    } else {
+      if (!wasOpen) {
+        captured.set(preroll.subarray(0, prerollLen));
+        capturedN = prerollLen;
+        prerollLen = 0;
+      }
+      capture(pcm);
+    }
+
+    // 事件太短会被丢掉，那时 event 是 undefined，但音频照样要清掉，
+    // 否则它会串进下一次发射。所以按状态翻转清，不按有没有事件清。
+    const closedNow = wasOpen && !detector.isOpen;
+    const audio = closedNow ? captured.slice(0, capturedN) : undefined;
+    if (closedNow) capturedN = 0;
+
+    if (event && audio) {
+      // 只有 CRC 通过且 unit ID 相等才算本台。op 和 arg 不参与判定。
+      const frames = cfg.myUnitId === undefined ? [] : decodeMdc(audio, rate);
+      const mine = frames.some((f) => f.unitId === cfg.myUnitId);
+      if (frames.length > 0) {
+        const list = frames
+          .map(
+            (f) =>
+              `${f.unitId.toString(16).toUpperCase().padStart(4, '0')}` +
+              `/${f.arg === 0x80 ? 'BOT' : f.arg === 0x00 ? 'EOT' : `arg${f.arg}`}` +
+              `@${(f.atSample / rate).toFixed(2)}s`,
+          )
+          .join(' ');
+        console.log(`${mhz} MHz 解出 ${frames.length} 个 MDC 帧: ${list}`);
+      }
+
+      const activity: Activity = {
+        id: eventId(ch.channel, event.startAt),
+        origin: 'sdr-fm',
+        startAt: Math.round(event.startAt),
+        durationS: Number(event.durationS.toFixed(2)),
+        mine,
+        freqMhz: mhz,
+        channel: ch.channel,
+        audioSnrDb: Number(event.audioSnrDb.toFixed(1)),
+      };
+      const buf = wav(audio, rate);
+      if (cfg.recordingsDir) {
+        writeFileSync(join(cfg.recordingsDir, `${activity.id}.wav`), buf);
+      }
+      onEvent(activity, buf);
+    }
+  };
+
+  return {
+    /** 喂这个信道新出的一段音频，凑够一块判一块，零头留到下次。 */
+    feed(audio: Int16Array): void {
+      let all = audio;
+      if (rest.length > 0) {
+        all = new Int16Array(rest.length + audio.length);
+        all.set(rest);
+        all.set(audio, rest.length);
+      }
+      let i = 0;
+      for (; i + blockN <= all.length; i += blockN) block(all.subarray(i, i + blockN));
+      rest = all.slice(i);
+    },
+
+    status(): RadioStatus {
+      return {
+        freqMhz: mhz,
+        channel: ch.channel,
+        gainDb: cfg.gainDb,
+        // 留一位小数。这是个分贝读数，后面十几位没有意义，只会让接口难读。
+        idleDb: round1(detector.idleDb),
+        openBelowDb: round1(detector.openBelowDb),
+        closeAboveDb: round1(detector.closeAboveDb),
+        noiseDb: detector.idleDb === undefined ? undefined : round1(detector.noiseDb),
+        open: detector.isOpen,
+        lastOpenAt,
+        at: Math.round(Date.now() / 1000),
+      };
+    },
+
+    flush(): void {
+      const last = detector.flush();
+      if (last) console.error(`${mhz} MHz 收尾时还有一次未闭合的发射，时长 ${last.durationS.toFixed(2)} 秒`);
+    },
+  };
+}
+
+/**
+ * 守一段频谱里的几个模拟信道，把各自的静噪开启变成发射事件。
+ *
+ * rtl_sdr 只管采样。拆信道和鉴频在 Channelizer 里，判决在 listen 里，一个信道一份。
+ */
+export function watchAnalog(
+  cfg: AnalogConfig,
+  onEvent: (activity: Activity, audio: Buffer) => void,
+  onExit?: () => void,
+  onStatus?: (s: RadioStatus[]) => void,
+): { stop: () => void; lastError: () => string | undefined } {
+  // 配置在读进来时已经按同一个算法验过，走到这里还不行就是程序错了。
+  const tuning = planTuning(cfg.channels.map((c) => c.freqHz));
+  if (!tuning.ok) throw new Error(tuning.problem);
+  const { centerHz, sampleRate, offsetsHz } = tuning.plan;
+
+  let lastStatus = 0;
+  let lastError: string | undefined;
+  const child = spawn(cfg.rtlSdrPath, [
+    '-f', String(centerHz),
+    '-s', String(sampleRate),
+    '-g', String(cfg.gainDb),
+    '-',
+  ]);
+  console.log(
+    `接收机调到 ${centerHz / 1e6} MHz，采样率 ${sampleRate / 1e6} MHz，守 ` +
+      cfg.channels.map((c) => `${c.freqHz / 1e6}（${c.channel}）`).join('、'),
+  );
+
+  if (cfg.recordingsDir) mkdirSync(cfg.recordingsDir, { recursive: true });
+
+  const startedAt = Date.now() / 1000;
+  const channelizer = new Channelizer(sampleRate, offsetsHz);
+  const listeners = cfg.channels.map((ch) => listen(cfg, ch, startedAt, onEvent));
+
   child.stderr.on('data', (d: Buffer) => {
     const line = d.toString().trim();
     if (line) {
       lastError = line;
-      console.error(`rtl_fm: ${line}`);
+      console.error(`rtl_sdr: ${line}`);
     }
   });
 
   child.stdout.on('data', (chunk: Buffer) => {
-    pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
-
-    while (pending.length >= blockN * 2) {
-      const raw = pending.subarray(0, blockN * 2);
-      pending = pending.subarray(blockN * 2);
-      const pcm = new Int16Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.length));
-      const at = startedAt + blockIndex * cfg.blockS;
-      blockIndex += 1;
-
-      const wasOpen = detector.isOpen;
-      const calibrating = detector.idleDb === undefined;
-      const openBelow = detector.openBelowDb;
-      const event = detector.push(pcm, at, cfg.blockS);
-      if (!wasOpen && detector.isOpen) lastOpenAt = Math.round(at);
-
-      const idle = detector.idleDb;
-      if (idle !== undefined && loggedIdle === undefined) {
-        console.log(
-          `静默基准 ${idle.toFixed(1)} dB，门限 开<${detector.openBelowDb!.toFixed(1)} 关>${detector.closeAboveDb!.toFixed(1)}`,
-        );
-        loggedIdle = idle;
-      } else if (idle !== undefined && Math.abs(idle - loggedIdle!) >= LOG_IDLE_STEP_DB) {
-        console.log(
-          `基准跟着本底移到 ${idle.toFixed(1)} dB，门限 开<${detector.openBelowDb!.toFixed(1)} 关>${detector.closeAboveDb!.toFixed(1)}`,
-        );
-        loggedIdle = idle;
-      }
-      if (event?.forced) {
-        console.error(
-          `静噪开了 ${event.durationS.toFixed(0)} 秒没关，强制关掉，基准现在是 ${idle!.toFixed(1)} dB`,
-        );
-      }
-
-      // 校准这 5 秒里也要报。不报的话换频率之后界面上还挂着旧频率，
-      // 而且 5 秒短于「太久没报」的门限，连不新鲜都看不出来。
-      if (onStatus !== undefined && Date.now() - lastStatus >= STATUS_MS) {
-        lastStatus = Date.now();
-        onStatus({
-          freqMhz: cfg.freqHz / 1e6,
-          channel: cfg.channel,
-          gainDb: cfg.gainDb,
-          // 留一位小数。这是个分贝读数，后面十几位没有意义，只会让接口难读。
-          idleDb: round1(idle),
-          openBelowDb: round1(detector.openBelowDb),
-          closeAboveDb: round1(detector.closeAboveDb),
-          noiseDb: calibrating ? undefined : round1(detector.noiseDb),
-          open: detector.isOpen,
-          lastOpenAt,
-          at: Math.round(Date.now() / 1000),
-        });
-      }
-
-      if (!calibrating) {
-        hour.blocks += 1;
-        if (!wasOpen && openBelow !== undefined) {
-          hour.closest = Math.min(hour.closest, detector.noiseDb! - openBelow);
-        }
-        hour.idleLo = Math.min(hour.idleLo, idle!);
-        hour.idleHi = Math.max(hour.idleHi, idle!);
-        if (event) hour.events += 1;
-        if (hour.blocks >= hourBlocks) {
-          const c = detector.counts;
-          const opened = c.opened - hour.counts.opened;
-          console.log(
-            `过去一小时 ${cfg.freqHz / 1e6} MHz：静噪开 ${opened} 次，记下 ${hour.events} 次，` +
-              `太短没记 ${c.short - hour.counts.short} 次，强制关 ${c.forced - hour.counts.forced} 次。` +
-              (hour.closest > 0 ? `噪声离开启门限最近还差 ${hour.closest.toFixed(1)} dB。` : '') +
-              `基准 ${hour.idleLo.toFixed(1)} 到 ${hour.idleHi.toFixed(1)} dB`,
-          );
-          hour = freshHour();
-        }
-      }
-
-      // 强制关掉的那一块还压着载波，属于这次发射，不是下一次的前导。
-      if (!detector.isOpen && !event?.forced) {
-        keep(pcm);
-      } else {
-        if (!wasOpen) {
-          captured.set(preroll.subarray(0, prerollLen));
-          capturedN = prerollLen;
-          prerollLen = 0;
-        }
-        capture(pcm);
-      }
-
-      // 事件太短会被丢掉，那时 event 是 undefined，但音频照样要清掉，
-      // 否则它会串进下一次发射。所以按状态翻转清，不按有没有事件清。
-      const closedNow = wasOpen && !detector.isOpen;
-      const audio = closedNow ? captured.slice(0, capturedN) : undefined;
-      if (closedNow) capturedN = 0;
-
-      if (event && audio) {
-        // 只有 CRC 通过且 unit ID 相等才算本台。op 和 arg 不参与判定。
-        const frames = cfg.myUnitId === undefined ? [] : decodeMdc(audio, cfg.sampleRate);
-        const mine = frames.some((f) => f.unitId === cfg.myUnitId);
-        if (frames.length > 0) {
-          const list = frames
-            .map(
-              (f) =>
-                `${f.unitId.toString(16).toUpperCase().padStart(4, '0')}` +
-                `/${f.arg === 0x80 ? 'BOT' : f.arg === 0x00 ? 'EOT' : `arg${f.arg}`}` +
-                `@${(f.atSample / cfg.sampleRate).toFixed(2)}s`,
-            )
-            .join(' ');
-          console.log(`解出 ${frames.length} 个 MDC 帧: ${list}`);
-        }
-
-        const activity: Activity = {
-          id: eventId(cfg.channel, event.startAt),
-          origin: 'sdr-fm',
-          startAt: Math.round(event.startAt),
-          durationS: Number(event.durationS.toFixed(2)),
-          mine,
-          freqMhz: cfg.freqHz / 1e6,
-          channel: cfg.channel,
-          audioSnrDb: Number(event.audioSnrDb.toFixed(1)),
-        };
-        const buf = wav(audio, cfg.sampleRate);
-        if (cfg.recordingsDir) {
-          writeFileSync(join(cfg.recordingsDir, `${activity.id}.wav`), buf);
-        }
-        onEvent(activity, buf);
-      }
+    channelizer.push(chunk).forEach((audio, k) => listeners[k]!.feed(audio));
+    // 校准这几秒里也要报。不报的话换频率之后界面上还挂着旧频率，
+    // 而且 5 秒短于「太久没报」的门限，连不新鲜都看不出来。
+    if (onStatus !== undefined && Date.now() - lastStatus >= STATUS_MS) {
+      lastStatus = Date.now();
+      onStatus(listeners.map((l) => l.status()));
     }
   });
 
   let stopped = false;
   child.on('exit', (code) => {
-    console.error(`rtl_fm 退出，code ${code}`);
+    console.error(`rtl_sdr 退出，code ${code}`);
     if (!stopped) onExit?.();
   });
 
   return {
     stop() {
       stopped = true;
-      const last = detector.flush();
-      if (last) console.error(`收尾时还有一次未闭合的发射，时长 ${last.durationS.toFixed(2)} 秒`);
+      for (const l of listeners) l.flush();
       child.kill();
     },
     lastError: () => lastError,

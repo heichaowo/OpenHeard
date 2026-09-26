@@ -84,8 +84,8 @@ export function errorText(e: unknown): string {
 }
 
 export interface AnalogSettings {
-  freqMhz: number
-  channel: string
+  /** 同一支接收机守的几个信道。 */
+  channels: { freqMhz: number; channel: string }[]
   gainDb?: number
   /** 本台的 MDC-1200 unit ID，十六进制字符串。 */
   myUnitId?: string
@@ -122,7 +122,7 @@ export interface Machine {
   load1: number
 }
 
-/** 电台此刻的样子。守护进程每秒报一次，只在内存里。 */
+/** 电台此刻的样子，一个信道一条。守护进程每秒报一次，只在内存里。 */
 export interface Radio {
   freqMhz: number
   channel: string
@@ -134,9 +134,9 @@ export interface Radio {
   noiseDb?: number
   open: boolean
   lastOpenAt?: number
-  /** rtl_fm 最后说的那句话。它起不来的时候唯一的线索。 */
+  /** rtl_sdr 最后说的那句话。它起不来的时候唯一的线索。 */
   lastError?: string
-  /** rtl_fm 重开了多少次。一直涨说明它根本起不来。 */
+  /** rtl_sdr 重开了多少次。一直涨说明它根本起不来。 */
   restarts?: number
   at: number
   ageS: number
@@ -157,8 +157,8 @@ export interface Ops {
   machine: Machine
   /** 录音占了多少。发射行按保留期裁时录音跟着删，但已入库的那些一直留着。 */
   recordings: { files: number; bytes: number }
-  /** 没配模拟守听、或者守护进程报不上来时没有这一项。 */
-  radio?: Radio
+  /** 一个信道一条。没配模拟守听、或者守护进程报不上来时是空的。 */
+  radios: Radio[]
   polls: PollRow[]
   activities: { origin: string; n: number; latest: number }[]
   queries: { key: string; intervalS: number; amount: number }[]

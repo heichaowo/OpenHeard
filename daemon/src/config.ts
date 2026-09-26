@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { Rule } from './brandmeister.ts';
 import { checkQueries } from '../../core/src/queries.ts';
+import { readAnalogChannels } from './core.ts';
 
 export interface Query {
   key: string;
@@ -12,8 +13,8 @@ export interface Query {
 
 /** 模拟守听。缺这一段就只跑数字侧。 */
 export interface AnalogConfig {
-  freqMhz: number;
-  channel: string;
+  /** 同一支接收机守的几个信道。 */
+  channels: { freqMhz: number; channel: string }[];
   gainDb: number;
   /** 本台的 MDC-1200 unit ID，十六进制字符串。没有就判不出哪次是本台。 */
   myUnitId?: string;
@@ -78,12 +79,13 @@ export function loadConfig(path: string): ConfigResult {
   const a = raw.analog;
   let analog: AnalogConfig | undefined;
   if (isObject(a)) {
-    if (typeof a.freqMhz !== 'number' || typeof a.channel !== 'string') {
-      problems.push('analog 要有 freqMhz 和 channel');
+    // 和 api 读配置、设置页校验是同一个函数，三处收的是同一种信道表。
+    const { channels, problems: bad } = readAnalogChannels(a);
+    if (channels === undefined) {
+      problems.push(...bad);
     } else {
       analog = {
-        freqMhz: a.freqMhz,
-        channel: a.channel,
+        channels,
         gainDb: typeof a.gainDb === 'number' ? a.gainDb : 32.8,
         // 本台自己的东西一律带 my 前缀，和 myGridsquare、myQth 那些一致。
         // unitId 是改名之前的写法，已经装出去的配置还在用，所以一起认。

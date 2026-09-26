@@ -1006,10 +1006,19 @@ describe('电台状态', () => {
       }),
     );
 
+  type View = {
+    freqMhz: number;
+    channel: string;
+    noiseDb: number;
+    fresh: boolean;
+    ageS: number;
+    open: boolean;
+    closestDb?: number;
+    lastError?: string;
+    restarts?: number;
+  };
   const ops = async (app: ReturnType<typeof setup>) =>
-    (await (await get(app, '/api/ops')).json()) as {
-      radio?: { freqMhz: number; noiseDb: number; fresh: boolean; ageS: number; open: boolean };
-    };
+    ((await (await get(app, '/api/ops')).json()) as { radios: View[] }).radios;
 
   const good = {
     freqMhz: 438.5,
@@ -1022,76 +1031,98 @@ describe('电台状态', () => {
     open: false,
     at: Math.floor(Date.now() / 1000),
   };
+  const other = { ...good, freqMhz: 438.975, channel: '438.975', noiseDb: 88.0 };
 
-  it('没收到过状态时 ops 里就没有这一项', async () => {
-    assert.equal((await ops(setup())).radio, undefined);
+  it('没收到过状态时 ops 里是空的', async () => {
+    assert.deepEqual(await ops(setup()), []);
   });
 
-  it('推上来之后 ops 里读得到，并且是新鲜的', async () => {
+  it('一支接收机守两个信道，一批报两条，ops 里两个都读得到，都是新鲜的', async () => {
     const app = setup();
-    assert.equal((await push(app, good)).status, 204);
+    assert.equal((await push(app, [good, other])).status, 204);
 
-    const r = (await ops(app)).radio;
-    assert.equal(r?.freqMhz, 438.5);
-    assert.equal(r?.noiseDb, 90.1);
-    assert.equal(r?.fresh, true);
-    assert.ok((r?.ageS ?? 99) < 5);
+    const r = await ops(app);
+    assert.deepEqual(
+      r.map((x) => [x.freqMhz, x.noiseDb, x.fresh]),
+      [
+        [438.5, 90.1, true],
+        [438.975, 88.0, true],
+      ],
+    );
+    assert.ok(r[0]!.ageS < 5);
   });
 
-  // 守护进程或者 rtl_fm 出事时状态就停在那里，界面要能看出来是停了。
+  // 只守一个信道时报的是单个对象，还没升级的守护进程照样认。
+  it('单个对象也认', async () => {
+    const app = setup();
+    await push(app, good);
+    assert.equal((await ops(app))[0]?.freqMhz, 438.5);
+  });
+
+  // 守护进程或者 rtl_sdr 出事时状态就停在那里，界面要能看出来是停了。
   it('太久没报就不算新鲜', async () => {
     const app = setup();
-    await push(app, { ...good, at: Math.floor(Date.now() / 1000) - 60 });
+    await push(app, [{ ...good, at: Math.floor(Date.now() / 1000) - 60 }]);
 
-    const r = (await ops(app)).radio;
+    const r = (await ops(app))[0];
     assert.equal(r?.fresh, false);
     assert.ok((r?.ageS ?? 0) >= 60);
   });
 
   // 运维页 20 秒拉一次，看到的只是那一瞬。光看一个瞬时值答不了
-  // 「这个信号够不够得着门限」，得记住最接近的那一次。
-  it('记住这次守听里最接近门限的一刻', async () => {
+  // 「这个信号够不够得着门限」，得记住最接近的那一次。每个信道各记各的。
+  it('每个信道各自记住这次守听里最接近门限的一刻', async () => {
     const app = setup();
-    await push(app, { ...good, noiseDb: 90.1 }); // 差 11.5
-    await push(app, { ...good, noiseDb: 82.0 }); // 差 3.4，最接近
-    await push(app, { ...good, noiseDb: 89.0 }); // 差 10.4
+    await push(app, [{ ...good, noiseDb: 90.1 }, { ...other, noiseDb: 88.0 }]);
+    await push(app, [{ ...good, noiseDb: 82.0 }, { ...other, noiseDb: 89.0 }]);
+    await push(app, [{ ...good, noiseDb: 89.0 }, { ...other, noiseDb: 90.0 }]);
 
-    const r = (await ops(app)).radio as { closestDb: number } | undefined;
-    assert.ok(r);
-    assert.equal(Math.round(r.closestDb * 10) / 10, 3.4);
+    const r = await ops(app);
+    assert.equal(r[0]!.closestDb, 3.4);
+    assert.equal(r[1]!.closestDb, 9.4);
   });
 
-  it('换了频率就重新记，上个频点的最接近值说明不了这个', async () => {
+  it('换了信道表，新信道从头记，去掉的信道不再出现', async () => {
     const app = setup();
-    await push(app, { ...good, noiseDb: 82.0 });
-    await push(app, { ...good, freqMhz: 145.5, channel: '145.500 直频', noiseDb: 90.1 });
+    await push(app, [{ ...good, noiseDb: 82.0 }, other]);
+    await push(app, [{ ...good, noiseDb: 90.1 }, { ...good, freqMhz: 145.5, channel: '145.500 直频', noiseDb: 90.1 }]);
 
-    const r = (await ops(app)).radio as { closestDb: number } | undefined;
-    assert.equal(Math.round((r?.closestDb ?? 0) * 10) / 10, 11.5);
+    const r = await ops(app);
+    assert.deepEqual(
+      r.map((x) => [x.freqMhz, x.closestDb]),
+      [
+        [438.5, 3.4],
+        [145.5, 11.5],
+      ],
+    );
   });
 
-  // 抢不到 USB 设备时 rtl_fm 不往 stdout 写东西，只有这条路能把原因带出来。
-  it('带上 rtl_fm 最后一句和重开次数', async () => {
+  // 抢不到 USB 设备时 rtl_sdr 不往 stdout 写东西，只有这条路能把原因带出来。
+  it('带上 rtl_sdr 最后一句和重开次数', async () => {
     const app = setup();
-    await push(app, {
-      freqMhz: 438.5,
-      channel: '438.500 中继',
-      gainDb: 32.8,
-      open: false,
-      lastError: 'rtl_fm: usb_claim_interface error -3',
-      restarts: 4,
-      at: Math.floor(Date.now() / 1000),
-    });
+    await push(app, [
+      {
+        freqMhz: 438.5,
+        channel: '438.500 中继',
+        gainDb: 32.8,
+        open: false,
+        lastError: 'rtl_sdr: usb_claim_interface error -3',
+        restarts: 4,
+        at: Math.floor(Date.now() / 1000),
+      },
+    ]);
 
-    const r = (await ops(app)).radio as { lastError: string; restarts: number } | undefined;
+    const r = (await ops(app))[0];
     assert.match(r?.lastError ?? '', /usb_claim_interface/);
     assert.equal(r?.restarts, 4);
   });
 
-  it('形状不对就当没收到，但不让请求失败', async () => {
+  it('形状不对的那条当没收到，但不让请求失败', async () => {
     const app = setup();
     assert.equal((await push(app, { 乱七八糟: 1 })).status, 204);
-    assert.equal((await ops(app)).radio, undefined);
+    assert.deepEqual(await ops(app), []);
+    await push(app, [good, { 乱七八糟: 1 }]);
+    assert.equal((await ops(app)).length, 1);
   });
 
   it('要 bearer token，不看会话', async () => {
@@ -1100,7 +1131,7 @@ describe('电台状态', () => {
       new Request('http://local/api/ingest/radio', {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie: cookie() },
-        body: JSON.stringify(good),
+        body: JSON.stringify([good]),
       }),
     );
     assert.equal(res.status, 401);
@@ -1145,24 +1176,22 @@ describe('设置读写', () => {
   };
 
   it('改完之后 GET 回来的是新值，不是启动时那份', async () => {
+    type A = { analog: { channels: { freqMhz: number; channel: string }[] } };
     const app = onDisk();
-    const before = (await (await get(app, '/api/settings')).json()) as {
-      analog: { freqMhz: number };
-    };
-    assert.equal(before.analog.freqMhz, 438.7);
+    const before = (await (await get(app, '/api/settings')).json()) as A;
+    // 文件里是旧写法的单个频率，读出来是一个信道的表
+    assert.deepEqual(before.analog.channels, [{ freqMhz: 438.7, channel: '438.700 直频' }]);
 
-    const put = await send(app, 'PUT', '/api/settings', {
-      ...before,
-      analog: { ...before.analog, freqMhz: 439.525, channel: '439.525 中继' },
-    });
+    const channels = [
+      { freqMhz: 438.5, channel: '438.500 中继' },
+      { freqMhz: 438.975, channel: '438.975' },
+    ];
+    const put = await send(app, 'PUT', '/api/settings', { ...before, analog: { ...before.analog, channels } });
     assert.equal(put.status, 200);
-    assert.equal(((await put.json()) as { analog: { freqMhz: number } }).analog.freqMhz, 439.525);
+    assert.deepEqual(((await put.json()) as A).analog.channels, channels);
 
-    const after = (await (await get(app, '/api/settings')).json()) as {
-      analog: { freqMhz: number; channel: string };
-    };
-    assert.equal(after.analog.freqMhz, 439.525);
-    assert.equal(after.analog.channel, '439.525 中继');
+    const after = (await (await get(app, '/api/settings')).json()) as A;
+    assert.deepEqual(after.analog.channels, channels);
   });
 
   it('本台和信道也一样，改完立刻读得到', async () => {
@@ -1190,11 +1219,16 @@ describe('设置读写', () => {
     const app = onDisk();
     const s = (await (await get(app, '/api/settings')).json()) as Record<string, unknown>;
 
-    const bad = await send(app, 'PUT', '/api/settings', { ...s, analog: { freqMhz: 100, channel: 'x' } });
+    const bad = await send(app, 'PUT', '/api/settings', {
+      ...s,
+      analog: { channels: [{ freqMhz: 100, channel: 'x' }] },
+    });
     assert.equal(bad.status, 422);
 
-    const after = (await (await get(app, '/api/settings')).json()) as { analog: { freqMhz: number } };
-    assert.equal(after.analog.freqMhz, 438.7);
+    const after = (await (await get(app, '/api/settings')).json()) as {
+      analog: { channels: { freqMhz: number }[] };
+    };
+    assert.equal(after.analog.channels[0]!.freqMhz, 438.7);
   });
 });
 

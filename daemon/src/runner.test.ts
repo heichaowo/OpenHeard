@@ -8,14 +8,14 @@ import type { Ingest } from './ingest.ts';
 import { startAnalog } from './runner.ts';
 
 /**
- * 在 PATH 最前面放一个假的 rtl_fm。每次被拉起就往计数文件里记一行，
+ * 在 PATH 最前面放一个假的 rtl_sdr。每次被拉起就往计数文件里记一行，
  * 第一次立刻退出，模拟 USB 掉了，后面几次一直挂着。
  */
 function fakeRtlFm(): { starts: () => number } {
   const dir = mkdtempSync(join(tmpdir(), 'openheard-rtl-'));
   const count = join(dir, 'starts');
   writeFileSync(count, '');
-  const bin = join(dir, 'rtl_fm');
+  const bin = join(dir, 'rtl_sdr');
   writeFileSync(
     bin,
     `#!/bin/sh
@@ -30,8 +30,7 @@ exec sleep 30
 }
 
 const cfg = (freqMhz: number): AnalogConfig => ({
-  freqMhz,
-  channel: `${freqMhz}`,
+  channels: [{ freqMhz, channel: `${freqMhz}` }],
   gainDb: 32.8,
   openMarginDb: 12,
   closeMarginDb: 7,
@@ -48,7 +47,7 @@ async function until(ok: () => boolean, ms = 3000): Promise<void> {
 }
 
 describe('startAnalog', () => {
-  // rtl_fm 掉了，排上 5 秒后重开。这 5 秒里界面改了设置，重调自己开了一份。
+  // rtl_sdr 掉了，排上 5 秒后重开。这 5 秒里界面改了设置，重调自己开了一份。
   // 排着的那次还在的话，到点再开一份，两个进程抢一个接收机。
   it('重调时撤掉排着的重开，不多开一份', async () => {
     mock.timers.enable({ apis: ['setTimeout'] });
@@ -56,8 +55,8 @@ describe('startAnalog', () => {
     let restarts = 0;
     const ingest = {
       push: async () => ({ sent: true, replayed: 0 }),
-      radio: async (s: { restarts?: number }) => {
-        restarts = Math.max(restarts, s.restarts ?? 0);
+      radio: async (list: { restarts?: number }[]) => {
+        for (const s of list) restarts = Math.max(restarts, s.restarts ?? 0);
       },
     } as unknown as Ingest;
 

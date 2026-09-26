@@ -84,7 +84,7 @@ describe('watchConfig', () => {
     stop();
 
     assert.equal(seen.analog.length, 1);
-    assert.equal(seen.analog[0].freqMhz, 145.5);
+    assert.equal(seen.analog[0].channels[0]!.freqMhz, 145.5);
     assert.equal(seen.queries.length, 0);
   });
 
@@ -130,6 +130,6 @@ describe('watchConfig', () => {
 
     // 坏的那次没生效，后面改好的那次照常生效
     assert.equal(seen.analog.length, 1);
-    assert.equal(seen.analog[0].freqMhz, 439.525);
+    assert.equal(seen.analog[0].channels[0]!.freqMhz, 439.525);
   });
 });

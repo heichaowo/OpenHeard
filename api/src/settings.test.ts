@@ -33,7 +33,7 @@ const ok: Settings = {
   station: base.station,
   channels: base.channels as Settings['channels'],
   queries: base.queries as Settings['queries'],
-  analog: { freqMhz: 145.5, channel: '145.500 直频', gainDb: 40.2, myUnitId: 'ABCD' },
+  analog: { channels: [{ freqMhz: 145.5, channel: '145.500 直频' }], gainDb: 40.2, myUnitId: 'ABCD' },
 };
 
 function written(extra: Record<string, unknown> = {}) {
@@ -70,9 +70,37 @@ describe('checkSettings', () => {
   // 调谐器调不到的频率写进去，守护进程会起来就崩，然后每 5 秒重来一次。
   it('频率不在 2m 或 70cm 段内就拦住', () => {
     for (const f of [100, 200, 500, 0]) {
-      assert.ok(checkSettings({ ...ok, analog: { ...ok.analog, freqMhz: f } }).length > 0, String(f));
+      const analog = { ...ok.analog, channels: [{ freqMhz: f, channel: 'x' }] };
+      assert.ok(checkSettings({ ...ok, analog }).length > 0, String(f));
     }
-    assert.deepEqual(checkSettings({ ...ok, analog: { ...ok.analog, freqMhz: 439.525 } }), []);
+    const analog = { ...ok.analog, channels: [{ freqMhz: 439.525, channel: 'x' }] };
+    assert.deepEqual(checkSettings({ ...ok, analog }), []);
+  });
+
+  it('一支接收机守两个信道', () => {
+    const channels = [
+      { freqMhz: 438.5, channel: '438.500 中继' },
+      { freqMhz: 438.975, channel: '438.975' },
+    ];
+    assert.deepEqual(checkSettings({ ...ok, analog: { ...ok.analog, channels } }), []);
+  });
+
+  // 一支接收机收不下的一组信道写进去，守护进程就起不来。
+  it('收不下、重名、一个都没有的信道表都拦住，并说清楚为什么', () => {
+    const with_ = (channels: unknown) => checkSettings({ ...ok, analog: { ...ok.analog, channels } });
+    const wide = with_([
+      { freqMhz: 438.0, channel: 'a' },
+      { freqMhz: 440.0, channel: 'b' },
+    ]);
+    assert.ok(wide.some((p) => p.includes('最多 1.8 MHz')), wide.join());
+    assert.ok(
+      with_([
+        { freqMhz: 438.5, channel: 'a' },
+        { freqMhz: 438.975, channel: 'a' },
+      ]).some((p) => p.includes('不能重复')),
+    );
+    assert.ok(with_([]).some((p) => p.includes('至少要有一个信道')));
+    assert.ok(with_([{ freqMhz: 438.5 }]).some((p) => p.includes('channel 必填')));
   });
 
   // 打开的门限比关闭的低，中间那段是回差。两个挨太近，信号刚过线就会开关抖个不停。
@@ -89,9 +117,8 @@ describe('checkSettings', () => {
   // 只提交一个余量的话，它会和文件里原来那个凑成一对，而那一对从没验过。
   it('只提交一个余量时，按合并之后的那一对验', () => {
     const only = (o: Record<string, unknown>) =>
-      checkSettings({ ...ok, analog: { freqMhz: 145.5, channel: 'x', ...o } }, {
-        freqMhz: 145.5,
-        channel: 'x',
+      checkSettings({ ...ok, analog: { channels: [{ freqMhz: 145.5, channel: 'x' }], ...o } }, {
+        channels: [{ freqMhz: 145.5, channel: 'x' }],
         openMarginDb: 12,
         closeMarginDb: 7,
       });
@@ -118,8 +145,7 @@ describe('checkSettings', () => {
   it('清空一个余量就是回到缺省值，按缺省值去凑那一对', () => {
     const clear = (k: string) =>
       checkSettings({ ...ok, analog: { ...ok.analog, [k]: null } }, {
-        freqMhz: 145.5,
-        channel: 'x',
+        channels: [{ freqMhz: 145.5, channel: 'x' }],
         openMarginDb: 20,
         closeMarginDb: 18,
       });
@@ -132,7 +158,7 @@ describe('checkSettings', () => {
   // 没配过模拟守听时，表单里那几格没填，照样会交一个空的 analog 上来。
   it('一个全空的 analog 不算要开始配，不拦', () => {
     assert.deepEqual(checkSettings({ ...ok, analog: {} }), []);
-    assert.deepEqual(checkSettings({ ...ok, analog: { freqMhz: null, channel: '' } }), []);
+    assert.deepEqual(checkSettings({ ...ok, analog: { channels: [], gainDb: null } }), []);
   });
 
   it('查询走的是和配置同一套校验', () => {
@@ -155,7 +181,7 @@ describe('writeSettings', () => {
 
     const again = loadConfig(path);
     assert.ok(again.ok);
-    assert.equal(again.config.analog?.freqMhz, 145.5);
+    assert.deepEqual(again.config.analog?.channels, [{ freqMhz: 145.5, channel: '145.500 直频' }]);
     assert.equal(again.config.analog?.myUnitId, 'ABCD');
     assert.equal(again.config.channels.length, 1);
   });
@@ -202,6 +228,19 @@ describe('writeSettings', () => {
     const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
     assert.equal(raw.analog, undefined);
     assert.equal(config.analog, undefined);
+  });
+
+  // 装出去的配置是旧写法，只有一个频率。存一次设置之后只剩信道表一种写法。
+  it('旧写法的单个频率存完变成信道表，不留两份', () => {
+    const { path, config } = written();
+    assert.deepEqual(config.analog?.channels, [{ freqMhz: 438.7, channel: '438.700 直频' }]);
+
+    writeSettings(config, ok);
+
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as { analog: Record<string, unknown> };
+    assert.equal('freqMhz' in raw.analog, false);
+    assert.equal('channel' in raw.analog, false);
+    assert.deepEqual(raw.analog.channels, [{ freqMhz: 145.5, channel: '145.500 直频' }]);
   });
 
   it('权限还是 600，里面有密钥', () => {

@@ -1,5 +1,5 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { checkQueries } from './core.ts';
+import { checkQueries, readAnalogChannels } from './core.ts';
 import type { Channel, StationDefaults } from './core.ts';
 import { loadConfig } from './config.ts';
 import type { Config, Query } from './config.ts';
@@ -18,8 +18,8 @@ export interface Settings {
 }
 
 export interface AnalogSettings {
-  freqMhz: number;
-  channel: string;
+  /** 同一支接收机守的几个信道。最高和最低相差不超过 1.8 MHz，见 core 的 planTuning。 */
+  channels: { freqMhz: number; channel: string }[];
   gainDb?: number;
   /** 本台的 MDC-1200 unit ID，十六进制字符串。 */
   myUnitId?: string;
@@ -39,7 +39,8 @@ const inBand = (f: number) => (f >= 144 && f <= 148) || (f >= 420 && f <= 450);
  * 表单里清空一格，antd 给的是 null，文本框给的是空串。两样都当「没填」，
  * 回到缺省值。
  */
-const given = (v: unknown) => v !== undefined && v !== null && v !== '';
+const given = (v: unknown) =>
+  v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0);
 
 /**
  * 没配过模拟守听时，表单照样会交一个各项都空的 analog 上来。它不是要开始配，
@@ -110,11 +111,8 @@ export function checkSettings(raw: unknown, current?: Config['analog']): string[
     if (!isObject(a)) {
       problems.push('analog 不是对象');
     } else {
-      // 调谐器调不到的频率写进去，守护进程会起来就崩，然后每 5 秒重来一次。
-      if (typeof a.freqMhz !== 'number' || !inBand(a.freqMhz)) {
-        problems.push('analog.freqMhz 要在 2m 或 70cm 段内');
-      }
-      if (typeof a.channel !== 'string' || a.channel === '') problems.push('analog.channel 必填');
+      // 和守护进程、api 读配置是同一个函数。设置页收下的，守护进程一定起得来。
+      problems.push(...readAnalogChannels({ channels: a.channels ?? [] }).problems);
       if (given(a.gainDb) && typeof a.gainDb !== 'number') problems.push('analog.gainDb 要是数字');
       if (given(a.myUnitId) && !/^[0-9a-fA-F]{1,4}$/.test(String(a.myUnitId))) {
         problems.push('analog.myUnitId 要是 1 到 4 位十六进制，例如 6460');
@@ -176,6 +174,9 @@ export function writeSettings(config: Config, next: Settings): void {
     for (const [k, v] of Object.entries(next.analog)) {
       if (!given(v)) delete merged[k];
     }
+    // 旧写法的单个频率换成信道表以后就是多余的，留着会让人以为它还管用。
+    delete merged.freqMhz;
+    delete merged.channel;
     raw.analog = merged;
   }
 

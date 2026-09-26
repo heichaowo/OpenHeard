@@ -65,14 +65,14 @@ openssl rand -hex 32                            # sessionSecret 和 ingestToken
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `freqMhz`、`channel` | 是 | 守哪个频率，以及进 `Activity` 的信道名 |
+| `channels` | 是 | 要守的信道，每个是 `{freqMhz, channel}`：频率，以及进 `Activity` 的信道名。旧写法只写一个 `freqMhz` 和一个 `channel`，仍然认 |
 | `gainDb` | 否 | 调谐器增益，缺省 32.8。收不到时先调到 49.6，见下文 |
 | `myUnitId` | 否 | 本台的 MDC-1200 unit ID，**十六进制字符串**。缺了就判不出哪次发射是本台，队列会一直是空的。旧名 `unitId` 仍然认 |
 | `openMarginDb` | 否 | 静噪打开的余量，dB，缺省 12。噪声比静默基准低这么多就算有载波 |
 | `closeMarginDb` | 否 | 静噪关闭的余量，dB，缺省 7。要比打开那个至少小 2，中间那段是回差 |
 | `recordingsDir` | 否 | 每次发射的音频往这里写，缺省 `./recordings` |
 
-一次只守一个频率。一支接收机同时只能调谐一处，跳频期间漏掉的发射无法补回。
+一支接收机同时守 `channels` 里的全部信道，最多 8 个，最高和最低相差不超过 1.8 MHz。接收机调到哪、采样率多少由程序算，设置页上填的时候就看得到。两个隔得更远的波段要再加一支接收机，这一版不支持。
 
 两个余量按部署调。噪声本底和天线各地不一样，调大了弱信号永远打不开静噪，调小了噪声起伏就会伪造出发射，把队列和磁盘塞满。运维页上写着此刻的噪声离门限还差多少，以及这次守听里最接近的一刻差了多少，照着那两个数调。设置页上能直接改，清空一格就回到缺省值。
 
@@ -169,15 +169,18 @@ src query reaches back 53 days, talkgroup 460 reaches 3.6 days, and 91 reaches
 
 | Field | Required | Meaning |
 |---|---|---|
-| `freqMhz`, `channel` | yes | Which frequency to watch, and the channel name that goes into `Activity` |
+| `channels` | yes | The channels to watch, each `{freqMhz, channel}`: the frequency and the channel name that goes into `Activity`. The old form with a single `freqMhz` and `channel` is still accepted |
 | `gainDb` | no | Tuner gain, default 32.8. If nothing is heard, try 49.6 first; see below |
 | `myUnitId` | no | Our MDC-1200 unit ID, **as a hex string**. Without it nothing is ever marked as ours and the queue stays empty. The old name `unitId` is still accepted |
 | `openMarginDb` | no | dB below the calibrated idle floor that counts as a carrier, default 12 |
 | `closeMarginDb` | no | dB for closing again, default 7. At least 2 below the open margin; the gap between them is the hysteresis |
 | `recordingsDir` | no | Where each transmission's audio is written, default `./recordings` |
 
-One frequency at a time. A single receiver tunes one place, and transmissions
-missed while hopping cannot be recovered.
+One receiver watches every channel in `channels` at once: at most 8, with no
+more than 1.8 MHz between the highest and the lowest. Where the receiver is
+tuned and at what sample rate is worked out by the program, and the settings
+page shows it while the channels are being entered. Bands further apart need a
+second receiver, which this version does not support.
 
 Both margins are tuned per deployment. Noise floors and antennas differ by
 site: too large and a weak signal never opens the squelch, too small and

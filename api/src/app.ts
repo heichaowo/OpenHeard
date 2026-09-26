@@ -67,10 +67,9 @@ export function createApp(
       await next();
     })
     .post('/activity', async (c) => c.json(store.ingest((await c.req.json()) as IngestRow[])))
-    // 电台状态。每秒一条，只留最新的一条在内存里，不入库。
+    // 电台状态。每秒一批，一个信道一条，只留最新的一批在内存里，不入库。
     .post('/radio', async (c) => {
-      const status = parseRadio(await c.req.json(), nowS());
-      if (status !== undefined) radio.set(status);
+      radio.set(parseRadio(await c.req.json(), nowS()));
       return c.body(null, 204);
     })
     .post('/poll-log', async (c) => {
@@ -127,7 +126,7 @@ export function createApp(
       }
       await next();
     })
-    .get('/ops', (c) => c.json({ ...store.ops(), radio: radio.view(nowS()) }))
+    .get('/ops', (c) => c.json({ ...store.ops(), radios: radio.view(nowS()) }))
     .get('/station', (c) => c.json(store.station()))
     .get('/pending', (c) => c.json(store.pending()))
     .get('/qsos', (c) => c.json(store.qsos()))

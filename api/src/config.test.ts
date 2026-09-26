@@ -62,4 +62,22 @@ describe('loadConfig', () => {
     assert.ok(!result.ok);
     assert.ok(result.problems.length > 5);
   });
+
+  // 装机前的检查用的是这里。守护进程读到写坏的信道表会直接退出，
+  // 这里要是悄悄丢掉那一条，检查就放过了一份起不来的配置。
+  it('信道表写坏一条就报出来，不悄悄丢掉那一条', () => {
+    const { path } = write({
+      analog: { channels: [{ freqMhz: 438.5, channel: 'A' }, { freqMhz: 438.975 }] },
+    });
+    const r = loadConfig(path);
+    assert.ok(!r.ok);
+    assert.ok(r.problems.some((p) => p.includes('analog.channels[1].channel 必填')));
+  });
+
+  it('旧写法的单个频率读成一个信道', () => {
+    const { path } = write({ analog: { freqMhz: 438.5, channel: '438.500 中继' } });
+    const r = loadConfig(path);
+    assert.ok(r.ok);
+    assert.deepEqual(r.config.analog?.channels, [{ freqMhz: 438.5, channel: '438.500 中继' }]);
+  });
 });

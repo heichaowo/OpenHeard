@@ -52,7 +52,7 @@ async function runOnce(q: Query, dmrId: number, ingest: Ingest): Promise<void> {
   }
 }
 
-/** rtl_fm 掉了就重开。无人值守时守听停了没人会发现。 */
+/** rtl_sdr 掉了就重开。无人值守时守听停了没人会发现。 */
 const RESTART_MS = 5000;
 
 /**
@@ -60,9 +60,9 @@ const RESTART_MS = 5000;
  * 这样运维页上看得出模拟侧还活着。
  */
 export interface AnalogHandle {
-  /** 换频率、增益、信道名或者 unit id。停掉当前这个再按新配置开一个。 */
+  /** 换信道、增益或者 unit id。停掉当前这个再按新配置开一个。 */
   retune: (next: AnalogConfig) => void;
-  /** 停掉 rtl_fm，也不再自己重开。进程退出前调。 */
+  /** 停掉 rtl_sdr，也不再自己重开。进程退出前调。 */
   stop: () => void;
 }
 
@@ -70,20 +70,21 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
   let current = cfg;
   let stop: (() => void) | undefined;
   let restarts = 0;
-  // 主动停的时候 rtl_fm 也会退出，onExit 会照样触发。不挡住的话会多开一份。
+  // 主动停的时候 rtl_sdr 也会退出，onExit 会照样触发。不挡住的话会多开一份。
   let deliberate = false;
   // 掉了之后排着的那次重开。重调或停下时要撤掉它，否则它到点又开一份：
-  // 两个 rtl_fm 抢一个 USB 设备，同一次发射记成两行，而前一个再也停不掉。
+  // 两个 rtl_sdr 抢一个 USB 设备，同一次发射记成两行，而前一个再也停不掉。
   let restartTimer: NodeJS.Timeout | undefined;
 
   const spawn = () => {
     const cfg = current;
     const radio = watchAnalog(
       {
-        freqHz: Math.round(cfg.freqMhz * 1e6),
-        channel: cfg.channel,
+        channels: cfg.channels.map((c) => ({
+          freqHz: Math.round(c.freqMhz * 1e6),
+          channel: c.channel,
+        })),
         gainDb: cfg.gainDb,
-        sampleRate: 24000,
         blockS: 0.05,
         calibrateS: 5,
         openMarginDb: cfg.openMarginDb,
@@ -95,7 +96,7 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
         myUnitId:
           cfg.myUnitId === undefined ? undefined : parseInt(cfg.myUnitId, 16),
         recordingsDir: cfg.recordingsDir,
-        rtlFmPath: "rtl_fm",
+        rtlSdrPath: "rtl_sdr",
       },
       (activity) => {
         const at = nowS();
@@ -106,13 +107,13 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
               activity,
               raw: JSON.stringify({
                 source: "sdr-fm",
-                channel: cfg.channel,
+                channel: activity.channel,
                 at,
               }),
             },
           ],
           {
-            queryKey: `analog:${cfg.channel}`,
+            queryKey: `analog:${activity.channel}`,
             at,
             fetched: 1,
             parsed: 1,
@@ -127,22 +128,25 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
       () => {
         if (deliberate) return;
         restarts += 1;
-        console.error(`rtl_fm 停了，${RESTART_MS / 1000} 秒后重开`);
-        // 抢不到 USB 设备时 rtl_fm 根本不往 stdout 写东西，watchAnalog 的
+        console.error(`rtl_sdr 停了，${RESTART_MS / 1000} 秒后重开`);
+        // 抢不到 USB 设备时 rtl_sdr 根本不往 stdout 写东西，watchAnalog 的
         // onStatus 一次也不会触发。不在这里主动报一次的话，界面上只会看到
         // 「太久没有状态」，而原因仍然只在 daemon.err.log 里。
-        void ingest.radio({
-          freqMhz: cfg.freqMhz,
-          channel: cfg.channel,
-          gainDb: cfg.gainDb,
-          open: false,
-          lastError: radio.lastError(),
-          restarts,
-          at: nowS(),
-        });
+        void ingest.radio(
+          cfg.channels.map((c) => ({
+            freqMhz: c.freqMhz,
+            channel: c.channel,
+            gainDb: cfg.gainDb,
+            open: false,
+            lastError: radio.lastError(),
+            restarts,
+            at: nowS(),
+          })),
+        );
         restartTimer = setTimeout(spawn, RESTART_MS);
       },
-      (status) => void ingest.radio({ ...status, restarts }),
+      (statuses) =>
+        void ingest.radio(statuses.map((s) => ({ ...s, restarts }))),
     );
     stop = radio.stop;
   };
@@ -157,7 +161,7 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
       stop?.();
       deliberate = false;
       console.log(
-        `换到 ${next.freqMhz} MHz（${next.channel}），重新校准要几秒`,
+        `换到 ${next.channels.map((c) => `${c.freqMhz} MHz（${c.channel}）`).join("、")}，重新校准要几秒`,
       );
       spawn();
     },
