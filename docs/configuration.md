@@ -66,7 +66,7 @@ openssl rand -hex 32                            # sessionSecret 和 ingestToken
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `freqMhz`、`channel` | 是 | 守哪个频率，以及进 `Activity` 的信道名 |
-| `gainDb` | 否 | 调谐器增益，缺省 32.8 |
+| `gainDb` | 否 | 调谐器增益，缺省 32.8。收不到时先调到 49.6，见下文 |
 | `myUnitId` | 否 | 本台的 MDC-1200 unit ID，**十六进制字符串**。缺了就判不出哪次发射是本台，队列会一直是空的。旧名 `unitId` 仍然认 |
 | `openMarginDb` | 否 | 静噪打开的余量，dB，缺省 12。噪声比静默基准低这么多就算有载波 |
 | `closeMarginDb` | 否 | 静噪关闭的余量，dB，缺省 7。要比打开那个至少小 2，中间那段是回差 |
@@ -75,6 +75,8 @@ openssl rand -hex 32                            # sessionSecret 和 ingestToken
 一次只守一个频率。一支接收机同时只能调谐一处，跳频期间漏掉的发射无法补回。
 
 两个余量按部署调。噪声本底和天线各地不一样，调大了弱信号永远打不开静噪，调小了噪声起伏就会伪造出发射，把队列和磁盘塞满。运维页上写着此刻的噪声离门限还差多少，以及这次守听里最接近的一刻差了多少，照着那两个数调。设置页上能直接改，清空一格就回到缺省值。
+
+增益低了，弱信号压不下噪声。2026-09-27 在 mini 上用 438.500 中继实测：同一串按键，落在 49.6 下的每次把噪声压低 23 到 24 dB，落在 32.8 下的每次只压低 5 dB 左右，到不了 12 dB 的开启门限。所以 32.8 守了两天，一次也没记下。收不到东西时，先看运维页上离门限最近差多少，再把增益调到 49.6。
 
 静默基准开机先听 5 秒定下。之后静噪关着时，每 60 秒按这 60 秒的噪声重定一次，所以门限跟着本底涨落。静噪开着超过 5 分钟就强制关掉。一次长过 5 分钟的发射记成几段，连着两段还没停就按它重定基准。守护进程每小时往 `daemon.log` 写一行小结：静噪开过几次、记下几次、噪声离开启门限最近差多少。
 
@@ -168,7 +170,7 @@ src query reaches back 53 days, talkgroup 460 reaches 3.6 days, and 91 reaches
 | Field | Required | Meaning |
 |---|---|---|
 | `freqMhz`, `channel` | yes | Which frequency to watch, and the channel name that goes into `Activity` |
-| `gainDb` | no | Tuner gain, default 32.8 |
+| `gainDb` | no | Tuner gain, default 32.8. If nothing is heard, try 49.6 first; see below |
 | `myUnitId` | no | Our MDC-1200 unit ID, **as a hex string**. Without it nothing is ever marked as ours and the queue stays empty. The old name `unitId` is still accepted |
 | `openMarginDb` | no | dB below the calibrated idle floor that counts as a carrier, default 12 |
 | `closeMarginDb` | no | dB for closing again, default 7. At least 2 below the open margin; the gap between them is the hysteresis |
@@ -183,6 +185,13 @@ ordinary noise invents transmissions that fill the queue and the disk. The ops
 page shows how far the current noise is from the threshold and how close it has
 come during this watch; tune against those two numbers. Both can be changed on
 the settings page, and clearing one returns it to its default.
+
+Too little gain leaves a weak signal unable to push the noise down. Measured on
+the mini on 2026-09-27 with the 438.500 repeater: in one series of key-ups,
+each one landing at gain 49.6 lowered the noise by 23 to 24 dB, and each one
+landing at 32.8 by about 5 dB, short of the 12 dB open margin. That is why two
+days at 32.8 recorded nothing. When nothing is heard, check how close the ops
+page says the noise has come to the threshold, then raise the gain to 49.6.
 
 The idle floor is set from the first 5 seconds after start. After that, while
 the squelch is closed, it is reset every 60 seconds from those 60 seconds, so
