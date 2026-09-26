@@ -67,6 +67,18 @@
 
 批量忽略也一样，每段带上选中那一刻看到的发射。选完到确认之间对方回了一句，这句不会跟着被忽略。挑的发射已经不在那一段里的，这一段算进 `missing`，不结算。
 
+## 收听记录
+
+| 方法和路径 | 请求 | 响应 |
+|---|---|---|
+| `GET /api/activities` | 可带 `?origin=sdr-fm&cursor=…&limit=100` | `{items, next?}`，或 `422` |
+
+`items` 是 `Activity[]`，最新的在前，结算过的另带 `settled`：`logged` 是已入库，`ignored` 是已忽略。它列出听到的每一次发射，别的电台单独发的也在里面，待确认队列不放这种。
+
+`origin` 是 `brandmeister`、`sdr-fm` 或 `sdr-dmr`，不给就是全部。`limit` 缺省 100，最多 200。
+
+要更早的一页，把 `next` 原样作为 `cursor` 传回来。没有 `next` 就是翻到头了。游标是上一页最后一行的时刻和 id，不是偏移量，翻页时进来的新行不会让下一页错位或者重复。
+
 ## 日志
 
 | 方法和路径 | 请求 | 响应 |
@@ -266,6 +278,23 @@ Bulk ignore works the same way: each segment carries the transmissions seen
 when it was picked. A reply that arrives between picking and confirming is not
 ignored with them. A segment whose picked transmissions are no longer in it is
 reported in `missing` and left alone.
+
+## Heard
+
+| Method and path | Request | Response |
+|---|---|---|
+| `GET /api/activities` | optionally `?origin=sdr-fm&cursor=…&limit=100` | `{items, next?}`, or `422` |
+
+`items` is `Activity[]`, newest first. Settled rows also carry `settled`:
+`logged` or `ignored`. It lists every transmission heard, including other
+stations on their own, which the pending queue does not show.
+
+`origin` is `brandmeister`, `sdr-fm` or `sdr-dmr`; without it, all of them.
+`limit` defaults to 100, at most 200.
+
+For the previous page, pass `next` back unchanged as `cursor`. No `next` means
+there is nothing older. The cursor is the time and id of the last row, not an
+offset, so rows arriving between pages do not shift or repeat the next page.
 
 ## Log
 

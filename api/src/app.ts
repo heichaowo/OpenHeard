@@ -133,6 +133,21 @@ export function createApp(
     .get('/qsos', (c) => c.json(store.qsos()))
     .get('/qsos/:id/history', (c) => c.json(store.qsoHistory(c.req.param('id'))))
 
+    .get('/activities', (c) => {
+      try {
+        return c.json(
+          store.heard({
+            origin: c.req.query('origin'),
+            cursor: c.req.query('cursor'),
+            limit: c.req.query('limit'),
+          }),
+        );
+      } catch (e) {
+        const { status, body } = fail(e);
+        return c.json(body, status);
+      }
+    })
+
     .post('/pending/:clusterId/promote', async (c) => {
       try {
         const body = (await c.req.json()) as QsoDraft & { activityIds?: string[] };

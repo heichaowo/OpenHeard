@@ -9,6 +9,7 @@ import {
   MonitorOutlined,
   PoweroffOutlined,
   SettingOutlined,
+  SoundOutlined,
 } from '@ant-design/icons'
 import { Badge, Button, Drawer, Dropdown, Layout, Menu } from 'antd'
 import type { MenuProps } from 'antd'
@@ -76,6 +77,7 @@ export function AppShell() {
       ),
     },
     { key: '/log', icon: <DatabaseOutlined />, label: '日志' },
+    { key: '/heard', icon: <SoundOutlined />, label: '收听记录' },
     { key: '/new', icon: <EditOutlined />, label: '快速补录' },
     { key: '/ops', icon: <MonitorOutlined />, label: '运维' },
     { key: '/settings', icon: <SettingOutlined />, label: '设置' },

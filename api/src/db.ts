@@ -282,6 +282,46 @@ export function selectPollLog(db: DatabaseSync, limit: number): PollLog[] {
   }));
 }
 
+/** 收听记录里的一行。结算过的带上结算成了什么。 */
+export type HeardItem = Activity & { settled?: 'logged' | 'ignored' };
+
+/**
+ * 收听记录的一页，最新的在前。
+ *
+ * 按上一页最后一行的时刻和 id 往前翻，不用偏移量。翻页时进来的新行排在最前面，
+ * 用偏移量的话会把已经看过的行挤进下一页。时刻相同的按 id 排，游标才不会跳过行。
+ */
+export function selectHeard(
+  db: DatabaseSync,
+  opts: { origin?: string; before?: { startAt: number; id: string }; limit: number },
+  dmrId: number,
+): HeardItem[] {
+  const where: string[] = [];
+  const args: (string | number)[] = [];
+  if (opts.origin !== undefined) {
+    where.push('a.origin = ?');
+    args.push(opts.origin);
+  }
+  if (opts.before !== undefined) {
+    where.push('(a.start_at < ? OR (a.start_at = ? AND a.id < ?))');
+    args.push(opts.before.startAt, opts.before.startAt, opts.before.id);
+  }
+  const rows = db
+    .prepare(`
+      SELECT a.*, r.activity_id AS resolved, r.qso_id AS resolved_qso FROM activity a
+      LEFT JOIN resolved_activity r ON r.activity_id = a.id
+      ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY a.start_at DESC, a.id DESC
+      LIMIT ?
+    `)
+    .all(...args, opts.limit) as Record<string, unknown>[];
+  return rows.map((r) => {
+    const a = rowToActivity(r, dmrId);
+    if (r.resolved === null) return a;
+    return { ...a, settled: r.resolved_qso === null ? 'ignored' : 'logged' };
+  });
+}
+
 /** 采集来的发射，按来源分组数一数。 */
 export function activityCounts(db: DatabaseSync): { origin: string; n: number; latest: number }[] {
   return db

@@ -30,6 +30,7 @@ import {
   pruneActivities,
   prunePollLog,
   resolveActivities,
+  selectHeard,
   selectPollLog,
   selectQso,
   selectQsoHistory,
@@ -38,7 +39,7 @@ import {
   updateQso,
   withTx,
 } from './db.ts';
-import type { IngestRow, PollLog, QsoChange } from './db.ts';
+import type { HeardItem, IngestRow, PollLog, QsoChange } from './db.ts';
 import { recordingsSize, removeRecordings } from './recordings.ts';
 import { checkSettings, settingsOf, writeSettings } from './settings.ts';
 import type { Settings } from './settings.ts';
@@ -90,6 +91,10 @@ export interface PublicSource {
   station: () => StationDefaults;
   qsos: () => Qso[];
 }
+
+const ORIGINS: string[] = ['brandmeister', 'sdr-fm', 'sdr-dmr'];
+const HEARD_PAGE = 100;
+const HEARD_MAX = 200;
 
 export function createStore(db: DatabaseSync, config: Config) {
   // 进程起来的时刻。健康检查靠它区分「刚装好还没轮询」和「轮询挂了」。
@@ -162,6 +167,41 @@ export function createStore(db: DatabaseSync, config: Config) {
     qsos: () => selectQsos(db),
 
     qsoHistory: (id: string): QsoChange[] => selectQsoHistory(db, id),
+
+    /**
+     * 收听记录。参数原样来自查询串，在这里验。
+     *
+     * @param cursor 上一页的 next，形如 `<时刻>:<id>`。
+     */
+    heard: (q: {
+      origin?: string;
+      cursor?: string;
+      limit?: string;
+    }): { items: HeardItem[]; next?: string } => {
+      if (q.origin !== undefined && !ORIGINS.includes(q.origin)) {
+        throw new StoreError(422, `origin 只能是 ${ORIGINS.join('、')}`);
+      }
+      const m = q.cursor === undefined ? undefined : /^(\d+):(.+)$/.exec(q.cursor);
+      if (q.cursor !== undefined && m === null) {
+        throw new StoreError(422, 'cursor 要是上一页给的 next');
+      }
+      const limit = q.limit === undefined ? HEARD_PAGE : Number(q.limit);
+      if (!Number.isInteger(limit) || limit < 1 || limit > HEARD_MAX) {
+        throw new StoreError(422, `limit 要是 1 到 ${HEARD_MAX} 的整数`);
+      }
+      const items = selectHeard(
+        db,
+        {
+          origin: q.origin,
+          before: m ? { startAt: Number(m[1]), id: m[2]! } : undefined,
+          limit,
+        },
+        config.dmrId,
+      );
+      const last = items.at(-1);
+      // 不满一页就是翻到头了。正好满一页时多给一个 next，下一页是空的，代价是多一次请求。
+      return items.length === limit && last ? { items, next: `${last.startAt}:${last.id}` } : { items };
+    },
 
     /**
      * @param activityIds 只处理这一段里的这几次发射。不给就是整段。

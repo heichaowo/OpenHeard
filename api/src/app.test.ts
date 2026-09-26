@@ -397,6 +397,86 @@ describe('一次忽略好几段', () => {
   });
 });
 
+// 待确认队列只放有本台的段。别的电台被听到了，以前只在运维页上变成一个计数。
+describe('收听记录', () => {
+  const t = Math.floor(Date.now() / 1000) - 3600;
+  const fm = (id: string, at: number, over: Partial<Activity> = {}) =>
+    act(id, { origin: 'sdr-fm', startAt: t + at, channel: '438.500 中继', freqMhz: 438.5, ...over });
+
+  type Page = { items: (Activity & { settled?: string })[]; next?: string };
+  const page = async (app: ReturnType<typeof setup>, q: string) =>
+    (await (await get(app, `/api/activities?${q}`)).json()) as Page;
+
+  it('别人的模拟发射也列出来，最新的在前，只看要的来源', async () => {
+    const app = setup([
+      fm('f1', 0),
+      fm('f2', 60),
+      act('b1', { startAt: t + 30, talkgroup: 46001 }),
+    ]);
+
+    const p = await page(app, 'origin=sdr-fm');
+
+    assert.deepEqual(p.items.map((a) => a.id), ['f2', 'f1']);
+    assert.equal(p.items[0]!.mine, false);
+    assert.equal(p.next, undefined);
+  });
+
+  it('结算过的带上结算成了什么', async () => {
+    const app = setup([
+      act('m1', { dmrId: MY_ID, startAt: t, talkgroup: 46001 }),
+      act('x1', { dmrId: 4616472, startAt: t + 10, talkgroup: 46001 }),
+      act('m2', { dmrId: MY_ID, startAt: t + 1000, talkgroup: 46001 }),
+    ]);
+    await send(app, 'POST', '/api/pending/m1/promote', { ...complete, activityIds: ['m1', 'x1'] });
+    await send(app, 'DELETE', '/api/pending/m2?activityIds=m2');
+
+    const p = await page(app, 'origin=brandmeister');
+
+    assert.deepEqual(
+      p.items.map((a) => [a.id, a.settled]),
+      [
+        ['m2', 'ignored'],
+        ['x1', 'logged'],
+        ['m1', 'logged'],
+      ],
+    );
+  });
+
+  // 时刻相同的几行正好压在页边上时，按时刻翻会跳过或者重复。
+  it('按游标往前翻，时刻相同的行不跳也不重复', async () => {
+    const app = setup([
+      fm('a', 0),
+      fm('b', 10),
+      fm('c', 10),
+      fm('d', 10),
+      fm('e', 20),
+    ]);
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < 5; i++) {
+      const p = await page(app, `origin=sdr-fm&limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+      seen.push(...p.items.map((a) => a.id));
+      cursor = p.next;
+      if (cursor === undefined) break;
+    }
+
+    assert.deepEqual(seen, ['e', 'd', 'c', 'b', 'a']);
+  });
+
+  it('参数不对回 422', async () => {
+    const app = setup();
+    for (const q of ['origin=ssb', 'cursor=abc', 'limit=0', 'limit=201', 'limit=2.5']) {
+      assert.equal((await get(app, `/api/activities?${q}`)).status, 422, q);
+    }
+  });
+
+  it('要会话', async () => {
+    const res = await setup().fetch(new Request('http://local/api/activities'));
+    assert.equal(res.status, 401);
+  });
+});
+
 // 保留期是手改配置文件定的，没有东西拦着它比待确认窗口短。
 describe('裁剪不碰队列里的段', () => {
   it('保留期比窗口短时，窗口里没处理的段还在', () => {

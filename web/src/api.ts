@@ -1,4 +1,13 @@
-import type { Channel, ClusterPick, PendingItem, Qso, QsoDraft, StationDefaults } from '@core'
+import type {
+  Activity,
+  Channel,
+  ClusterPick,
+  Origin,
+  PendingItem,
+  Qso,
+  QsoDraft,
+  StationDefaults,
+} from '@core'
 
 /** 后端回的错误。422 会带上还缺哪些字段。 */
 export class ApiError extends Error {
@@ -94,6 +103,9 @@ export interface Settings {
   analog?: AnalogSettings
 }
 
+/** 收听记录里的一行。结算过的带上结算成了什么。 */
+export type HeardItem = Activity & { settled?: 'logged' | 'ignored' }
+
 export interface QsoChange {
   at: number
   action: 'edit' | 'delete'
@@ -177,6 +189,13 @@ export const api = {
     ),
 
   qsoHistory: (id: string) => call<QsoChange[]>(`/qsos/${encodeURIComponent(id)}/history`),
+
+  /** cursor 是上一页给的 next。不给就是最新的一页。 */
+  heard: (origin: Origin, cursor?: string) =>
+    call<{ items: HeardItem[]; next?: string }>(
+      `/activities?origin=${origin}` +
+        (cursor === undefined ? '' : `&cursor=${encodeURIComponent(cursor)}`),
+    ),
   station: () => call<{ station: StationDefaults; channels: Channel[] }>('/station'),
   pending: () => call<PendingItem[]>('/pending'),
   qsos: () => call<Qso[]>('/qsos'),
