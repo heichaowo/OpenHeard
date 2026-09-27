@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -749,6 +749,23 @@ describe('公开路由', () => {
     }
   });
 
+  // 录音挂在会话后面，不进公开面。guarded 的 /api/qsos 才带 activities。
+  it('/public/qsos 不带 activities', async () => {
+    const start = Math.floor(Date.now() / 1000) - 600;
+    const app = setup([act('a', { startAt: start, dmrId: MY_ID, callsign: 'BD7KLO' })]);
+    const pending = (await (await get(app, '/api/pending')).json()) as { cluster: { activities: { id: string }[] } }[];
+    await send(app, 'POST', '/api/conversations/promote', {
+      ...complete,
+      activityIds: pending[0]!.cluster.activities.map((a) => a.id),
+    });
+
+    const guarded = (await (await get(app, '/api/qsos')).json()) as { activities?: unknown }[];
+    assert.ok(Array.isArray(guarded[0]!.activities) && guarded[0]!.activities!.length > 0);
+
+    const pub = (await (await get(app, '/public/qsos')).json()) as Record<string, unknown>[];
+    assert.equal(pub[0]!.activities, undefined);
+  });
+
   // RST 是别的业余电台核对这次通联时要看的，本台字段和备注不往外发。
   it('summary 带 RST，不带本台字段和备注', async () => {
     const app = setup();
@@ -1243,6 +1260,150 @@ describe('设置读写', () => {
       analog: { channels: { freqMhz: number }[] };
     };
     assert.equal(after.analog.channels[0]!.freqMhz, 438.7);
+  });
+});
+
+describe('开关', () => {
+  const onDisk = (overrides: Record<string, unknown> = {}) => {
+    const dir = mkdtempSync(join(tmpdir(), 'openheard-switches-'));
+    const path = join(dir, 'openheard.config.json');
+    writeFileSync(
+      path,
+      JSON.stringify({
+        dbPath: ':memory:',
+        dmrId: 4616460,
+        clusterGapS: 120,
+        pendingWindowDays: 7,
+        activityRetentionDays: 90,
+        ingestToken: config.ingestToken,
+        adminPasswordHash: config.adminPasswordHash,
+        sessionSecret: config.sessionSecret,
+        station: { myCallsign: 'BG0CG', networkFreqMhz: 439.525 },
+        channels: [],
+        analog: { channels: [{ freqMhz: 438.5, channel: '438.500 中继' }], myUnitId: '6460' },
+        queries: [
+          { key: 'dst:46001', rule: { id: 'DestinationID', operator: 'equal', value: 46001 }, amount: 200, intervalS: 900 },
+        ],
+        ...overrides,
+      }),
+      { mode: 0o600 },
+    );
+    const r = loadConfig(path);
+    assert.ok(r.ok);
+    const app = createApp(
+      createStore(openDb(':memory:'), r.config),
+      config.ingestToken,
+      { passwordHash: config.adminPasswordHash, sessionSecret: config.sessionSecret },
+      // 和 index.ts 一样传函数：写设置改了 config.recordingsDir 之后，这里
+      // 要立刻看见新值，不等进程重启。
+      { recordingsDir: () => r.config.recordingsDir },
+    );
+    return { app, path, cfg: r.config };
+  };
+
+  it('GET /api/station 和 /api/ops 都带上生效的开关状态', async () => {
+    const { app } = onDisk();
+    const station = (await (await get(app, '/api/station')).json()) as {
+      analogEnabled: boolean;
+      brandmeisterEnabled: boolean;
+    };
+    assert.deepEqual([station.analogEnabled, station.brandmeisterEnabled], [true, true]);
+
+    const ops = (await (await get(app, '/api/ops')).json()) as { analogEnabled: boolean; brandmeisterEnabled: boolean };
+    assert.deepEqual([ops.analogEnabled, ops.brandmeisterEnabled], [true, true]);
+  });
+
+  const pushRadio = (app: ReturnType<typeof setup>, body: unknown) =>
+    app.fetch(
+      new Request('http://local/api/ingest/radio', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${config.ingestToken}` },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  it('关掉模拟守听：GET /api/radios 和 /api/ops 的 radios 一律是空数组', async () => {
+    const { app } = onDisk();
+    await pushRadio(app, [
+      { freqMhz: 438.5, channel: '438.500 中继', gainDb: 32.8, open: false, at: Math.floor(Date.now() / 1000) },
+    ]);
+
+    const before = (await (await get(app, '/api/radios')).json()) as { analogEnabled: boolean; radios: unknown[] };
+    assert.equal(before.analogEnabled, true);
+    assert.equal(before.radios.length, 1);
+
+    const { app: off } = onDisk({ analog: { channels: [{ freqMhz: 438.5, channel: '438.500 中继' }], enabled: false } });
+    await pushRadio(off, [
+      { freqMhz: 438.5, channel: '438.500 中继', gainDb: 32.8, open: false, at: Math.floor(Date.now() / 1000) },
+    ]);
+    const r = (await (await get(off, '/api/radios')).json()) as { analogEnabled: boolean; radios: unknown[] };
+    assert.deepEqual([r.analogEnabled, r.radios], [false, []]);
+    const opsOff = (await (await get(off, '/api/ops')).json()) as { analogEnabled: boolean; radios: unknown[] };
+    assert.deepEqual([opsOff.analogEnabled, opsOff.radios], [false, []]);
+  });
+
+  it('切开关全程保留原来的 queries 和信道表，回显和接口都不丢字段', async () => {
+    const { app } = onDisk();
+    const before = (await (await get(app, '/api/settings')).json()) as Record<string, unknown>;
+
+    // Form.Item 挂着但隐藏：body 里 queries 照样带着原样的值，只多了 brandmeisterEnabled。
+    const put = await send(app, 'PUT', '/api/settings', { ...before, brandmeisterEnabled: false });
+    assert.equal(put.status, 200);
+
+    const after = (await put.json()) as { brandmeisterEnabled: boolean; queries: unknown[] };
+    assert.equal(after.brandmeisterEnabled, false);
+    assert.equal(after.queries.length, 1);
+
+    const station = (await (await get(app, '/api/station')).json()) as { brandmeisterEnabled: boolean };
+    assert.equal(station.brandmeisterEnabled, false);
+  });
+
+  // 设置页从没有模拟守听加上一段之后，录音路由不用等 api 重启。
+  it('设置页加上模拟守听之后，新目录里的录音立刻能列出来、放得出', async () => {
+    const { app, cfg } = onDisk({ analog: undefined });
+    assert.equal(cfg.analog, undefined);
+    assert.deepEqual(await (await get(app, '/api/recordings')).json(), []);
+
+    const before = (await (await get(app, '/api/settings')).json()) as Record<string, unknown>;
+    const put = await send(app, 'PUT', '/api/settings', {
+      ...before,
+      analog: { channels: [{ freqMhz: 438.5, channel: '438.500 中继' }] },
+    });
+    assert.equal(put.status, 200);
+    assert.ok(cfg.recordingsDir.length > 0);
+
+    mkdirSync(cfg.recordingsDir, { recursive: true });
+    writeFileSync(join(cfg.recordingsDir, 'fm-abc123.wav'), 'RIFF1234');
+
+    assert.deepEqual(await (await get(app, '/api/recordings')).json(), ['fm-abc123']);
+    const rec = await get(app, '/api/recordings/fm-abc123');
+    assert.equal(rec.status, 200);
+    assert.equal(await rec.text(), 'RIFF1234');
+  });
+
+  // 进程已经跑了很久（早就过了宽限期），BrandMeister 关了一阵子刚打开：
+  // 不该拿进程启动的那一刻当基准，得从刚打开这一刻重新算宽限。
+  it('BrandMeister 从关到开，健康检查按打开的那一刻给宽限，不是按进程启动的那一刻', async () => {
+    const { app } = onDisk({ brandmeisterEnabled: false });
+    const real = Date.now;
+    try {
+      // 进程「已经跑了」比最慢查询三倍还久
+      Date.now = () => real() + 900 * 3 * 1000 + 5000;
+      const stillOff = (await (await app.fetch(new Request('http://local/health'))).json()) as { ok: boolean };
+      assert.equal(stillOff.ok, true, '还没打开过 BrandMeister，没有查询在跑，天然健康');
+
+      const s = (await (await get(app, '/api/settings')).json()) as Record<string, unknown>;
+      // 关一次，再打开：宽限从这一次打开算起，不是进程起来的那一刻
+      await send(app, 'PUT', '/api/settings', { ...s, brandmeisterEnabled: false });
+      const put = await send(app, 'PUT', '/api/settings', { ...s, brandmeisterEnabled: true });
+      assert.equal(put.status, 200);
+
+      // 刚打开，一次都没轮询过，也该是健康的——宽限期从这一刻算起。
+      const justOn = (await (await app.fetch(new Request('http://local/health'))).json()) as { ok: boolean };
+      assert.equal(justOn.ok, true);
+    } finally {
+      Date.now = real;
+    }
   });
 });
 

@@ -26,15 +26,16 @@ const STREAK = 3;
  * 不健康时返回 503，这样一行 curl 就能当外部检查用。
  */
 /**
- * @param startedAt 本进程起来的时刻。刚装好还一次都没轮询过是正常的，
- *   要等够一轮才算不正常。不看这个的话，装完那一下 curl 必然是 503，
- *   而 install.sh 会照着打印「健康检查没通过」，吓人且没有意义。
+ * @param graceStart 宽限期的起点：进程刚起来、或者 BrandMeister 刚从关
+ *   打开，那一刻起一次都没轮询过是正常的，要等够一轮才算不正常。不看这个
+ *   的话，装完那一下 curl 必然是 503，而 install.sh 会照着打印「健康检查
+ *   没通过」，吓人且没有意义；BrandMeister 关了一阵子刚打开也是同一个坑。
  */
 export function checkHealth(
   db: DatabaseSync,
   config: Config,
   now: number,
-  startedAt: number,
+  graceStart: number,
 ): Health {
   const problems: string[] = [];
 
@@ -42,16 +43,19 @@ export function checkHealth(
     db.prepare('SELECT MAX(at) AS n FROM poll_log').get() as { n: number | null }
   ).n;
 
-  const slowest = config.queries.reduce((m, q) => Math.max(m, q.intervalS), 0);
+  // 关着的那一路不算健康问题：queries 留在配置里给界面显示，这里只看生效值。
+  const queries = config.brandmeisterEnabled ? config.queries : [];
+
+  const slowest = queries.reduce((m, q) => Math.max(m, q.intervalS), 0);
   if (slowest > 0) {
     if (lastPollAt === null) {
-      if (now - startedAt > slowest * 3) problems.push('起来之后一直没有轮询成功过');
+      if (now - graceStart > slowest * 3) problems.push('起来之后一直没有轮询成功过');
     } else if (now - lastPollAt > slowest * 3) {
       problems.push(`最近一次轮询在 ${now - lastPollAt} 秒前，超过最慢那条查询间隔的三倍`);
     }
   }
 
-  for (const q of config.queries) {
+  for (const q of queries) {
     const last = db
       .prepare('SELECT fetched, parsed FROM poll_log WHERE query_key = ? ORDER BY at DESC LIMIT ?')
       .all(q.key, STREAK) as { fetched: number; parsed: number }[];
