@@ -64,9 +64,20 @@ export default function LogList() {
   const [importing, setImporting] = useState(false);
   const time = useTime();
 
+  // 呼号按呼号的写法比，QTH、网格和备注按原文不分大小写找。
+  // 只能搜呼号的话，「上次在克拉玛依碰到的那个人」就找不回来。
   const rows = useMemo(() => {
-    const needle = normalizeCallsign(search);
-    const matched = needle ? qsos.filter((q) => q.call.includes(needle)) : qsos;
+    const call = normalizeCallsign(search);
+    const text = search.trim().toLowerCase();
+    const matched = text
+      ? qsos.filter(
+          (q) =>
+            (call !== "" && q.call.includes(call)) ||
+            [q.qth, q.gridsquare, q.note].some((v) =>
+              v?.toLowerCase().includes(text),
+            ),
+        )
+      : qsos;
     return [...matched].sort((a, b) => b.startAt - a.startAt);
   }, [qsos, search]);
 
@@ -81,6 +92,7 @@ export default function LogList() {
       rstRcvd: q.rstRcvd,
       gridsquare: q.gridsquare,
       qth: q.qth,
+      myGridsquare: q.myGridsquare,
       myQth: q.myQth,
       myDevice: q.myDevice,
       myAntenna: q.myAntenna,
@@ -175,8 +187,18 @@ export default function LogList() {
       return;
     }
     download("openheard.adi", adifFile(rows));
-    message.success(`导出 ${rows.length} 条`);
+    message.success(
+      search.trim()
+        ? `导出筛选出的 ${rows.length} 条，不是全部`
+        : `导出 ${rows.length} 条`,
+    );
   };
+
+  /** 自动入库的那条删掉之后，它用到的发射会回到待确认队列，要先说清楚。 */
+  const deleteTitle = (q: Qso) =>
+    q.clusterId
+      ? `删除与 ${q.call} 的通联？它用到的那几次发射会回到待确认队列。`
+      : `删除与 ${q.call} 的通联？`;
 
   /** 手机上的一条一张卡。和待确认队列同一个道理：表格在这个宽度里要横滚。 */
   const cards = (
@@ -216,7 +238,7 @@ export default function LogList() {
                 编辑
               </Button>
               <Popconfirm
-                title={`删除与 ${q.call} 的通联？`}
+                title={deleteTitle(q)}
                 onConfirm={() =>
                   removeQso(q.id).catch((e: Error) => message.error(e.message))
                 }
@@ -237,59 +259,65 @@ export default function LogList() {
       title: `时间 ${time.label}`,
       dataIndex: "startAt",
       render: time.at,
-      width: 190,
+      width: 184,
     },
     {
       title: "呼号",
       dataIndex: "call",
-      width: 120,
+      width: 148,
+      ellipsis: true,
       render: (call: string) => (
-        <Typography.Text strong>{call}</Typography.Text>
+        <Typography.Text strong title={call}>
+          {call}
+        </Typography.Text>
       ),
     },
     {
       title: "频率",
       dataIndex: "freqMhz",
-      width: 110,
+      width: 128,
       render: (f: number) => `${f} MHz`,
     },
-    { title: "波段", dataIndex: "band", width: 80 },
+    // 波段看频率就知道。窄一点的屏幕上把位置让给 QTH。
+    { title: "波段", dataIndex: "band", width: 72, responsive: ["xxl"] },
     {
       title: "模式",
       dataIndex: "mode",
-      width: 90,
+      width: 80,
       render: (m: string) => <Tag>{m}</Tag>,
     },
     {
       title: "报告 发/收",
       key: "rst",
-      width: 110,
+      width: 100,
       render: (_, q) => `${q.rstSent} / ${q.rstRcvd}`,
-    },
-    {
-      title: "对方 QTH",
-      key: "their",
-      render: (_, q) => [q.qth, q.gridsquare].filter(Boolean).join(" ") || "—",
     },
     {
       title: "来源",
       key: "source",
-      width: 90,
+      width: 80,
       render: (_, q) =>
         q.clusterId ? <Tag color="blue">自动</Tag> : <Tag>手工</Tag>,
     },
     {
+      // 不定宽，余下的宽度都给它。再长就省略，悬停看全文。
+      title: "对方 QTH",
+      key: "their",
+      ellipsis: true,
+      render: (_, q) => [q.qth, q.gridsquare].filter(Boolean).join(" ") || "—",
+    },
+    {
       title: "操作",
       key: "action",
-      width: 150,
+      width: 140,
       fixed: wide ? ("right" as const) : undefined,
       render: (_, q) => (
-        <Space size={0}>
+        <Space size={0} className="compact-links">
           <Button type="link" onClick={() => open(q)}>
             编辑
           </Button>
           <Popconfirm
-            title={`删除与 ${q.call} 的通联？`}
+            title={deleteTitle(q)}
             onConfirm={() =>
               removeQso(q.id).catch((e: Error) => message.error(e.message))
             }
@@ -313,7 +341,11 @@ export default function LogList() {
             <Button loading={importing} onClick={pickFile}>
               导入 ADIF
             </Button>
-            <Button onClick={exportAdif}>导出 ADIF</Button>
+            {/* 搜索框里有字时导出的只是筛出来的那几条，按钮上要说出来。
+                拿去传 LoTW 的人会以为是整本日志。 */}
+            <Button onClick={exportAdif}>
+              {search.trim() ? `导出筛选出的 ${rows.length} 条` : "导出 ADIF"}
+            </Button>
           </Space>
         }
       />
@@ -324,7 +356,7 @@ export default function LogList() {
             <Input.Search
               allowClear
               className="card-toolbar-search"
-              placeholder="按呼号筛选"
+              placeholder="按呼号、QTH、网格或备注筛选"
               onChange={(e) => setSearch(e.target.value)}
             />
             <Typography.Text type="secondary">{rows.length} 条</Typography.Text>
@@ -343,7 +375,8 @@ export default function LogList() {
               rowKey="id"
               columns={columns}
               dataSource={rows}
-              scroll={{ x: 1000 }}
+              // 各列定宽加起来约 950，QTH 至少留 200。
+              scroll={{ x: 1150 }}
               pagination={{ pageSize: 20, hideOnSinglePage: true }}
               expandable={{
                 // 改动历史要展开才知道有没有，所以每行都可展开。
@@ -369,19 +402,32 @@ export default function LogList() {
                         : ` · 天线 ${q.myHeightM} m`}
                     </Typography.Text>
                     {q.note && <Typography.Text>{q.note}</Typography.Text>}
-                    {changes[q.id]?.length ? (
+                    {/* 还没读回来时要说一声，否则和「从没改过」看起来一样。
+                        每一次都列出来，不只是最近那次：错改之后又改，最早那一版才是原样。 */}
+                    {changes[q.id] === undefined ? (
                       <Typography.Text type="secondary">
-                        改过 {changes[q.id].length} 次，最近一次{" "}
-                        {time.at(changes[q.id][0].at)}，那之前是「
-                        {[
-                          changes[q.id][0].before.call,
-                          `${changes[q.id][0].before.rstSent}/${changes[q.id][0].before.rstRcvd}`,
-                          changes[q.id][0].before.qth,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                        」
+                        正在读改动记录
                       </Typography.Text>
+                    ) : changes[q.id].length > 0 ? (
+                      <>
+                        <Typography.Text type="secondary">
+                          改过 {changes[q.id].length} 次，最近的在前：
+                        </Typography.Text>
+                        {changes[q.id].map((c) => (
+                          <Typography.Text type="secondary" key={c.at}>
+                            {time.at(c.at)} 之前是「
+                            {[
+                              c.before.call,
+                              `${c.before.rstSent}/${c.before.rstRcvd}`,
+                              c.before.qth,
+                              c.before.note,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                            」
+                          </Typography.Text>
+                        ))}
+                      </>
                     ) : null}
                   </Space>
                 ),

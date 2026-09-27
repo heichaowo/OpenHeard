@@ -176,3 +176,77 @@ describe('LogList 的改动记录', () => {
     expect(await screen.findByText(/改过 1 次/)).toBeInTheDocument()
   })
 })
+
+describe('LogList 的搜索和导出', () => {
+  // 只能搜呼号的话，「上次在克拉玛依碰到的那个人」就找不回来。
+  it('按 QTH、网格和备注也能搜', async () => {
+    mount([
+      qso({ id: 'a', call: 'BA1AA', qth: '克拉玛依区' }),
+      qso({ id: 'b', call: 'BD7KLO', gridsquare: 'MN86ab' }),
+      qso({ id: 'c', call: 'BG9XYZ', note: '车台，楼顶天线' }),
+    ])
+    const search = screen.getByPlaceholderText(/按呼号、QTH、网格或备注筛选/)
+
+    await userEvent.type(search, '克拉玛依')
+    expect(screen.getByText('BA1AA')).toBeInTheDocument()
+    expect(screen.queryByText('BD7KLO')).not.toBeInTheDocument()
+
+    await userEvent.clear(search)
+    await userEvent.type(search, 'mn86')
+    expect(screen.getByText('BD7KLO')).toBeInTheDocument()
+
+    await userEvent.clear(search)
+    await userEvent.type(search, '楼顶')
+    expect(screen.getByText('BG9XYZ')).toBeInTheDocument()
+  })
+
+  // 拿去传 LoTW 的人会以为导出的是整本日志。
+  it('筛过之后导出按钮说清楚只导出筛出来的几条', async () => {
+    mount([qso({ id: 'a', call: 'BA1AA' }), qso({ id: 'b', call: 'BD7KLO' })])
+    expect(button('导出 ADIF')).toBeInTheDocument()
+
+    await userEvent.type(screen.getByPlaceholderText(/按呼号/), 'BA1')
+
+    expect(screen.getByRole('button', { name: /导出筛选出的 1 条/ })).toBeInTheDocument()
+  })
+})
+
+describe('LogList 的改动历史和删除', () => {
+  it('每一次改动都列出来，读回来之前说正在读', async () => {
+    let done: (v: unknown) => void = () => undefined
+    qsoHistory.mockImplementationOnce(() => new Promise((r) => (done = r)))
+    const { container } = mount()
+
+    await userEvent.click(container.querySelector('.ant-table-row-expand-icon')!)
+    expect(await screen.findByText('正在读改动记录')).toBeInTheDocument()
+
+    done([
+      { at: 1_789_000_200, action: 'edit', before: qso({ qth: '成都' }) },
+      { at: 1_789_000_100, action: 'edit', before: qso({ qth: '深圳' }) },
+    ])
+    expect(await screen.findByText(/改过 2 次/)).toBeInTheDocument()
+    expect(screen.getByText(/深圳/)).toBeInTheDocument()
+    expect(screen.getByText(/成都/)).toBeInTheDocument()
+  })
+
+  it('删自动入库的那条时说那几次发射会回到待确认队列', async () => {
+    mount([qso({ clusterId: 'c1' })])
+    await userEvent.click(button('删除'))
+    expect((await screen.findAllByText(/会回到待确认队列/)).length).toBeGreaterThan(0)
+  })
+
+  it('编辑框能改本台网格', async () => {
+    editQso.mockResolvedValue(undefined)
+    mount([qso({ myGridsquare: 'OM24' })])
+    await userEvent.click(button('编辑'))
+    const grid = await screen.findByDisplayValue('OM24')
+
+    await userEvent.clear(grid)
+    await userEvent.type(grid, 'MN86')
+    await userEvent.click(button('保存'))
+
+    await waitFor(() => expect(editQso).toHaveBeenCalledOnce())
+    expect(editQso.mock.calls[0][1]).toMatchObject({ myGridsquare: 'MN86' })
+  })
+})
+

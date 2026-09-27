@@ -36,11 +36,13 @@ const SOURCES: { value: Origin; label: string; empty: string }[] = [
 const channelOf = (a: HeardItem) =>
   a.channel ?? (a.talkgroup === undefined ? "—" : `TG ${a.talkgroup}`);
 
-function Sender({ a }: { a: HeardItem }) {
+/** myCall 是本台呼号。模拟侧的发射不带呼号，本台的那几次就用它，不说「呼号未知」。 */
+function Sender({ a, myCall }: { a: HeardItem; myCall?: string }) {
   return (
     <Space size={4}>
       <Tag color={a.mine ? "blue" : "default"}>{a.mine ? "本台" : "对方"}</Tag>
       {a.callsign ??
+        (a.mine ? myCall : undefined) ??
         (a.dmrId === undefined ? (
           <Typography.Text type="secondary">呼号未知</Typography.Text>
         ) : (
@@ -62,7 +64,7 @@ function Settled({ a }: { a: HeardItem }) {
  * 只读。结算在待确认队列里做，这里只回答「到底听到了什么」。
  */
 export default function HeardList() {
-  const { recordings } = useStore();
+  const { recordings, station } = useStore();
   const time = useTime();
   const wide = Grid.useBreakpoint().md ?? true;
   const [origin, setOrigin] = useState<Origin>("sdr-fm");
@@ -87,9 +89,8 @@ export default function HeardList() {
       setNext(page.next);
       setError(undefined);
     } catch (e) {
+      // 已经显示的列表留着，只多一条错误提示。清空的话一次失败就整页变成重试页。
       if (mine !== seq.current) return;
-      setItems([]);
-      setNext(undefined);
       setError(errorText(e));
     } finally {
       if (mine === seq.current) setLoading(false);
@@ -140,12 +141,10 @@ export default function HeardList() {
               <Typography.Text type="secondary">
                 {time.atShort(a.startAt)}
               </Typography.Text>
-              <Typography.Text type="secondary" ellipsis>
-                {channelOf(a)}
-              </Typography.Text>
+              <Typography.Text type="secondary">{channelOf(a)}</Typography.Text>
             </div>
             <Space size={8} wrap>
-              <Sender a={a} />
+              <Sender a={a} myCall={station.myCallsign} />
               <Typography.Text type="secondary">
                 {a.durationS.toFixed(1)} 秒
               </Typography.Text>
@@ -180,8 +179,22 @@ export default function HeardList() {
     {
       title: "发射方",
       key: "sender",
-      render: (_, a) => <Sender a={a} />,
+      render: (_, a) => <Sender a={a} myCall={station.myCallsign} />,
       width: 200,
+    },
+    // 模拟侧看音频信噪比，数字侧看误码率，都是判断信号好坏用的。
+    {
+      title: origin === "sdr-fm" ? "信噪比" : "误码率",
+      key: "quality",
+      width: 90,
+      render: (_, a) =>
+        origin === "sdr-fm"
+          ? a.audioSnrDb === undefined
+            ? "—"
+            : `${a.audioSnrDb.toFixed(1)} dB`
+          : a.ber === undefined
+            ? "—"
+            : `${a.ber}%`,
     },
     {
       title: "结算",

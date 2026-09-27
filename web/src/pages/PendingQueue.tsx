@@ -44,6 +44,12 @@ const originOf = (row: PendingRow) => {
 };
 
 /**
+ * 一段里一次显示多少次发射。热闹的话务组一段能有几百次，一口气全列出来，
+ * 展开之后要滑好几屏，也没法看。
+ */
+const ACTIVITY_PAGE = 20;
+
+/**
  * 一段里的逐次发射，手机上用。可以取消勾选。表格在这个宽度里塞不下，
  * 何况还有个播放器。
  *
@@ -61,9 +67,10 @@ function ActivityList({
 }) {
   const time = useTime();
   const { recordings } = useStore();
+  const [shown, setShown] = useState(ACTIVITY_PAGE);
   return (
     <Space direction="vertical" size={10} style={{ width: "100%" }}>
-      {activities.map((a) => (
+      {activities.slice(0, shown).map((a) => (
         <div key={a.id}>
           <Space size={8} wrap>
             <Checkbox
@@ -82,6 +89,11 @@ function ActivityList({
             {a.callsign && (
               <Typography.Text strong>{a.callsign}</Typography.Text>
             )}
+            {a.talkgroup !== undefined && (
+              <Typography.Text type="secondary">
+                TG {a.talkgroup}
+              </Typography.Text>
+            )}
           </Space>
           {recordings.has(a.id) && (
             <audio
@@ -98,13 +110,33 @@ function ActivityList({
           )}
         </div>
       ))}
+      {shown < activities.length && (
+        <Button size="small" onClick={() => setShown((n) => n + ACTIVITY_PAGE)}>
+          再显示 {Math.min(ACTIVITY_PAGE, activities.length - shown)} 次（共{" "}
+          {activities.length} 次）
+        </Button>
+      )}
     </Space>
   );
 }
 
-function ActivityTable({ activities }: { activities: Activity[] }) {
+/**
+ * 一段里的逐次发射，桌面上用。和手机上一样能取消勾选：聚类猜错时，
+ * 桌面上也要能把不属于这次通联的那几次拿掉。
+ */
+function ActivityTable({
+  activities,
+  chosen,
+  onChange,
+}: {
+  activities: Activity[];
+  chosen: string[];
+  onChange: (ids: string[]) => void;
+}) {
   const time = useTime();
   const { recordings } = useStore();
+  // 一段只在一个信道上，要么全是模拟，要么全是数字。
+  const digital = activities.some((a) => a.origin !== "sdr-fm");
   const columns: TableColumnsType<Activity> = [
     // 外层表头写了时区，这张展开表也要写，否则两个时间看着像不同口径。
     {
@@ -150,16 +182,32 @@ function ActivityTable({ activities }: { activities: Activity[] }) {
       ),
       width: 200,
     },
-    {
-      title: "音频信噪比",
-      dataIndex: "audioSnrDb",
-      render: (v?: number) => (v === undefined ? "—" : `${v.toFixed(1)} dB`),
-    },
-    {
-      title: "误码率",
-      dataIndex: "ber",
-      render: (v?: number) => (v === undefined ? "—" : `${v}%`),
-    },
+    ...(digital
+      ? [
+          {
+            title: "话务组",
+            dataIndex: "talkgroup",
+            render: (v?: number) => (v === undefined ? "—" : `TG ${v}`),
+          },
+          {
+            title: "DMR ID",
+            dataIndex: "dmrId",
+            render: (v?: number) => v ?? "—",
+          },
+          {
+            title: "误码率",
+            dataIndex: "ber",
+            render: (v?: number) => (v === undefined ? "—" : `${v}%`),
+          },
+        ]
+      : [
+          {
+            title: "音频信噪比",
+            dataIndex: "audioSnrDb",
+            render: (v?: number) =>
+              v === undefined ? "—" : `${v.toFixed(1)} dB`,
+          },
+        ]),
   ];
   return (
     <Table
@@ -167,7 +215,15 @@ function ActivityTable({ activities }: { activities: Activity[] }) {
       rowKey="id"
       columns={columns}
       dataSource={activities}
-      pagination={false}
+      rowSelection={{
+        selectedRowKeys: chosen,
+        onChange: (keys) => onChange(keys as string[]),
+      }}
+      pagination={
+        activities.length > ACTIVITY_PAGE
+          ? { pageSize: ACTIVITY_PAGE, size: "small", showSizeChanger: false }
+          : false
+      }
     />
   );
 }
@@ -235,6 +291,9 @@ export default function PendingQueue() {
       ? `只忽略挑中的 ${chosen(row).length} 次发射？`
       : "不记这次对话？";
 
+  const chooseActivities = (row: PendingRow, ids: string[]) =>
+    setSubset((m) => ({ ...m, [row.cluster.id]: ids }));
+
   const toggleActivity = (row: PendingRow, id: string) =>
     setSubset((m) => {
       const now = m[row.cluster.id] ?? row.cluster.activities.map((a) => a.id);
@@ -255,6 +314,7 @@ export default function PendingQueue() {
       rstRcvd: draft.rstRcvd,
       gridsquare: undefined,
       qth: undefined,
+      myGridsquare: draft.myGridsquare,
       myQth: draft.myQth,
       myDevice: draft.myDevice,
       myAntenna: draft.myAntenna,
@@ -381,6 +441,9 @@ export default function PendingQueue() {
       return;
     }
     setSubmitting(true);
+    // 和「直接入库」共用一把锁。抽屉里的那次还没回来，列表上别的按钮再点
+    // 就是两个入库请求同时在路上。
+    setBusyId(editing.row.cluster.id);
     try {
       await promote(editing.row.cluster.id, draft, editing.ids);
       setEditing(null);
@@ -389,6 +452,7 @@ export default function PendingQueue() {
       fail(e);
     } finally {
       setSubmitting(false);
+      setBusyId(null);
     }
   };
 
@@ -422,12 +486,10 @@ export default function PendingQueue() {
                     {time.atShort(row.cluster.startAt)}
                   </Typography.Text>
                 </Space>
-                <Space size={4}>
+                <Typography.Text type="secondary">
                   <Tag>{row.draft.mode}</Tag>
-                  <Typography.Text type="secondary" ellipsis>
-                    {row.cluster.activities[0]?.channel ?? originOf(row)}
-                  </Typography.Text>
-                </Space>
+                  {row.cluster.activities[0]?.channel ?? originOf(row)}
+                </Typography.Text>
               </div>
 
               <div className="pending-card-call">
@@ -459,7 +521,7 @@ export default function PendingQueue() {
                 <Button
                   type="primary"
                   block
-                  disabled={none}
+                  disabled={none || busyId !== null}
                   onClick={() => open(row)}
                 >
                   {ready ? "编辑" : "确认"}
@@ -520,42 +582,50 @@ export default function PendingQueue() {
       title: `时间 ${time.label}`,
       key: "startAt",
       render: (_, row) => time.at(row.cluster.startAt),
-      width: 200,
+      width: 184,
     },
     {
+      // 不定宽，余下的宽度都给它。再长就省略，悬停看全名。
       title: "信道",
       key: "channel",
+      ellipsis: true,
       render: (_, row) => row.cluster.activities[0]?.channel ?? originOf(row),
     },
     {
       title: "模式",
       key: "mode",
       render: (_, row) => <Tag>{row.draft.mode}</Tag>,
-      width: 90,
+      width: 80,
     },
     {
       title: "发射",
       key: "activities",
+      // 在展开的表里取消了几次，这里要看得出来，否则确认的时候不知道结算的是哪几次。
       render: (_, row) =>
-        `${row.cluster.activities.length} 次 / ${Math.round(row.cluster.endAt - row.cluster.startAt)} 秒`,
-      width: 140,
+        narrowed(row)
+          ? `挑中 ${chosen(row).length} / ${row.cluster.activities.length} 次`
+          : `${row.cluster.activities.length} 次 / ${Math.round(row.cluster.endAt - row.cluster.startAt)} 秒`,
+      width: 144,
     },
     {
       title: "对方呼号",
       key: "call",
+      ellipsis: true,
       render: (_, row) =>
         draftOf(row).call ??
         (aloneIn(row) ? <Tag>没人回</Tag> : <Tag color="orange">待补</Tag>),
-      width: 120,
+      width: 144,
     },
     {
+      // 缺的项多时标签换到第二行，不往右边挤。
       title: "还缺",
       key: "missing",
+      width: 150,
       render: (_, row) =>
         missingOf(row).length === 0 ? (
           <Tag color="green">可直接入库</Tag>
         ) : (
-          <Space size={4}>
+          <Space size={4} wrap>
             {missingOf(row).map((k) => (
               <Tag key={k} color="orange">
                 {LABELS[k] ?? k}
@@ -567,29 +637,35 @@ export default function PendingQueue() {
     {
       title: "操作",
       key: "action",
-      width: 220,
+      width: 212,
       fixed: wide ? ("right" as const) : undefined,
       render: (_, row) => (
-        <Space size={0}>
+        <Space size={0} className="compact-links">
           <Button
             type="link"
             loading={busyId === row.cluster.id}
             disabled={
               missingOf(row).length > 0 ||
+              chosen(row).length === 0 ||
               (busyId !== null && busyId !== row.cluster.id)
             }
             onClick={() => straightIn(row)}
           >
             直接入库
           </Button>
-          <Button type="link" onClick={() => open(row)}>
+          <Button
+            type="link"
+            disabled={chosen(row).length === 0 || busyId !== null}
+            onClick={() => open(row)}
+          >
             {missingOf(row).length === 0 ? "编辑" : "确认"}
           </Button>
           <Popconfirm
             title={ignoreTitle(row)}
+            disabled={chosen(row).length === 0}
             onConfirm={() => ignore(row.cluster.id, chosen(row)).catch(fail)}
           >
-            <Button type="link" danger>
+            <Button type="link" danger disabled={chosen(row).length === 0}>
               忽略
             </Button>
           </Popconfirm>
@@ -634,10 +710,15 @@ export default function PendingQueue() {
               columns={columns}
               dataSource={pending}
               pagination={false}
-              scroll={{ x: 900 }}
+              // 各列定宽加起来约 1000，信道列至少留 150。
+              scroll={{ x: 1150 }}
               expandable={{
                 expandedRowRender: (row) => (
-                  <ActivityTable activities={row.cluster.activities} />
+                  <ActivityTable
+                    activities={row.cluster.activities}
+                    chosen={chosen(row)}
+                    onChange={(ids) => chooseActivities(row, ids)}
+                  />
                 ),
               }}
             />

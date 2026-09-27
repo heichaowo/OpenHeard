@@ -172,13 +172,16 @@ export default function SettingsPage() {
           form={form}
           layout="vertical"
           onFinish={save}
-          // 信道表整体的规则挂在 Form.List 上，改某一行时不会自己重跑。
-          // 不补这一下，信道名重复要点了保存才看得到。
+          // 信道表和查询表整体的规则挂在 Form.List 上，改某一行时不会自己重跑。
+          // 不补这一下，名字重复要点了保存才看得到。
           onValuesChange={(changed: Partial<Settings>) => {
             if (changed.analog?.channels !== undefined) {
               form
                 .validateFields([["analog", "channels"]])
                 .catch(() => undefined);
+            }
+            if (changed.queries !== undefined) {
+              form.validateFields([["queries"]]).catch(() => undefined);
             }
           }}
         >
@@ -201,13 +204,14 @@ export default function SettingsPage() {
               {(fields, { add, remove }, { errors }) => (
                 <>
                   {fields.map((field) => (
-                    <Space key={field.key} align="start" wrap>
+                    <div key={field.key} className="list-row">
                       <Form.Item
                         name={[field.name, "freqMhz"]}
+                        label="频率 MHz"
                         rules={[{ required: true, message: "频率必填" }]}
                       >
                         <InputNumber
-                          style={{ width: 140 }}
+                          style={{ width: "100%" }}
                           step={0.0125}
                           placeholder="438.500"
                           aria-label="信道频率 MHz"
@@ -215,22 +219,20 @@ export default function SettingsPage() {
                       </Form.Item>
                       <Form.Item
                         name={[field.name, "channel"]}
+                        label="信道名"
                         rules={[{ required: true, message: "信道名必填" }]}
                       >
-                        <Input
-                          style={{ width: 180 }}
-                          placeholder="438.500 中继"
-                          aria-label="信道名"
-                        />
+                        <Input placeholder="438.500 中继" aria-label="信道名" />
                       </Form.Item>
                       <Button
                         type="link"
                         danger
+                        className="list-row-remove"
                         onClick={() => remove(field.name)}
                       >
                         删掉
                       </Button>
-                    </Space>
+                    </div>
                   ))}
                   <Button
                     onClick={() => add({})}
@@ -316,40 +318,41 @@ export default function SettingsPage() {
               {(fields, { add, remove }) => (
                 <>
                   {fields.map((field) => (
-                    <Space key={field.key} align="start" wrap>
+                    <div key={field.key} className="list-row">
                       <Form.Item
                         name={[field.name, "name"]}
+                        label="名字"
                         rules={[{ required: true, message: "名字必填" }]}
                       >
-                        <Input
-                          style={{ width: 180 }}
-                          placeholder="439.525 中继"
-                        />
+                        <Input placeholder="439.525 中继" />
                       </Form.Item>
                       <Form.Item
                         name={[field.name, "freqMhz"]}
+                        label="频率 MHz"
                         rules={[{ required: true, message: "频率必填" }]}
                       >
                         <InputNumber
-                          style={{ width: 130 }}
+                          style={{ width: "100%" }}
                           step={0.0125}
                           placeholder="439.525"
                         />
                       </Form.Item>
                       <Form.Item
                         name={[field.name, "mode"]}
+                        label="模式"
                         rules={[{ required: true }]}
                       >
-                        <Select style={{ width: 100 }} options={MODES} />
+                        <Select options={MODES} />
                       </Form.Item>
                       <Button
                         type="link"
                         danger
+                        className="list-row-remove"
                         onClick={() => remove(field.name)}
                       >
                         删掉
                       </Button>
-                    </Space>
+                    </div>
                   ))}
                   <Button onClick={() => add({ mode: "FM" })}>加一条</Button>
                 </>
@@ -359,33 +362,55 @@ export default function SettingsPage() {
 
           <Card size="small" title="BrandMeister 查询">
             <Typography.Paragraph type="secondary">
-              每条规则单独一次查询，不要用 OR 合并，`amount`
-              是合并去重后的全局上限，热闹的话务组会把安静的饿死。
-              数值字段必须是数字，传字符串会静默返回空集。
+              每条规则单独查一次，不要用 OR
+              合并。「每次取」是合并去重之后的总上限，
+              合在一起的话，热闹的话务组会把安静的挤掉。
             </Typography.Paragraph>
-            <Form.List name="queries">
-              {(fields, { add, remove }) => (
+            <Form.List
+              name="queries"
+              rules={[
+                {
+                  // 名字是轮询记录和运维页上认一条查询的唯一办法，重了就分不开。
+                  validator: async (_, rows?: { key?: string }[]) => {
+                    const keys = (rows ?? []).map((r) => r?.key).filter(filled);
+                    if (new Set(keys).size !== keys.length) {
+                      throw new Error("查询名字不能重复");
+                    }
+                  },
+                },
+              ]}
+            >
+              {(fields, { add, remove }, { errors }) => (
                 <>
                   {fields.map((field) => (
-                    <Space key={field.key} align="start" wrap>
+                    <div key={field.key} className="list-row">
                       <Form.Item
                         name={[field.name, "key"]}
+                        label="名字"
                         rules={[{ required: true, message: "名字必填" }]}
                       >
-                        <Input style={{ width: 150 }} placeholder="dst:46001" />
+                        <Input placeholder="dst:46001" />
                       </Form.Item>
                       <Form.Item
                         name={[field.name, "rule", "id"]}
+                        label="查什么"
                         rules={[{ required: true }]}
                       >
                         <Select
-                          style={{ width: 160 }}
+                          popupMatchSelectWidth={false}
+                          // 格子只有两列宽，带上英文字段名就放不下。英文名留在悬停提示里，
+                          // 对 BrandMeister 的接口时还查得到。
                           options={[
                             {
                               value: "DestinationID",
-                              label: "话务组 DestinationID",
+                              label: "话务组",
+                              title: "DestinationID",
                             },
-                            { value: "SourceID", label: "发射方 SourceID" },
+                            {
+                              value: "SourceID",
+                              label: "发射方",
+                              title: "SourceID",
+                            },
                           ]}
                         />
                       </Form.Item>
@@ -398,41 +423,45 @@ export default function SettingsPage() {
                       </Form.Item>
                       <Form.Item
                         name={[field.name, "rule", "value"]}
+                        label="号码"
                         rules={[{ required: true, message: "必填" }]}
                       >
                         <InputNumber
-                          style={{ width: 130 }}
+                          style={{ width: "100%" }}
                           placeholder="46001"
                         />
                       </Form.Item>
                       <Form.Item
                         name={[field.name, "amount"]}
+                        label="每次取"
                         rules={[{ required: true }]}
                       >
                         <InputNumber
-                          style={{ width: 110 }}
+                          style={{ width: "100%" }}
                           placeholder="200"
-                          addonBefore="取"
+                          suffix="行"
                         />
                       </Form.Item>
                       <Form.Item
                         name={[field.name, "intervalS"]}
+                        label="间隔"
                         rules={[{ required: true }]}
                       >
                         <InputNumber
-                          style={{ width: 130 }}
+                          style={{ width: "100%" }}
                           placeholder="900"
-                          addonAfter="秒"
+                          suffix="秒"
                         />
                       </Form.Item>
                       <Button
                         type="link"
                         danger
+                        className="list-row-remove"
                         onClick={() => remove(field.name)}
                       >
                         删掉
                       </Button>
-                    </Space>
+                    </div>
                   ))}
                   <Button
                     onClick={() =>
@@ -445,6 +474,7 @@ export default function SettingsPage() {
                   >
                     加一条
                   </Button>
+                  <Form.ErrorList errors={errors} />
                 </>
               )}
             </Form.List>

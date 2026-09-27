@@ -196,3 +196,53 @@ describe('手机上只挑一段里的几次', () => {
     expect(button('忽略')).toBeDisabled()
   })
 })
+
+// 热闹的话务组一段能有几百次发射，一口气全列出来没法看。
+describe('一段里的发射很多时', () => {
+  const many = Array.from({ length: 45 }, (_, i) =>
+    act(`b${i}`, i * 5, i % 2 === 0 ? { mine: true, callsign: 'BG0CG' } : { callsign: 'BA1AA' }),
+  )
+
+  it('桌面上展开后分页，每页 20 次', async () => {
+    const { container } = render(tree([row(many)]))
+    await userEvent.click(container.querySelector('.ant-table-row-expand-icon')!)
+
+    const inner = await waitFor(() => {
+      const t = container.querySelectorAll('.ant-table-expanded-row .ant-table-tbody tr.ant-table-row')
+      expect(t.length).toBe(20)
+      return t
+    })
+    expect(inner.length).toBe(20)
+    expect(container.querySelector('.ant-table-expanded-row .ant-pagination')).not.toBeNull()
+  })
+
+  it('手机上先列 20 次，按一下再多 20 次', async () => {
+    setViewportWidth(375)
+    render(tree([row(many)]))
+    await userEvent.click(screen.getByText(/逐次发射/))
+
+    expect(screen.getAllByRole('checkbox').length).toBe(1 + 20)
+    await userEvent.click(screen.getByRole('button', { name: /再显示 20 次/ }))
+    expect(screen.getAllByRole('checkbox').length).toBe(1 + 40)
+  })
+
+  // 聚类猜错时，桌面上也要能把不属于这次通联的那几次拿掉。
+  it('桌面上也能在展开的表里取消几次，直接入库只带剩下的', async () => {
+    const two = [act('m1', 0, { mine: true }), act('x1', 10, { callsign: 'BA1AA' }), act('x2', 20, { callsign: 'BA1AA' })]
+    const { container } = render(tree([row(two)]))
+    await userEvent.click(container.querySelector('.ant-table-row-expand-icon')!)
+
+    const boxes = await waitFor(() => {
+      const b = container.querySelectorAll('.ant-table-expanded-row .ant-table-tbody .ant-checkbox-input')
+      expect(b.length).toBe(3)
+      return b
+    })
+    await userEvent.click(boxes[2] as HTMLElement)
+
+    expect(await screen.findByText('挑中 2 / 3 次')).toBeInTheDocument()
+    await userEvent.click(button('直接入库'))
+    await waitFor(() => expect(promote).toHaveBeenCalledOnce())
+    expect(promote.mock.calls[0][2]).toEqual(['m1', 'x1'])
+  })
+})
+

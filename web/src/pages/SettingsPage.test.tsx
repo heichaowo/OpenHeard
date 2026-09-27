@@ -141,4 +141,50 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
     expect(saveSettings.mock.calls[0][0].analog).toMatchObject({ openMarginDb: 9, closeMarginDb: 7 })
   })
+
+  // 名字是轮询记录和运维页上认一条查询的唯一办法，重了就分不开。
+  it('两条查询名字一样就不让存', async () => {
+    const q = (key: string) => ({
+      key,
+      rule: { id: 'DestinationID', operator: 'equal', value: 46001 },
+      amount: 200,
+      intervalS: 900,
+    })
+    mount({ ...base, queries: [q('dst:46001'), q('dst:46001')] })
+    await screen.findAllByDisplayValue('dst:46001')
+
+    await userEvent.click(screen.getByRole('button', { name: /^保\s*存$/ }))
+
+    expect(await screen.findByText('查询名字不能重复')).toBeInTheDocument()
+    expect(saveSettings).not.toHaveBeenCalled()
+  })
+
+  it('查询名字重复不用等保存，填的时候就说', async () => {
+    mount({
+      ...base,
+      queries: [{ key: 'dst:46001', rule: { id: 'DestinationID', operator: 'equal', value: 46001 }, amount: 200, intervalS: 900 }],
+    })
+    await screen.findByDisplayValue('dst:46001')
+
+    const adds = screen.getAllByRole('button', { name: /加一条/ })
+    await userEvent.click(adds[adds.length - 1]!)
+    const names = screen.getAllByPlaceholderText('dst:46001')
+    await userEvent.type(names[names.length - 1]!, 'dst:46001')
+
+    expect(await screen.findByText('查询名字不能重复')).toBeInTheDocument()
+    expect(saveSettings).not.toHaveBeenCalled()
+  })
+
+  // 手机上一行折成几行时，没有标签就认不出哪一格是什么。
+  it('查询的每一格都带标签', async () => {
+    mount({
+      ...base,
+      queries: [{ key: 'dst:46001', rule: { id: 'DestinationID', operator: 'equal', value: 46001 }, amount: 200, intervalS: 900 }],
+    })
+    await screen.findByDisplayValue('dst:46001')
+    for (const label of ['名字', '查什么', '号码', '每次取', '间隔']) {
+      expect(screen.getAllByText(label).length).toBeGreaterThan(0)
+    }
+  })
 })
+

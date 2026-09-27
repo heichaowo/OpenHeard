@@ -30,7 +30,9 @@ const mount = (recordings: string[] = []) =>
   render(
     <Preferences>
       <App>
-        <StoreContext value={{ recordings: new Set(recordings) } as unknown as Store}>
+        <StoreContext
+          value={{ recordings: new Set(recordings), station: { myCallsign: 'BG0CG' } } as unknown as Store}
+        >
           <HeardList />
         </StoreContext>
       </App>
@@ -58,6 +60,28 @@ describe('HeardList', () => {
     const players = container.querySelectorAll('audio')
     expect(players.length).toBe(1)
     expect(players[0]!.getAttribute('src')).toBe('/api/recordings/f2')
+  })
+
+  // 模拟侧的发射不带呼号。本台那几次是谁很清楚，不该说「呼号未知」。
+  it('本台的模拟发射显示本台呼号', async () => {
+    heard.mockResolvedValue({ items: [fm('f1', { mine: true }), fm('f2')] })
+    mount()
+
+    expect(await screen.findByText('BG0CG')).toBeInTheDocument()
+    expect(screen.getAllByText('呼号未知').length).toBe(1)
+  })
+
+  // 已经显示的列表不能被一次刷新失败清掉。
+  it('刷新失败时留着已经显示的列表，只多一条提示', async () => {
+    heard.mockResolvedValueOnce({ items: [fm('f1')] })
+    heard.mockRejectedValueOnce(new Error('连不上后端'))
+    mount()
+    await screen.findByText('438.500 中继')
+
+    await userEvent.click(screen.getByRole('button', { name: /刷\s*新/ }))
+
+    expect(await screen.findByText(/连不上后端/)).toBeInTheDocument()
+    expect(screen.getByText('438.500 中继')).toBeInTheDocument()
   })
 
   it('切到数字就按 BrandMeister 取', async () => {

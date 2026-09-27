@@ -23,13 +23,15 @@ import { useStore } from '../store'
 const COLLAPSED_KEY = 'openheard.sidebar-collapsed'
 
 function Brand({ collapsed = false }: { collapsed?: boolean }) {
+  // 本台呼号跟设置走。写死的话，换了呼号侧边栏还是旧的。
+  const { station } = useStore()
   return (
     <div className="brand">
       <div className="brand-mark">OH</div>
       {!collapsed && (
         <div>
           <div className="brand-name">OpenHeard</div>
-          <div className="brand-call">BG0CG</div>
+          {station.myCallsign && <div className="brand-call">{station.myCallsign}</div>}
         </div>
       )}
     </div>

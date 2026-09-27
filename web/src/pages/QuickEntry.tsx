@@ -82,6 +82,7 @@ export default function QuickEntry() {
   const [form] = Form.useForm<FormValues>()
   const [busy, setBusy] = useState(false)
   const time = useTime()
+  const wide = Grid.useBreakpoint().md ?? true
   const { recalledAt, onValuesChange, reset: resetRecall } = useRecall(form, qsos)
 
   const initial: Partial<FormValues> = {
@@ -106,10 +107,31 @@ export default function QuickEntry() {
     prevZone.current = time.zone
   }, [time.zone, form])
 
+  // 直接打开这一页时本台信息还没从后端回来，而 initialValues 只在挂载时读一次。
+  // 回来之后把还空着的那几格补上，人已经填过的不动。每格只补一次：本台信息
+  // 每 15 秒重拉一遍，人刚清空准备重填的那一格不能又被填回去。
+  const filled = useRef(new Set<string>())
+  useEffect(() => {
+    const fill: Record<string, unknown> = {}
+    for (const k of ['myQth', 'myDevice', 'myAntenna', 'myPower', 'myHeightM'] as const) {
+      if (filled.current.has(k) || station[k] === undefined) continue
+      filled.current.add(k)
+      const cur: unknown = form.getFieldValue(k)
+      if (cur === undefined || cur === null || cur === '') fill[k] = station[k]
+    }
+    if (Object.keys(fill).length > 0) form.setFieldsValue(fill as Partial<FormValues>)
+  }, [station, form])
+
   const pickChannel = (name: string) => {
     const ch = channels.find((c) => c.name === name)
     if (ch) form.setFieldsValue({ freqMhz: ch.freqMhz, mode: ch.mode })
   }
+
+  // 信道下拉跟着表单里的频率和模式走。选了再手改频率，下拉还挂着旧信道名的话，
+  // 看上去像是按那个信道记的。
+  const freqMhz = Form.useWatch('freqMhz', form) as number | undefined
+  const mode = Form.useWatch('mode', form) as Mode | undefined
+  const channelName = channels.find((c) => c.freqMhz === freqMhz && c.mode === mode)?.name
 
   const submit = async ({ at, ...values }: FormValues) => {
     const band = bandOf(values.freqMhz)
@@ -183,6 +205,7 @@ export default function QuickEntry() {
           <Select
             allowClear
             placeholder="从频谱表里挑，会带出频率和模式"
+            value={channelName}
             onChange={pickChannel}
             options={channels.map((c) => ({ value: c.name, label: c.name }))}
           />
@@ -256,9 +279,12 @@ export default function QuickEntry() {
           <Input.TextArea rows={2} />
         </Form.Item>
 
-        <Button type="primary" htmlType="submit" loading={busy}>
-          入库
-        </Button>
+        {/* 手机上贴着底边、占满一行。表单十几格，填完不用滑到最底下找按钮。 */}
+        <div className="form-submit">
+          <Button type="primary" htmlType="submit" loading={busy} block={!wide} size={wide ? 'middle' : 'large'}>
+            入库
+          </Button>
+        </div>
       </Form>
       </Card>
     </>

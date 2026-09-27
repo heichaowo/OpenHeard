@@ -15,6 +15,7 @@ export type QsoFormValues = Pick<
   | 'rstRcvd'
   | 'gridsquare'
   | 'qth'
+  | 'myGridsquare'
   | 'myQth'
   | 'myDevice'
   | 'myAntenna'
@@ -73,9 +74,14 @@ export function QsoFields({
       <Divider titlePlacement="left" plain>
         本台
       </Divider>
-      <Form.Item name="myQth" label="QTH">
-        <Input />
-      </Form.Item>
+      <Space wrap>
+        <Form.Item name="myGridsquare" label="网格">
+          <Input style={{ width: 100 }} placeholder="OM24" />
+        </Form.Item>
+        <Form.Item name="myQth" label="QTH">
+          <Input style={{ width: 200 }} />
+        </Form.Item>
+      </Space>
       <Form.Item name="myDevice" label="设备">
         <Input />
       </Form.Item>

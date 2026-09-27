@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
+  Button,
   Card,
   Descriptions,
+  Grid,
+  List,
   Statistic,
   Table,
   Tag,
@@ -35,23 +38,33 @@ const duration = (s: number) => {
   return `${(s / 86400).toFixed(1)} 天`;
 };
 
+/** 标签列不折行。手机上「本进程内存」被挤成三行，一眼看不出是哪一项。 */
+const LABEL_NOWRAP = { label: { whiteSpace: "nowrap" as const } };
+
 /** 现在的噪声离「开」还差多少 dB。负数说明已经过线了。 */
 const margin = (r: { noiseDb?: number; openBelowDb?: number }) =>
   r.noiseDb === undefined || r.openBelowDb === undefined
     ? undefined
     : r.noiseDb - r.openBelowDb;
 
-const ago = (now: number, at?: number) =>
-  at === undefined ? "还没有" : `${now - at} 秒前`;
+/** 多久以前。一分钟以内写秒，再往上写分钟、小时、天，不让人自己除 60。 */
+const ago = (now: number, at?: number) => {
+  if (at === undefined) return "还没有";
+  const s = Math.max(0, now - at);
+  return s < 60 ? `${s} 秒前` : `${duration(s)}前`;
+};
 
 export default function OpsPage() {
   const [ops, setOps] = useState<Ops | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
+  // 只管刷新按钮转不转。loading 只在第一次拉取时为真，定时拉取不该闪骨架屏。
+  const [refreshing, setRefreshing] = useState(false);
   // 上一次还没回来就别再发。重试按钮和 20 秒的定时器用的是同一个 load，
   // 两个请求抢着 setOps，后回来的那个未必是后发的那个。
   const inFlight = useRef(false);
   const time = useTime();
+  const wide = Grid.useBreakpoint().md ?? true;
 
   const load = useCallback(async () => {
     if (inFlight.current) return;
@@ -133,6 +146,17 @@ export default function OpsPage() {
       <PageHeader
         title="运维"
         note="无人值守时这几个数字是唯一能读到的东西。取回多少行、解析出多少行、写入多少行分开记，来源改字段时才看得出来。"
+        actions={
+          <Button
+            loading={refreshing}
+            onClick={() => {
+              setRefreshing(true);
+              void load().finally(() => setRefreshing(false));
+            }}
+          >
+            刷新
+          </Button>
+        }
       />
       <AsyncContent
         loading={loading}
@@ -232,6 +256,7 @@ export default function OpsPage() {
                       size="small"
                       column={1}
                       bordered
+                      styles={LABEL_NOWRAP}
                       style={{ marginBottom: 12 }}
                       title={`${r.freqMhz} MHz（${r.channel}）`}
                     >
@@ -280,7 +305,12 @@ export default function OpsPage() {
 
             {/* 这台机器没人看着，跑飞的轮询和内存泄漏只看磁盘看不出来。 */}
             <Card size="small" title="机器" style={{ marginBottom: 16 }}>
-              <Descriptions size="small" column={1} bordered>
+              <Descriptions
+                size="small"
+                column={1}
+                bordered
+                styles={LABEL_NOWRAP}
+              >
                 <Descriptions.Item label="负载">
                   {ops.machine.load1.toFixed(2)}
                   <Typography.Text type="secondary">
@@ -313,13 +343,21 @@ export default function OpsPage() {
             </Card>
 
             <Card size="small" title="采集来源" style={{ marginBottom: 16 }}>
-              <Descriptions size="small" column={1} bordered>
+              <Descriptions
+                size="small"
+                column={1}
+                bordered
+                styles={LABEL_NOWRAP}
+              >
                 {ops.activities.map((a) => (
                   <Descriptions.Item
                     key={a.origin}
                     label={ORIGINS[a.origin] ?? a.origin}
                   >
-                    {a.n} 条，最近一条 {time.at(a.latest)}
+                    {a.n} 条，最近一条{" "}
+                    <span style={{ whiteSpace: "nowrap" }}>
+                      {time.at(a.latest)}
+                    </span>
                   </Descriptions.Item>
                 ))}
                 {ops.activities.length === 0 && (
@@ -331,7 +369,12 @@ export default function OpsPage() {
             </Card>
 
             <Card size="small" title="配置" style={{ marginBottom: 16 }}>
-              <Descriptions size="small" column={1} bordered>
+              <Descriptions
+                size="small"
+                column={1}
+                bordered
+                styles={LABEL_NOWRAP}
+              >
                 <Descriptions.Item label="聚类间隔阈值">
                   {ops.clusterGapS} 秒
                   <Typography.Text type="secondary">
@@ -348,7 +391,11 @@ export default function OpsPage() {
                 {ops.queries.map((q) => (
                   <Descriptions.Item
                     key={q.key}
-                    label={<span className="mono">{q.key}</span>}
+                    label={
+                      <span className="mono token" title={q.key}>
+                        {q.key}
+                      </span>
+                    }
                   >
                     每 {q.intervalS} 秒一次，每次取 {q.amount} 行
                   </Descriptions.Item>
@@ -357,15 +404,53 @@ export default function OpsPage() {
             </Card>
 
             <Card className="flush-card" title="最近的采集">
-              <Table
-                rowKey={(r) => `${r.queryKey}-${r.at}`}
-                size="small"
-                columns={columns}
-                dataSource={ops.polls}
-                pagination={false}
-                scroll={{ x: 760, y: 420 }}
-                locale={{ emptyText: "还没有采集记录" }}
-              />
+              {wide ? (
+                <Table
+                  rowKey={(r) => `${r.queryKey}-${r.at}`}
+                  size="small"
+                  columns={columns}
+                  dataSource={ops.polls}
+                  pagination={false}
+                  scroll={{ x: 760, y: 420 }}
+                  locale={{ emptyText: "还没有采集记录" }}
+                />
+              ) : (
+                // 手机上一次一行。表格要横滚才看得到计数，自带的纵向滚动还会把整页的滑动截住。
+                <List
+                  size="small"
+                  dataSource={ops.polls}
+                  locale={{ emptyText: "还没有采集记录" }}
+                  renderItem={(r) => (
+                    <List.Item>
+                      <div style={{ width: "100%" }}>
+                        <div className="pending-card-top">
+                          <Typography.Text type="secondary">
+                            {time.atShort(r.at)}
+                          </Typography.Text>
+                          <span className="mono token" title={r.queryKey}>
+                            {r.queryKey}
+                          </span>
+                        </div>
+                        <span className="mono">
+                          {r.fetched} / {r.parsed} / {r.written}
+                        </span>
+                        <Typography.Text type="secondary">
+                          {" "}
+                          取回 / 解析 / 写入，{r.ms} ms{" "}
+                        </Typography.Text>
+                        {r.ok ? (
+                          <Tag color="green">正常</Tag>
+                        ) : (
+                          <>
+                            <Tag color="red">失败</Tag>
+                            <span className="mono">{r.errorMsg}</span>
+                          </>
+                        )}
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              )}
             </Card>
           </>
         )}

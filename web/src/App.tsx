@@ -22,10 +22,12 @@ function Themed() {
         algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
         token: { colorPrimary: '#1677ff', borderRadius: 8, fontSize: 14 },
         components: {
+          // 用 antd 自己导出的颜色变量。以前引用的 --app-bg 和 --app-elevated
+          // 从没定义过，暗色下侧边栏拼成了几块颜色。
           Layout: {
-            bodyBg: 'var(--app-bg)',
-            headerBg: 'var(--app-elevated)',
-            siderBg: 'var(--app-elevated)',
+            bodyBg: 'var(--ant-color-bg-layout)',
+            headerBg: 'var(--ant-color-bg-container)',
+            siderBg: 'var(--ant-color-bg-container)',
           },
           Menu: { itemBorderRadius: 7 },
         },

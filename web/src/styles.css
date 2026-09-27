@@ -182,18 +182,45 @@ select {
 
 /* ---- 卡片与表格 ---- */
 
-/* 表格贴着卡片内壁，分页留出和卡片头一致的内边距 */
-.flush-card .ant-card-body {
+/* 表格贴着卡片内壁。只清外层这一张的：写成后代选择器的话，手机上一条一张的
+   小卡片也跟着没了内边距，时间和信道名直接压在边框上。 */
+.flush-card > .ant-card-body {
   padding: 0;
+}
+
+/* 卡片头和表格格子用同一个左右内边距，工具栏和下面的内容对齐。 */
+.flush-card > .ant-card-head {
+  padding-inline: 16px;
+}
+
+/* 手机上的卡片列表在外层卡片里留一圈边，小卡片不贴着外框。 */
+.flush-card > .ant-card-body > .ant-list {
+  padding: 12px;
 }
 
 .flush-card .ant-table-wrapper {
   overflow: hidden;
 }
 
-/* 只管正常的数据格。展开行里是备注和改动历史，那些要能换行。 */
+/* 只管正常的数据格。展开行里是备注和改动历史，那些要能换行。
+   装不下的截成省略号，不压到隔壁列上。固定在右边的操作列除外，
+   它的阴影画在格子外面，一截就没了。 */
 .flush-card .ant-table-cell {
   white-space: nowrap;
+}
+
+.flush-card
+  .ant-table-tbody
+  .ant-table-cell:not([class*="ant-table-cell-fix"]):not(.ant-table-row-expand-icon-cell):not(
+    .ant-table-selection-column
+  ) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 操作列里一排文字按钮。antd 默认的左右内边距让三个按钮放不进一格。 */
+.compact-links .ant-btn {
+  padding-inline: 6px;
 }
 
 .flush-card .ant-table-expanded-row .ant-table-cell {
@@ -258,6 +285,17 @@ select {
   overflow-wrap: anywhere;
 }
 
+/* 查询名这类短记号不从中间断开，src:4616460 断成两行就认不出来了。
+   名字是人填的，没有长度上限。上限用 vw，百分比在表格里量不出宽度，长名字会把整页撑宽。 */
+.mono.token {
+  display: inline-block;
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
 .only-narrow {
   display: none !important;
 }
@@ -291,9 +329,13 @@ select {
   .page-head h1 {
     font-size: 21px !important;
   }
-  .stat-row,
-  .stat-row-4 {
+  /* 运维页那四格不在这里，照 900px 那条两两一行。一格一行的话，
+     最近一次采集要滑到第三屏。 */
+  .stat-row:not(.stat-row-4) {
     grid-template-columns: 1fr;
+  }
+  .flush-card > .ant-card-head {
+    padding-inline: 12px;
   }
   .card-toolbar {
     display: grid;
@@ -341,6 +383,21 @@ select {
   margin-block-end: 6px;
 }
 
+/* 右边是信道名。长的换行，不挤出卡片。弹性布局的子项默认不收缩，要给 0。 */
+.pending-card-top > * {
+  min-width: 0;
+}
+
+.pending-card-top > :first-child {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.pending-card-top > :last-child {
+  text-align: end;
+  overflow-wrap: anywhere;
+}
+
 .pending-card-call {
   font-size: 20px;
   font-weight: 600;
@@ -357,8 +414,43 @@ select {
   flex: 1;
 }
 
-/* 手机上贴着底边的保存条。表单长，填完就地存，不用滚回顶上。 */
+/* 设置页里一条一条的表：信道、频谱表、查询。每条一个带边框的块，每格带标签，
+   窄屏上折成几行也认得出是哪一格。 */
+.list-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0 12px;
+  align-items: end;
+  padding: 12px 12px 0;
+  margin-block-end: 12px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+}
+
+.list-row .ant-form-item {
+  margin-block-end: 12px;
+}
+
+.list-row-remove {
+  justify-self: start;
+  margin-block-end: 12px;
+}
+
+/* 快速补录的入库按钮。手机上贴着底边，表单十几格，填完不用滑到最底下。 */
+@media (max-width: 767px) {
+  .form-submit {
+    position: sticky;
+    inset-block-end: 0;
+    z-index: 10;
+    padding-block: 12px calc(12px + env(safe-area-inset-bottom));
+    background: var(--ant-color-bg-container);
+  }
+}
+
+/* 手机上贴着底边的保存条。表单长，填完就地存，不用滚回顶上。
+   要压在输入框上面：数字框的前后缀自己带层级，不给的话会画到保存条上。 */
 .sticky-save {
+  z-index: 10;
   position: sticky;
   inset-block-end: 0;
   margin-block-start: 16px;
