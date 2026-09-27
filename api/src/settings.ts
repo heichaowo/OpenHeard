@@ -189,12 +189,15 @@ export function writeSettings(config: Config, next: Settings): void {
   if (typeof next.brandmeisterEnabled === 'boolean') raw.brandmeisterEnabled = next.brandmeisterEnabled;
 
   if (next.analog !== undefined && next.analog !== null) {
-    const before = isObject(raw.analog) ? raw.analog : {};
+    const before = isObject(raw.analog) ? raw.analog : undefined;
     if (blankAnalog(next.analog)) {
-      // 只是切换开关，或者压根没配过模拟守听：channels 一律不碰。只有真的
-      // 带着 enabled 才写它，纯粹空对象（保存本台信息时表单顺带交上来的）
-      // 什么都不做，不能凭空造出一个空的 analog 段。
-      if (typeof next.analog.enabled === 'boolean') raw.analog = { ...before, enabled: next.analog.enabled };
+      // 只是切换开关：channels 一律不碰，只改 enabled。文件里压根没有
+      // analog 段的话，「没配过模拟守听时表单顺带带上一个空对象」和
+      // 「单独把开关切一下」长得一样，分不清哪种，一律当没交，不能凭空
+      // 造出一个新的 analog 段。
+      if (typeof next.analog.enabled === 'boolean' && before !== undefined) {
+        raw.analog = { ...before, enabled: next.analog.enabled };
+      }
     } else {
       // recordingsDir 是路径，不在界面上改，保留文件里原来那个。
       const merged: Record<string, unknown> = { ...before, ...next.analog };

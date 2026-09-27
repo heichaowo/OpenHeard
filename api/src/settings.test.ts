@@ -257,3 +257,117 @@ describe('writeSettings', () => {
     assert.equal(statSync(path).mode & 0o777, 0o600);
   });
 });
+
+describe('checkSettings：开关', () => {
+  it('BrandMeister 关着，queries 缺失或者空数组都不拦', () => {
+    assert.deepEqual(checkSettings({ ...ok, brandmeisterEnabled: false, queries: undefined }), []);
+    assert.deepEqual(checkSettings({ ...ok, brandmeisterEnabled: false, queries: [] }), []);
+  });
+
+  it('BrandMeister 关着，也不强求网络记账频率', () => {
+    assert.deepEqual(
+      checkSettings({
+        ...ok,
+        brandmeisterEnabled: false,
+        queries: [],
+        station: { myCallsign: 'BG0CG' },
+      }),
+      [],
+    );
+  });
+
+  it('BrandMeister 关着，传了的 queries 条目还是照样验', () => {
+    const problems = checkSettings({
+      ...ok,
+      brandmeisterEnabled: false,
+      queries: [{ key: 'dst:91' }],
+    });
+    assert.ok(problems.length > 0);
+  });
+
+  // Form.Item 挂着但隐藏，表单原样把加载时的 analog 交回来，只多一个 enabled:false。
+  it('模拟守听关着，提交的还是完整信道表时照样全验一遍，合规就不拦', () => {
+    assert.deepEqual(
+      checkSettings({
+        ...ok,
+        analog: { channels: [{ freqMhz: 145.5, channel: '145.500 直频' }], enabled: false },
+      }),
+      [],
+    );
+  });
+
+  it('模拟守听关着，只给 enabled:false（没有别的字段）不拦，当成没交', () => {
+    assert.deepEqual(checkSettings({ ...ok, analog: { enabled: false } }), []);
+  });
+
+  it('模拟守听关着，提交的信道表本身有问题还是拦', () => {
+    const problems = checkSettings({
+      ...ok,
+      analog: { channels: [{ freqMhz: 100, channel: 'x' }], enabled: false },
+    });
+    assert.ok(problems.some((p) => p.includes('2m 或 70cm')));
+  });
+});
+
+describe('writeSettings：开关', () => {
+  it('BrandMeister 关着、queries 没给：文件里原来那份留着', () => {
+    const { path, config } = written();
+
+    writeSettings(config, { ...ok, brandmeisterEnabled: false, queries: undefined } as unknown as Settings);
+
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as { queries: unknown[] };
+    assert.deepEqual(raw.queries, base.queries);
+  });
+
+  it('模拟守听关着：只写 enabled，channels 原样留着', () => {
+    const { path, config } = written();
+
+    writeSettings(config, { ...ok, analog: { enabled: false } } as unknown as Settings);
+
+    const again = loadConfig(path);
+    assert.ok(again.ok);
+    assert.equal(again.config.analog?.enabled, false);
+    assert.deepEqual(again.config.analog?.channels, [{ freqMhz: 438.7, channel: '438.700 直频' }]);
+    assert.equal(config.analog?.enabled, false);
+  });
+
+  it('没配过模拟守听时单独关掉：不凭空造出一段空 analog', () => {
+    const { path, config } = written({ analog: undefined });
+
+    writeSettings(config, { ...ok, analog: { enabled: false } } as unknown as Settings);
+
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    assert.equal(raw.analog, undefined);
+    assert.equal(config.analog, undefined);
+  });
+
+  it('关了又开：enabled 跟着变，channels 全程没动过', () => {
+    const { path, config } = written();
+
+    writeSettings(config, { ...ok, analog: { enabled: false } } as unknown as Settings);
+    writeSettings(config, { ...ok, analog: { enabled: true } } as unknown as Settings);
+
+    const again = loadConfig(path);
+    assert.ok(again.ok);
+    assert.equal(again.config.analog?.enabled, true);
+    assert.deepEqual(again.config.analog?.channels, [{ freqMhz: 438.7, channel: '438.700 直频' }]);
+  });
+
+  it('写出来的东西自己读不回来就不落盘，原文件不变', () => {
+    const { path, config } = written();
+    const before = readFileSync(path, 'utf8');
+
+    assert.throws(() => writeSettings(config, { ...ok, queries: [{ key: 'dst:91' }] } as unknown as Settings));
+
+    assert.equal(readFileSync(path, 'utf8'), before);
+  });
+
+  it('brandmeisterEnabled 和 recordingsDir 也跟着写完之后的新值就地更新', () => {
+    const { config } = written();
+
+    writeSettings(config, { ...ok, brandmeisterEnabled: false, queries: [] });
+
+    assert.equal(config.brandmeisterEnabled, false);
+    assert.ok(config.recordingsDir.length > 0);
+  });
+});
