@@ -141,4 +141,32 @@ describe('watchAnalog', () => {
     ] };
     assert.throws(() => watchAnalog(bad, () => undefined), /最多 1.8 MHz/);
   });
+
+  // 关掉、重调、退出都走 stop()。正在收的那次发射不能白白丢掉：收尾要
+  // 和正常关闭一样，写录音、推事件。
+  it('停下来时还开着的那次照常收尾，写录音、推事件', async () => {
+    const rec = mkdtempSync(join(tmpdir(), 'openheard-rec-'));
+    // 只有开头一段噪声定基准，之后一直是载波，流结束时静噪还开着。
+    const bin = fakeRtlSdr(iq([['noise', 1], ['carrier', 1]]));
+    const events: Activity[] = [];
+    let exited = false;
+    const radio = watchAnalog(cfg(bin, rec), (a) => events.push(a), () => {
+      exited = true;
+    });
+    try {
+      // 假 rtl_sdr 很快把这段数据吐完退出，静噪这时还没等到收尾的噪声。
+      await until(() => exited);
+      assert.equal(events.length, 0, '流结束时还不该有事件——还没调用 stop()');
+
+      radio.stop();
+
+      assert.equal(events.length, 1);
+      const e = events[0]!;
+      assert.equal(e.channel, '438.500 中继');
+      assert.ok(near(e.durationS, 1, 0.15), `时长 ${e.durationS}`);
+      assert.ok(statSync(join(rec, `${e.id}.wav`)).size > 44, '录音要真的写下来，不只是记了个事件');
+    } finally {
+      radio.stop();
+    }
+  });
 });

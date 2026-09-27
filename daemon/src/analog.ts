@@ -236,38 +236,45 @@ function listen(
     const audio = closedNow ? captured.slice(0, capturedN) : undefined;
     if (closedNow) capturedN = 0;
 
-    if (event && audio) {
-      // 只有 CRC 通过且 unit ID 相等才算本台。op 和 arg 不参与判定。
-      const frames = cfg.myUnitId === undefined ? [] : decodeMdc(audio, rate);
-      const mine = frames.some((f) => f.unitId === cfg.myUnitId);
-      if (frames.length > 0) {
-        const list = frames
-          .map(
-            (f) =>
-              `${f.unitId.toString(16).toUpperCase().padStart(4, '0')}` +
-              `/${f.arg === 0x80 ? 'BOT' : f.arg === 0x00 ? 'EOT' : `arg${f.arg}`}` +
-              `@${(f.atSample / rate).toFixed(2)}s`,
-          )
-          .join(' ');
-        console.log(`${mhz} MHz 解出 ${frames.length} 个 MDC 帧: ${list}`);
-      }
+    if (event && audio) emit(event, audio);
+  };
 
-      const activity: Activity = {
-        id: eventId(ch.channel, event.startAt),
-        origin: 'sdr-fm',
-        startAt: Math.round(event.startAt),
-        durationS: Number(event.durationS.toFixed(2)),
-        mine,
-        freqMhz: mhz,
-        channel: ch.channel,
-        audioSnrDb: Number(event.audioSnrDb.toFixed(1)),
-      };
-      const buf = wav(audio, rate);
-      if (cfg.recordingsDir) {
-        writeFileSync(join(cfg.recordingsDir, `${activity.id}.wav`), buf);
-      }
-      onEvent(activity, buf);
+  /**
+   * 把一个静噪事件变成一条 Activity：解 MDC、判本台、写 wav、回调。block()
+   * 里正常关闭的事件和 flush() 里收尾时还开着的那次共用这一份，否则两处
+   * 各写一遍，字段迟早会对不上。
+   */
+  const emit = (event: SquelchEvent, audio: Int16Array): void => {
+    // 只有 CRC 通过且 unit ID 相等才算本台。op 和 arg 不参与判定。
+    const frames = cfg.myUnitId === undefined ? [] : decodeMdc(audio, rate);
+    const mine = frames.some((f) => f.unitId === cfg.myUnitId);
+    if (frames.length > 0) {
+      const list = frames
+        .map(
+          (f) =>
+            `${f.unitId.toString(16).toUpperCase().padStart(4, '0')}` +
+            `/${f.arg === 0x80 ? 'BOT' : f.arg === 0x00 ? 'EOT' : `arg${f.arg}`}` +
+            `@${(f.atSample / rate).toFixed(2)}s`,
+        )
+        .join(' ');
+      console.log(`${mhz} MHz 解出 ${frames.length} 个 MDC 帧: ${list}`);
     }
+
+    const activity: Activity = {
+      id: eventId(ch.channel, event.startAt),
+      origin: 'sdr-fm',
+      startAt: Math.round(event.startAt),
+      durationS: Number(event.durationS.toFixed(2)),
+      mine,
+      freqMhz: mhz,
+      channel: ch.channel,
+      audioSnrDb: Number(event.audioSnrDb.toFixed(1)),
+    };
+    const buf = wav(audio, rate);
+    if (cfg.recordingsDir) {
+      writeFileSync(join(cfg.recordingsDir, `${activity.id}.wav`), buf);
+    }
+    onEvent(activity, buf);
   };
 
   return {
@@ -300,9 +307,17 @@ function listen(
       };
     },
 
+    /**
+     * 主动停（切换、重调、退出）时收尾：还开着的那次和正常关闭一样处理，
+     * 写录音、推事件，不是白白丢掉。detector.flush() 已经按 minDurationS
+     * 过滤过，太短的那次不会到这里。
+     */
     flush(): void {
       const last = detector.flush();
-      if (last) console.error(`${mhz} MHz 收尾时还有一次未闭合的发射，时长 ${last.durationS.toFixed(2)} 秒`);
+      if (!last) return;
+      console.error(`${mhz} MHz 收尾时还有一次未闭合的发射，时长 ${last.durationS.toFixed(2)} 秒，照常记下`);
+      emit(last, captured.slice(0, capturedN));
+      capturedN = 0;
     },
   };
 }
