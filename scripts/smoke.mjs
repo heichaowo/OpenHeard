@@ -98,6 +98,14 @@ try {
   const withSession = await fetch(`${BASE}/api/qsos`, { headers: { cookie } });
   check('带上会话就读得到日志', withSession.status === 200 && Array.isArray(await withSession.json()));
 
+  const unlogged = await fetch(`${BASE}/api/conversations?view=unlogged`, { headers: { cookie } });
+  check('未入库视图应答 200', unlogged.status === 200, `HTTP ${unlogged.status}`);
+
+  const backup = await fetch(`${BASE}/api/backup`, { headers: { cookie } });
+  const backupHead = backup.status === 200 ? new Uint8Array(await backup.arrayBuffer()).slice(0, 16) : new Uint8Array();
+  const backupMagic = Buffer.from(backupHead).toString('utf8');
+  check('备份下载应答 200，是一份真的 SQLite 文件', backup.status === 200 && backupMagic === 'SQLite format 3\0', `HTTP ${backup.status}`);
+
   // 采集入口，顺带验证真的写进了磁盘上那个库
   const ingest = await fetch(`${BASE}/api/ingest/activity`, {
     method: 'POST',
