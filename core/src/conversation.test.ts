@@ -190,7 +190,7 @@ describe('extendChannel', () => {
   it('往前扩之后新的首行还碰边界，继续扩，直到不再碰为止', () => {
     let calls = 0;
     const firstLo = 1000 - 7200;
-    const clusters = extendChannel([at('a', 1000, 5)], 1000, 3000, gap, (from, to) => {
+    const clusters = extendChannel([at('a', 1000, 5)], 1000, 3000, gap, (from) => {
       calls += 1;
       if (calls === 1) {
         // 第一次扩：读到的 b 紧贴新窗口起点，逼着再扩一次

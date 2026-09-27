@@ -95,6 +95,16 @@ export interface PendingItem {
   draft: QsoDraft;
 }
 
+/**
+ * 一段里挑中的那几次发射。按 cluster.id 批量忽略的旧接口用它，
+ * 新的 /api/conversations/ignore 认的是 {id, activityIds}。
+ * 留着这个类型只是给还没跟上这份合同的调用方过编译，backend 自己不再用它。
+ */
+export interface ClusterPick {
+  clusterId: string;
+  activityIds: string[];
+}
+
 /** 对话的五档。 */
 export type ConversationStatus = 'pending' | 'unlogged' | 'logged' | 'ignored' | 'overheard';
 
