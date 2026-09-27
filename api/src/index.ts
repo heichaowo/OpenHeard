@@ -19,16 +19,27 @@ if (result.ok) {
   console.log(`数据库第 ${userVersion(db)} 版：${result.config.dbPath}`);
   // 构建产物在仓库里的固定位置，不跟 cwd 走。
   const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));
+  const store = createStore(db, result.config);
   app = createApp(
-    createStore(db, result.config),
+    store,
     result.config.ingestToken,
     {
       passwordHash: result.config.adminPasswordHash,
       sessionSecret: result.config.sessionSecret,
     },
-    { webDist, recordingsDir: result.config.recordingsDir },
+    {
+      webDist,
+      // 传函数，每次请求都重新问配置：设置页加上模拟守听之后，录音路由
+      // 要立刻能用，不等这个进程重启。
+      recordingsDir: () => result.config.recordingsDir,
+      dbPath: result.config.dbPath,
+    },
   );
   console.log(existsSync(webDist) ? `管理端界面：${webDist}` : `没有管理端界面，跑 npm run build --prefix web`);
+
+  // 发射行的保留期裁剪不等轮询触发：模拟和数字两路都关着时，也不能什么都不裁。
+  store.prune();
+  setInterval(() => store.prune(), 3600_000);
 } else {
   for (const p of result.problems) console.error(`配置: ${p}`);
   app = createBrokenApp(result.problems);

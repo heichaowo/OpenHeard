@@ -4,6 +4,14 @@ import { userVersion } from './migrations.ts';
 /** 备份前后各数一遍的那几张表。 */
 const TABLES = ['activity', 'resolved_activity', 'qso', 'poll_log'];
 
+/**
+ * 备份文件名里那段时刻。CLI 脚本和管理端下载路由共用同一个格式，
+ * 文件名才不会因为走的是哪条路而长得不一样。
+ */
+export function backupStamp(now = new Date()): string {
+  return now.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+}
+
 export function tableCounts(db: DatabaseSync): Record<string, number> {
   const out: Record<string, number> = {};
   for (const t of TABLES) {

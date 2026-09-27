@@ -33,13 +33,17 @@ export interface Config {
   station: StationDefaults;
   channels: Channel[];
   queries: Query[];
+  /** BrandMeister 查询的开关，缺省开。关着时 queries 可以是空的，原样留在文件里。 */
+  brandmeisterEnabled: boolean;
   /**
    * 模拟侧每次发射的音频落在哪里。守护进程写，api 读着发出去。
    *
    * 这一项本来是守护进程那半边的（在 analog 里），api 也读它，因为两边共用
-   * 同一份配置文件，而且按规范这两个进程跑在同一台机器上。
+   * 同一份配置文件，而且按规范这两个进程跑在同一台机器上。不管有没有
+   * analog 那一段都会给出一个值，缺省和守护进程那边同一个 `./recordings`，
+   * 这样从设置页加上模拟守听之后，录音路由不用等 api 重启就能用。
    */
-  recordingsDir?: string;
+  recordingsDir: string;
   /** 模拟守听里人能改的那几项。守护进程那边还会多读 recordingsDir。 */
   analog?: {
     /** 同一支接收机守的几个信道。 */
@@ -48,6 +52,8 @@ export interface Config {
     myUnitId?: string;
     openMarginDb?: number;
     closeMarginDb?: number;
+    /** 模拟守听的开关，缺省开。关着时这份表还留着，界面收起但不清空。 */
+    enabled: boolean;
   };
   /** 配置文件自己的路径。写设置的时候要写回这里。 */
   path: string;
@@ -101,10 +107,12 @@ export function loadConfig(path: string): ConfigResult {
   if (!isObject(raw.station)) problems.push('station 必填');
   if (!Array.isArray(raw.channels)) problems.push('channels 必填，可以是空数组');
 
+  const brandmeisterEnabled = raw.brandmeisterEnabled !== false;
   const queries = raw.queries;
-  problems.push(...checkQueries(queries));
+  problems.push(...checkQueries(queries, brandmeisterEnabled));
   // 守护进程读到坏的信道表会直接退出。装机前的检查用的是这里，要在这里就拦下。
-  if (isObject(raw.analog)) problems.push(...readAnalogChannels(raw.analog).problems);
+  const analogEnabled = isObject(raw.analog) && raw.analog.enabled !== false;
+  if (isObject(raw.analog)) problems.push(...readAnalogChannels(raw.analog, analogEnabled).problems);
 
   if (problems.length > 0) return { ok: false, problems };
   return {
@@ -115,6 +123,7 @@ export function loadConfig(path: string): ConfigResult {
       // api/ 起的服务和你在仓库根手敲的备份命令会指向两个不同的文件。
       dbPath: resolve(dirname(path), raw.dbPath as string),
       host: typeof raw.host === 'string' ? raw.host : '127.0.0.1',
+      brandmeisterEnabled,
       recordingsDir: recordingsDirOf(raw, path),
       analog: analogOf(raw),
       path: resolve(path),
@@ -130,10 +139,12 @@ export function loadConfig(path: string): ConfigResult {
 function analogOf(raw: Record<string, unknown>): Config['analog'] {
   const a = raw.analog;
   if (!isObject(a)) return undefined;
-  const { channels } = readAnalogChannels(a);
+  const enabled = a.enabled !== false;
+  const { channels } = readAnalogChannels(a, enabled);
   if (channels === undefined) return undefined;
   return {
     channels,
+    enabled,
     gainDb: typeof a.gainDb === 'number' ? a.gainDb : undefined,
     myUnitId: typeof a.myUnitId === 'string' ? a.myUnitId : typeof a.unitId === 'string' ? a.unitId : undefined,
     // 报生效值，不报「文件里没写」。设置页照着它填表，显示空白的话人会
@@ -143,10 +154,14 @@ function analogOf(raw: Record<string, unknown>): Config['analog'] {
   };
 }
 
-/** analog.recordingsDir，缺省和守护进程那边同一个值。没有 analog 段就没有录音。 */
-function recordingsDirOf(raw: Record<string, unknown>, path: string): string | undefined {
+/**
+ * analog.recordingsDir，缺省和守护进程那边同一个值。
+ *
+ * 不管有没有 analog 那一段都给一个值：设置页从没有模拟守听加上一段之后，
+ * 录音路由和裁剪要立刻按它工作，不等 api 重启。
+ */
+function recordingsDirOf(raw: Record<string, unknown>, path: string): string {
   const a = raw.analog;
-  if (!isObject(a)) return undefined;
-  const dir = typeof a.recordingsDir === 'string' ? a.recordingsDir : './recordings';
+  const dir = isObject(a) && typeof a.recordingsDir === 'string' ? a.recordingsDir : './recordings';
   return resolve(dirname(path), dir);
 }

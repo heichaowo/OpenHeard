@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isValidCallsign, normalizeCallsign } from './callsign.ts';
+import { isValidCallsign, normalizeCallsign, prefixRange } from './callsign.ts';
 
 describe('normalizeCallsign', () => {
   it('去空格并转大写', () => {
@@ -23,5 +23,22 @@ describe('isValidCallsign', () => {
     expect(isValidCallsign('ABCDE')).toBe(false);
     expect(isValidCallsign('12345')).toBe(false);
     expect(isValidCallsign('BG0CG//P')).toBe(false);
+  });
+});
+
+describe('prefixRange', () => {
+  it('给出半开区间，边界在最后一个字符上加一', () => {
+    expect(prefixRange('BG')).toEqual(['BG', 'BH']);
+    expect(prefixRange('BG0CG')).toEqual(['BG0CG', 'BG0CH']);
+  });
+
+  it('范围能框住所有以这个前缀开头的字符串，也框不住别的', () => {
+    const [lo, hi] = prefixRange('BG0');
+    for (const s of ['BG0', 'BG0CG', 'BG0ZZZ']) {
+      expect(s >= lo && s < hi).toBe(true);
+    }
+    for (const s of ['BF9', 'BG1', 'BH0']) {
+      expect(s >= lo && s < hi).toBe(false);
+    }
   });
 });

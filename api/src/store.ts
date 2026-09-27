@@ -2,25 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from './config.ts';
+import { buildKnownMap, dayConversations, ORIGINS, searchConversations, unloggedConversations } from './conversations.ts';
+import type { ConversationPage } from './conversations.ts';
 import { checkHealth } from './health.ts';
 import type { Health } from './health.ts';
-import {
-  clusterActivities,
-  draftFromCluster,
-  knownCalls,
-  parseAdif,
-  missingFields,
-  normalizeCallsign,
-} from './core.ts';
-import type {
-  Channel,
-  Cluster,
-  ClusterPick,
-  PendingItem,
-  Qso,
-  QsoDraft,
-  StationDefaults,
-} from './core.ts';
+import { channelKey, clusterActivities, draftFromCluster, parseAdif, missingFields, normalizeCallsign } from './core.ts';
+import type { Activity, Channel, Cluster, PendingItem, Qso, QsoDraft, StationDefaults } from './core.ts';
 import {
   activityCounts,
   deleteQso,
@@ -30,9 +17,11 @@ import {
   pruneActivities,
   prunePollLog,
   resolveActivities,
+  selectActivitiesByIds,
   selectHeard,
   selectPollLog,
   selectQso,
+  selectQsoActivitiesMap,
   selectQsoHistory,
   selectQsos,
   selectUnresolvedActivities,
@@ -41,8 +30,12 @@ import {
 } from './db.ts';
 import type { HeardItem, IngestRow, PollLog, QsoChange } from './db.ts';
 import { recordingsSize, removeRecordings } from './recordings.ts';
+import { analogEffectivelyOn } from './radio.ts';
 import { checkSettings, settingsOf, writeSettings } from './settings.ts';
 import type { Settings } from './settings.ts';
+
+export { StoreError } from './store-error.ts';
+import { StoreError } from './store-error.ts';
 
 const nowS = () => Math.floor(Date.now() / 1000);
 
@@ -75,58 +68,50 @@ function machine() {
   };
 }
 
-/** 调用方能区分的三种失败。 */
-export class StoreError extends Error {
-  status: 404 | 409 | 422;
-  missing?: string[];
-
-  constructor(status: 404 | 409 | 422, message: string, missing?: string[]) {
-    super(message);
-    this.status = status;
-    this.missing = missing;
-  }
-}
-
 export interface PublicSource {
   station: () => StationDefaults;
   qsos: () => Qso[];
 }
 
-const ORIGINS: string[] = ['brandmeister', 'sdr-fm', 'sdr-dmr'];
 const HEARD_PAGE = 100;
 const HEARD_MAX = 200;
+
+type ActivityLookup = Map<string, { activity: Activity; resolved: boolean }>;
+
+/**
+ * 结算按发射 id 走的那五条检查，/promote 和 /ignore 共用。按顺序：非空、
+ * 不重复、都还在、都没结算过、都在同一条信道上。哪一条不过就抛对应的
+ * StoreError，调用方按需要接住或者让它一路抛出去变成 HTTP 状态。
+ */
+function checkIdSet(ids: string[], lookup: ActivityLookup): Activity[] {
+  if (ids.length === 0) throw new StoreError(422, '一次发射都没挑');
+  if (new Set(ids).size !== ids.length) throw new StoreError(422, '同一次发射不能挑两遍');
+  if (ids.some((id) => !lookup.has(id))) throw new StoreError(409, '这几次发射已经不在了，刷新后重试');
+  if (ids.some((id) => lookup.get(id)!.resolved)) throw new StoreError(409, '这几次发射已经结算过了，刷新后重试');
+  const activities = ids.map((id) => lookup.get(id)!.activity);
+  if (new Set(activities.map((a) => channelKey(a))).size > 1) {
+    throw new StoreError(422, '这几次发射不在同一条信道上');
+  }
+  return activities;
+}
+
+/** (start_at, id) 最小的那个，和 clusterActivities 排序一致。 */
+const smallestId = (activities: Activity[]): string =>
+  [...activities].sort((a, b) => a.startAt - b.startAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))[0]!.id;
 
 export function createStore(db: DatabaseSync, config: Config) {
   // 进程起来的时刻。健康检查靠它区分「刚装好还没轮询」和「轮询挂了」。
   const startedAt = nowS();
+  // BrandMeister 从关到开的那一刻。刚打开时还没来得及轮询，健康检查要按
+  // 这一刻给一段宽限，不是一直拿进程起来的时刻当基准。
+  let brandmeisterEnabledSince = config.brandmeisterEnabled ? startedAt : undefined;
+  const graceStart = () => brandmeisterEnabledSince ?? startedAt;
+
   /** 重新聚一次，拿到当前的待确认队列。 */
   const clusters = (): Cluster[] => {
     const since = nowS() - config.pendingWindowDays * 86400;
     const acts = selectUnresolvedActivities(db, since, config.dmrId);
-    return clusterActivities(acts, config.clusterGapS).filter((c) =>
-      c.activities.some((a) => a.mine),
-    );
-  };
-
-  const find = (clusterId: string): Cluster => {
-    const c = clusters().find((x) => x.id === clusterId);
-    // 两次请求之间可能又入库了更早的行，段的边界就变了。
-    if (!c) throw new StoreError(409, '这一段已经变了或已经处理过，刷新后重试');
-    return c;
-  };
-
-  /** 挑出这一段里的这几次发射。不给就是整段，给了就得真的属于这一段。 */
-  const subsetOf = (cluster: Cluster, ids?: string[]): string[] => {
-    const all = cluster.activities.map((a) => a.id);
-    if (ids === undefined) return all;
-    // 空数组是「一次都没挑」。当成整段的话，界面上把勾全去掉再点确认，
-    // 会把整段连同不相干的那一边一起结算掉。
-    if (ids.length === 0) throw new StoreError(422, '一次发射都没挑');
-    const outside = ids.filter((id) => !all.includes(id));
-    if (outside.length > 0) {
-      throw new StoreError(409, `这几次发射已经不在这一段里，刷新后重试：${outside.join('、')}`);
-    }
-    return ids;
+    return clusterActivities(acts, config.clusterGapS).filter((c) => c.activities.some((a) => a.mine));
   };
 
   const build = (draft: QsoDraft, clusterId?: string): Qso => {
@@ -137,34 +122,65 @@ export function createStore(db: DatabaseSync, config: Config) {
     return { ...full, id: randomUUID(), createdAt: nowS() } as Qso;
   };
 
+  /**
+   * activity 的保留期、poll_log 的保留期、连带录音一起裁。logPoll 每次轮询
+   * 都跑一遍，api 自己还按小时跑一遍——两路都关着的时候没有轮询上门，
+   * 不能靠它触发，不然什么都不裁。
+   */
+  const prune = (): void => {
+    prunePollLog(db, nowS() - 30 * 86400);
+    const keepDays = Math.max(config.activityRetentionDays, config.pendingWindowDays);
+    const gone = pruneActivities(db, nowS() - keepDays * 86400);
+    if (gone.length > 0) removeRecordings(config.recordingsDir, gone);
+  };
+
+  const switches = (): { analogEnabled: boolean; brandmeisterEnabled: boolean } => ({
+    analogEnabled: analogEffectivelyOn(config.analog),
+    brandmeisterEnabled: config.brandmeisterEnabled,
+  });
+
   return {
-    station: (): { station: StationDefaults; channels: Channel[] } => ({
+    station: (): {
+      station: StationDefaults;
+      channels: Channel[];
+      analogEnabled: boolean;
+      brandmeisterEnabled: boolean;
+    } => ({
       station: config.station,
       channels: config.channels,
+      ...switches(),
     }),
+
+    switches,
 
     settings: (): Settings => settingsOf(config, config.analog),
 
     /** 写回配置文件并就地更新内存里那份。守护进程自己盯着文件，会跟着改。 */
     saveSettings: (next: unknown): Settings => {
-      const problems = checkSettings(next, config.analog);
+      const problems = checkSettings(next, config);
       if (problems.length > 0) throw new StoreError(422, problems.join('，'));
+      const wasEnabled = config.brandmeisterEnabled;
       writeSettings(config, next as Settings);
+      if (!wasEnabled && config.brandmeisterEnabled) brandmeisterEnabledSince = nowS();
+      if (!config.brandmeisterEnabled) brandmeisterEnabledSince = undefined;
       // 用写完之后的 config，不要用请求体拼。拼出来的会掩盖没落盘的字段。
       return settingsOf(config, config.analog);
     },
 
     pending: (): PendingItem[] => {
-      // 对照表用整个保留期内的行来建，不只是队列里这几段。以前见过的呼号
-      // 才补得上，而队列里那几段本来就是缺呼号的那些。
-      const known = knownCalls(selectUnresolvedActivities(db, 0, config.dmrId));
-      return clusters().map((cluster) => ({
-        cluster,
-        draft: draftFromCluster(cluster, config.station, known),
-      }));
+      const segs = clusters();
+      // 只查 draftFromCluster 真的会用到的那几个 dmr id，不是整个保留期扫一遍。
+      const known = buildKnownMap(db, segs);
+      return segs.map((cluster) => ({ cluster, draft: draftFromCluster(cluster, config.station, known) }));
     },
 
     qsos: () => selectQsos(db),
+
+    /** 挂了每条通联用到的发射（id、开始时刻、时长），只给管理端用。 */
+    qsosWithActivities: (): (Qso & { activities: { id: string; startAt: number; durationS: number }[] })[] => {
+      const map = selectQsoActivitiesMap(db);
+      return selectQsos(db).map((q) => ({ ...q, activities: map.get(q.id) ?? [] }));
+    },
 
     qsoHistory: (id: string): QsoChange[] => selectQsoHistory(db, id),
 
@@ -173,11 +189,7 @@ export function createStore(db: DatabaseSync, config: Config) {
      *
      * @param cursor 上一页的 next，形如 `<时刻>:<id>`。
      */
-    heard: (q: {
-      origin?: string;
-      cursor?: string;
-      limit?: string;
-    }): { items: HeardItem[]; next?: string } => {
+    heard: (q: { origin?: string; cursor?: string; limit?: string }): { items: HeardItem[]; next?: string } => {
       if (q.origin !== undefined && !ORIGINS.includes(q.origin)) {
         throw new StoreError(422, `origin 只能是 ${ORIGINS.join('、')}`);
       }
@@ -191,11 +203,7 @@ export function createStore(db: DatabaseSync, config: Config) {
       }
       const items = selectHeard(
         db,
-        {
-          origin: q.origin,
-          before: m ? { startAt: Number(m[1]), id: m[2]! } : undefined,
-          limit,
-        },
+        { origin: q.origin, before: m ? { startAt: Number(m[1]), id: m[2]! } : undefined, limit },
         config.dmrId,
       );
       const last = items.at(-1);
@@ -204,57 +212,95 @@ export function createStore(db: DatabaseSync, config: Config) {
     },
 
     /**
-     * @param activityIds 只处理这一段里的这几次发射。不给就是整段。
-     *
-     * 聚类是按一个间隔阈值猜的，会猜错。两段对话被并成一段时，整段提升会把
-     * 两边的呼号和时长记成一条，整段忽略又把两边都丢掉。挑出属于这次通联的
-     * 那几次，剩下的下一轮重新聚类，自己会分出去。
+     * 收听页：按天看、未入库、按呼号搜，三选一。exactly one of from+to /
+     * view=unlogged / q，否则 422。
      */
-    promote: (clusterId: string, draft: QsoDraft, activityIds?: string[]): Qso => {
-      const cluster = find(clusterId);
-      const ids = subsetOf(cluster, activityIds);
-      const qso = build(draft, clusterId);
+    conversations: (q: {
+      from?: string;
+      to?: string;
+      view?: string;
+      q?: string;
+      origin?: string;
+      status?: string;
+      channel?: string;
+      cursor?: string;
+      limit?: string;
+    }): (ConversationPage & { channels?: { key: string; label: string }[]; total?: number }) => {
+      const wantsDay = q.from !== undefined || q.to !== undefined;
+      const wantsUnlogged = q.view !== undefined;
+      const wantsSearch = q.q !== undefined;
+      const count = Number(wantsDay) + Number(wantsUnlogged) + Number(wantsSearch);
+      if (count !== 1) {
+        throw new StoreError(422, '要在按天看（from、to）、view=unlogged、按呼号搜（q）三者里选一个');
+      }
+      const filters: { origin?: string; status?: string; channel?: string; cursor?: string; limit?: string } = {
+        origin: q.origin,
+        status: q.status,
+        channel: q.channel,
+        cursor: q.cursor,
+        limit: q.limit,
+      };
+
+      if (wantsDay) {
+        if (q.from === undefined || q.to === undefined) {
+          throw new StoreError(422, '按天看要同时给 from 和 to');
+        }
+        const from = Number(q.from);
+        const to = Number(q.to);
+        if (!Number.isInteger(from) || !Number.isInteger(to)) {
+          throw new StoreError(422, 'from 和 to 要是整数 Unix 秒');
+        }
+        return dayConversations(db, config, from, to, filters);
+      }
+      if (wantsUnlogged) {
+        if (q.view !== 'unlogged') throw new StoreError(422, 'view 只能是 unlogged');
+        return unloggedConversations(db, config, filters);
+      }
+      return searchConversations(db, config, q.q!, filters);
+    },
+
+    /**
+     * 按发射 id 结算成通联。检查顺序见 checkIdSet。服务端存下收到的草稿，
+     * 不重算开始时间和呼号——界面已经按挑中的那几次算过了。
+     */
+    promoteActivities: (activityIds: string[], draft: QsoDraft): Qso => {
+      const lookup = selectActivitiesByIds(db, activityIds, config.dmrId);
+      const activities = checkIdSet(activityIds, lookup);
+      const qso = build(draft, smallestId(activities));
       return withTx(db, () => {
         insertQso(db, qso);
-        resolveActivities(db, ids, qso.id, nowS());
+        resolveActivities(db, activityIds, qso.id, nowS());
         return qso;
       });
     },
 
-    ignore: (clusterId: string, activityIds?: string[]): void => {
-      const cluster = find(clusterId);
-      const ids = subsetOf(cluster, activityIds);
-      withTx(db, () => {
-        resolveActivities(db, ids, null, nowS());
-      });
-    },
-
     /**
-     * 一次忽略好几段。
-     *
-     * 一条一条调的话，每忽略一段就要重新聚类一次，剩下那些段的边界和 id 都会变，
-     * 后面几条于是全部 409。这里在同一次聚类结果上一起解决，一个事务写完。
-     *
-     * 每段只结算挑的时候看到的那几次。挑完到确认之间，同一段里可能进来一条
-     * 回复，段 id 不变。按段 id 整段忽略的话，这条回复没人看过就一起丢了。
+     * 一次忽略好几个对话，按发射 id。一条不过就把它记到 missing 里，不影响
+     * 别的；同一个请求里，后一条挑的 id 若已经被前一条有效的 pick 用过，
+     * 也算「已经结算过」。合法的那些一个事务写完。
      */
-    ignoreMany: (picks: ClusterPick[]): { ignored: number; missing: string[] } => {
-      const all = clusters();
+    ignoreActivities: (picks: { id: string; activityIds: string[] }[]): { ignored: number; missing: string[] } => {
+      const allIds = [...new Set(picks.flatMap((p) => p.activityIds))];
+      const base = selectActivitiesByIds(db, allIds, config.dmrId);
+      const usedByEarlier = new Set<string>();
       const settle: string[] = [];
       const missing: string[] = [];
+
       for (const pick of picks) {
-        const c = all.find((x) => x.id === pick.clusterId);
-        const ids = c?.activities.map((a) => a.id) ?? [];
-        if (pick.activityIds.length === 0 || pick.activityIds.some((id) => !ids.includes(id))) {
-          missing.push(pick.clusterId);
-        } else {
+        const lookup: ActivityLookup = new Map(
+          [...base].map(([id, v]) => [id, usedByEarlier.has(id) ? { ...v, resolved: true } : v]),
+        );
+        try {
+          checkIdSet(pick.activityIds, lookup);
+          for (const id of pick.activityIds) usedByEarlier.add(id);
           settle.push(...pick.activityIds);
+        } catch (e) {
+          if (!(e instanceof StoreError)) throw e;
+          missing.push(pick.id);
         }
       }
 
-      if (settle.length > 0) {
-        withTx(db, () => resolveActivities(db, settle, null, nowS()));
-      }
+      if (settle.length > 0) withTx(db, () => resolveActivities(db, settle, null, nowS()));
       return { ignored: picks.length - missing.length, missing };
     },
 
@@ -270,11 +316,7 @@ export function createStore(db: DatabaseSync, config: Config) {
     editQso: (id: string, draft: QsoDraft): Qso => {
       const existing = selectQso(db, id);
       if (!existing) throw new StoreError(404, '没有这条通联');
-      const qso = {
-        ...build(draft, existing.clusterId),
-        id: existing.id,
-        createdAt: existing.createdAt,
-      };
+      const qso = { ...build(draft, existing.clusterId), id: existing.id, createdAt: existing.createdAt };
       updateQso(db, qso, nowS());
       return qso;
     },
@@ -298,9 +340,7 @@ export function createStore(db: DatabaseSync, config: Config) {
       withTx(db, () => {
         drafts.forEach((draft, i) => {
           const call = draft.call === undefined ? undefined : normalizeCallsign(draft.call);
-          const key = call === undefined || draft.startAt === undefined
-            ? undefined
-            : dupKey(call, draft.startAt);
+          const key = call === undefined || draft.startAt === undefined ? undefined : dupKey(call, draft.startAt);
           if (key !== undefined && seen.has(key)) {
             skipped += 1;
             return;
@@ -332,21 +372,17 @@ export function createStore(db: DatabaseSync, config: Config) {
 
     logPoll: (p: PollLog): void => {
       insertPollLog(db, p);
-      prunePollLog(db, nowS() - 30 * 86400);
-      // 发射行裁掉了，对应的录音就没有任何东西指向它了。不一起删的话
-      // 那个目录只涨不减，而且涨得比库里任何一张表都快。
-      // 保留期比待确认窗口短时按窗口算。队列里还没处理的段不能被裁掉，
-      // 人还要靠它和它的录音去判断。
-      const keepDays = Math.max(config.activityRetentionDays, config.pendingWindowDays);
-      const gone = pruneActivities(db, nowS() - keepDays * 86400);
-      if (gone.length > 0) removeRecordings(config.recordingsDir, gone);
+      prune();
     },
 
-    health: (): Health => checkHealth(db, config, nowS(), startedAt),
+    /** api 自己按小时跑一遍裁剪，独立于轮询：两路都关着时没有轮询上门。 */
+    prune,
+
+    health: (): Health => checkHealth(db, config, nowS(), graceStart()),
 
     // 运维页一次拿齐，免得开三个请求各自过期。
     ops: () => ({
-      health: checkHealth(db, config, nowS(), startedAt),
+      health: checkHealth(db, config, nowS(), graceStart()),
       machine: machine(),
       recordings: recordingsSize(config.recordingsDir),
       polls: selectPollLog(db, 40),
@@ -356,6 +392,7 @@ export function createStore(db: DatabaseSync, config: Config) {
       activityRetentionDays: config.activityRetentionDays,
       pendingWindowDays: config.pendingWindowDays,
       now: nowS(),
+      ...switches(),
     }),
   };
 }

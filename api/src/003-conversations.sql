@@ -7,3 +7,6 @@ CREATE INDEX IF NOT EXISTS activity_talkgroup ON activity (talkgroup, start_at);
 CREATE INDEX IF NOT EXISTS activity_channel ON activity (channel, start_at);
 -- 搜呼号也要从日志里找：呼号来自发射行，也来自已经入库的通联。
 CREATE INDEX IF NOT EXISTS qso_call ON qso (call, start_at);
+-- 按信道窗口读到一行已入库的发射时，要一次性把它所在通联的全部成员找出来，
+-- 不管窗口边界，否则窗口切在半截会让同一次通联在两个视图里长得不一样。
+CREATE INDEX IF NOT EXISTS resolved_activity_qso ON resolved_activity (qso_id);

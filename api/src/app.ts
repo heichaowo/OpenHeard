@@ -6,12 +6,13 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { COOKIE, SESSION_DAYS, signSession, verifyPassword, verifySession } from './auth.ts';
-import type { ClusterPick, QsoDraft } from './core.ts';
+import { backupRoutes } from './backup-download.ts';
+import type { QsoDraft } from './core.ts';
 import type { IngestRow, PollLog } from './db.ts';
 import { publicRoutes } from './public.ts';
 import { recordingRoutes } from './recordings.ts';
 import { StoreError } from './store.ts';
-import { createRadioState, parseRadio } from './radio.ts';
+import { createRadioState, parseRadio, radiosOf } from './radio.ts';
 import { createThrottle } from './throttle.ts';
 import type { Store } from './store.ts';
 
@@ -22,10 +23,16 @@ const fail = (e: unknown) => {
   throw e;
 };
 
-const isPick = (x: unknown): x is ClusterPick => {
-  const p = x as Partial<ClusterPick> | null;
+/** /api/conversations/ignore 请求体里的一项：一个对话，挑中的那几次发射。 */
+interface IgnorePick {
+  id: string;
+  activityIds: string[];
+}
+
+const isPick = (x: unknown): x is IgnorePick => {
+  const p = x as Partial<IgnorePick> | null;
   return (
-    typeof p?.clusterId === 'string' &&
+    typeof p?.id === 'string' &&
     Array.isArray(p.activityIds) &&
     p.activityIds.every((id) => typeof id === 'string')
   );
@@ -49,10 +56,18 @@ export function createApp(
     loginThrottle?: ReturnType<typeof createThrottle>;
     /** 管理端 SPA 的构建产物目录。给了就在根路径上把它发出去。 */
     webDist?: string;
-    /** 模拟侧录音的目录。 */
-    recordingsDir?: string;
+    /**
+     * 模拟侧录音的目录。传一个函数就每次请求都重新问一遍——设置页加上
+     * 模拟守听之后这个目录要立刻能用，不等 api 重启；传一个值就当作
+     * 从头到尾不变，测试用这个更省事。
+     */
+    recordingsDir?: string | (() => string | undefined);
+    /** 数据库文件的路径。给了才挂 /api/backup，测试可以不给。 */
+    dbPath?: string;
   } = {},
 ) {
+  const recordingsDirOf =
+    typeof options.recordingsDir === 'function' ? options.recordingsDir : () => options.recordingsDir as string | undefined;
   const nowS = () => Math.floor(Date.now() / 1000);
   const throttle =
     options.loginThrottle ?? createThrottle({ windowMs: LOGIN_WINDOW_MS, max: LOGIN_MAX });
@@ -126,11 +141,18 @@ export function createApp(
       }
       await next();
     })
-    .get('/ops', (c) => c.json({ ...store.ops(), radios: radio.view(nowS()) }))
+    .get('/ops', (c) =>
+      c.json({ ...store.ops(), radios: radiosOf(radio, store.switches().analogEnabled, nowS()) }),
+    )
     .get('/station', (c) => c.json(store.station()))
     .get('/pending', (c) => c.json(store.pending()))
-    .get('/qsos', (c) => c.json(store.qsos()))
+    .get('/qsos', (c) => c.json(store.qsosWithActivities()))
     .get('/qsos/:id/history', (c) => c.json(store.qsoHistory(c.req.param('id'))))
+
+    // 电台此刻的样子。关着的时候一律是空数组，和 /api/ops 那份用同一个函数判。
+    .get('/radios', (c) =>
+      c.json({ analogEnabled: store.switches().analogEnabled, radios: radiosOf(radio, store.switches().analogEnabled, nowS()) }),
+    )
 
     .get('/activities', (c) => {
       try {
@@ -147,35 +169,48 @@ export function createApp(
       }
     })
 
-    .post('/pending/:clusterId/promote', async (c) => {
+    // 收听页：按天看（from/to）、view=unlogged、按呼号搜（q），三选一。
+    .get('/conversations', (c) => {
       try {
-        const body = (await c.req.json()) as QsoDraft & { activityIds?: string[] };
-        const { activityIds, ...draft } = body;
-        return c.json(store.promote(c.req.param('clusterId'), draft, activityIds));
+        return c.json(
+          store.conversations({
+            from: c.req.query('from'),
+            to: c.req.query('to'),
+            view: c.req.query('view'),
+            q: c.req.query('q'),
+            origin: c.req.query('origin'),
+            status: c.req.query('status'),
+            channel: c.req.query('channel'),
+            cursor: c.req.query('cursor'),
+            limit: c.req.query('limit'),
+          }),
+        );
       } catch (e) {
         const { status, body } = fail(e);
         return c.json(body, status);
       }
     })
 
-    .post('/pending/ignore', async (c) => {
+    .post('/conversations/promote', async (c) => {
+      try {
+        const body = (await c.req.json()) as QsoDraft & { activityIds?: unknown };
+        const { activityIds, ...draft } = body;
+        if (!Array.isArray(activityIds) || !activityIds.every((id) => typeof id === 'string')) {
+          return c.json({ error: 'activityIds 要是字符串数组' }, 422);
+        }
+        return c.json(store.promoteActivities(activityIds, draft), 201);
+      } catch (e) {
+        const { status, body } = fail(e);
+        return c.json(body, status);
+      }
+    })
+
+    .post('/conversations/ignore', async (c) => {
       const { picks } = (await c.req.json()) as { picks?: unknown };
       if (!Array.isArray(picks) || !picks.every(isPick)) {
-        return c.json({ error: 'picks 要是 {clusterId, activityIds} 数组' }, 422);
+        return c.json({ error: 'picks 要是 {id, activityIds} 数组' }, 422);
       }
-      return c.json(store.ignoreMany(picks));
-    })
-
-    .delete('/pending/:clusterId', (c) => {
-      try {
-        // 只忽略其中几次发射：?activityIds=a,b
-        const only = c.req.query('activityIds');
-        store.ignore(c.req.param('clusterId'), only === undefined ? undefined : only.split(','));
-        return c.body(null, 204);
-      } catch (e) {
-        const { status, body } = fail(e);
-        return c.json(body, status);
-      }
+      return c.json(store.ignoreActivities(picks));
     })
 
     // ADIF 文本直接当请求体，不走 multipart。一个人从浏览器传一个文件，
@@ -209,7 +244,9 @@ export function createApp(
       }
     })
 
-    .route('/recordings', recordingRoutes(options.recordingsDir))
+    .route('/recordings', recordingRoutes(recordingsDirOf))
+
+    .route('/backup', options.dbPath === undefined ? new Hono() : backupRoutes(options.dbPath))
 
     .get('/settings', (c) => c.json(store.settings()))
 

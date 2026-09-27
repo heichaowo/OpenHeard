@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { callFor, knownCalls } from './known-calls.ts';
+import { callFor, dmrIdsNeedingLookup, knownCalls } from './known-calls.ts';
 import { draftFromCluster } from './draft.ts';
 import type { Activity, Cluster } from './types.ts';
 
@@ -70,5 +70,27 @@ describe('draftFromCluster 用对照表补呼号', () => {
     const known = knownCalls([act('old', { dmrId: 4616460, callsign: 'BG0CG' })]);
     const c = cluster([act('m', { mine: true, dmrId: 4616460 })]);
     expect(draftFromCluster(c, {}, known).call).toBeUndefined();
+  });
+});
+
+describe('dmrIdsNeedingLookup', () => {
+  it('已经有非本台呼号时不用查表', () => {
+    const members = [act('m', { mine: true, dmrId: 1 }), act('x', { dmrId: 2, callsign: 'BH7IBG' })];
+    expect(dmrIdsNeedingLookup(members)).toEqual([]);
+  });
+
+  it('没有非本台呼号时收集非本台成员的 dmr id', () => {
+    const members = [act('m', { mine: true, dmrId: 1 }), act('x', { dmrId: 2 }), act('y', { dmrId: 3 })];
+    expect(dmrIdsNeedingLookup(members)).toEqual([2, 3]);
+  });
+
+  it('本台自己的 dmr id 不收集', () => {
+    const members = [act('m', { mine: true, dmrId: 1 })];
+    expect(dmrIdsNeedingLookup(members)).toEqual([]);
+  });
+
+  it('没有 dmr id 的成员跳过', () => {
+    const members = [act('x', { dmrId: undefined, channel: 'A' })];
+    expect(dmrIdsNeedingLookup(members)).toEqual([]);
   });
 });

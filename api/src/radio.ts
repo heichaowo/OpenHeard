@@ -75,6 +75,23 @@ function parseOne(raw: unknown, now: number): RadioStatus | undefined {
   };
 }
 
+/**
+ * 模拟守听是不是有效地开着。判的是配置，不是「保存时清一次状态」：一个正在
+ * 停下来的守护进程可能还有一两批在途的状态，清状态挡不住它们把旧信道带回来，
+ * 只有在读的这一刻按配置过一遍才行。
+ */
+export function analogEffectivelyOn(analog: { enabled?: boolean } | undefined): boolean {
+  return analog !== undefined && analog.enabled !== false;
+}
+
+/**
+ * /api/radios 和 /api/ops 共用同一个函数，两边才不会说法不一样：关着的时候
+ * 一律是空数组，不是把上一批状态一直摆在那里。
+ */
+export function radiosOf(state: { view(now: number): RadioView[] }, analogEnabled: boolean, now: number): RadioView[] {
+  return analogEnabled ? state.view(now) : [];
+}
+
 export function createRadioState() {
   let latest: RadioStatus[] | undefined;
   /** 每个信道这次守听里离门限最近的一刻。 */

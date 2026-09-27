@@ -52,10 +52,15 @@ export function recordingsSize(dir: string | undefined): { files: number; bytes:
   return { files, bytes };
 }
 
-export function recordingRoutes(dir: string | undefined) {
+/**
+ * @param dirOf 每次请求都重新问一遍，不是建路由那一刻的快照。设置页从没有
+ *   模拟守听加上一段之后，这个目录要立刻能读能写，不等 api 重启。
+ */
+export function recordingRoutes(dirOf: () => string | undefined) {
   return new Hono()
     // 哪些发射有录音。界面据此决定给哪几行放播放器，免得挨个探一次 404。
     .get('/', (c) => {
+      const dir = dirOf();
       if (dir === undefined || !existsSync(dir)) return c.json<string[]>([]);
       const ids = readdirSync(dir)
         .filter((f) => f.endsWith('.wav'))
@@ -64,6 +69,7 @@ export function recordingRoutes(dir: string | undefined) {
     })
 
     .get('/:id', (c) => {
+      const dir = dirOf();
       if (dir === undefined) return c.json({ error: '没配模拟守听，没有录音' }, 404);
       const id = c.req.param('id');
       // id 来自 URL，不能让它跑出录音目录。

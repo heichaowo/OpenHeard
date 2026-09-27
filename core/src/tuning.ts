@@ -92,8 +92,14 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
  *
  * 以前只能守一个频率，写的是 analog.freqMhz 和 analog.channel。已经装出去的
  * 配置还是那样写，读成只有一个信道的表。
+ *
+ * @param required 模拟守听关着时传 false：没有信道表不算错，原来配过的
+ *   那张表留着不动，界面还要照它填表。有信道表的话照样全验一遍。
  */
-export function readAnalogChannels(analog: Record<string, unknown>): {
+export function readAnalogChannels(
+  analog: Record<string, unknown>,
+  required = true,
+): {
   channels?: AnalogChannel[];
   problems: string[];
 } {
@@ -102,7 +108,9 @@ export function readAnalogChannels(analog: Record<string, unknown>): {
     : analog.channels === undefined && analog.freqMhz !== undefined
       ? [{ freqMhz: analog.freqMhz, channel: analog.channel }]
       : [];
-  if (raw.length === 0) return { problems: ['analog.channels 至少要有一个信道'] };
+  if (raw.length === 0) {
+    return required ? { problems: ['analog.channels 至少要有一个信道'] } : { channels: [], problems: [] };
+  }
 
   const problems: string[] = [];
   raw.forEach((c, i) => {

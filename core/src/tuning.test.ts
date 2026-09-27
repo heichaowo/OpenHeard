@@ -103,3 +103,16 @@ describe('readAnalogChannels', () => {
     expect(readAnalogChannels({ channels: [] }).problems).toEqual(['analog.channels 至少要有一个信道']);
   });
 });
+
+describe('readAnalogChannels：模拟守听关着时', () => {
+  it('没有信道表不算错', () => {
+    expect(readAnalogChannels({}, false)).toEqual({ channels: [], problems: [] });
+    expect(readAnalogChannels({ channels: [] }, false)).toEqual({ channels: [], problems: [] });
+  });
+
+  it('有信道表还是照样全验一遍', () => {
+    const r = readAnalogChannels({ channels: [{ freqMhz: 100, channel: 'a' }] }, false);
+    expect(r.channels).toBeUndefined();
+    expect(r.problems[0]).toMatch(/2m 或 70cm/);
+  });
+});

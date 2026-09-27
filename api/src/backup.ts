@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { loadConfig } from './config.ts';
-import { tableCounts, verifyBackup } from './verify-backup.ts';
+import { backupStamp, tableCounts, verifyBackup } from './verify-backup.ts';
 import { userVersion } from './migrations.ts';
 
 const [configPath, outDir] = process.argv.slice(2);
@@ -35,7 +35,7 @@ mkdirSync(dir, { recursive: true });
 
 // 文件名带 UTC 时刻。VACUUM INTO 不覆盖已有文件，同一秒里备份两次会直接报错，
 // 所以撞名就往后加序号。
-const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+const stamp = backupStamp();
 let out = join(dir, `openheard-${stamp}.db`);
 for (let n = 2; existsSync(out); n++) out = join(dir, `openheard-${stamp}-${n}.db`);
 

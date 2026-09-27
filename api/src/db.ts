@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import type { Activity, Qso } from './core.ts';
+import type { Activity, HeardItem, Qso } from './core.ts';
 import { migrate } from './migrations.ts';
 
 /** 采集端推过来的一行：归一化结果加上原始行。 */
@@ -282,8 +282,7 @@ export function selectPollLog(db: DatabaseSync, limit: number): PollLog[] {
   }));
 }
 
-/** 收听记录里的一行。结算过的带上结算成了什么。 */
-export type HeardItem = Activity & { settled?: 'logged' | 'ignored' };
+export type { HeardItem };
 
 /**
  * 收听记录的一页，最新的在前。
@@ -350,4 +349,243 @@ export function pruneActivities(db: DatabaseSync, olderThan: number): string[] {
 
 export function prunePollLog(db: DatabaseSync, olderThan: number): number {
   return Number(db.prepare('DELETE FROM poll_log WHERE at < ?').run(olderThan).changes);
+}
+
+// ---- 收听页：对话视图 ----------------------------------------------------
+
+/** 一行发射带着它的结算状态：没结算、忽略掉了、还是入库到了哪条通联。 */
+export interface RangeRow {
+  activity: Activity;
+  resolved: boolean;
+  /** 只在 resolved 且不是忽略时才有。 */
+  qsoId?: string;
+}
+
+function rowToRange(r: Record<string, unknown>, dmrId: number): RangeRow {
+  return {
+    activity: rowToActivity(r, dmrId),
+    resolved: r.resolved_id !== null && r.resolved_id !== undefined,
+    qsoId: r.resolved_qso === null || r.resolved_qso === undefined ? undefined : String(r.resolved_qso),
+  };
+}
+
+/** 一天再前后各两小时那个初始窗口：不分信道，取全部状态的行。 */
+export function selectActivitiesInRange(
+  db: DatabaseSync,
+  fromInclusive: number,
+  toExclusive: number,
+  dmrId: number,
+): RangeRow[] {
+  const rows = db
+    .prepare(`
+      SELECT a.*, r.activity_id AS resolved_id, r.qso_id AS resolved_qso FROM activity a
+      LEFT JOIN resolved_activity r ON r.activity_id = a.id
+      WHERE a.start_at >= ? AND a.start_at < ?
+      ORDER BY a.start_at
+    `)
+    .all(fromInclusive, toExclusive) as Record<string, unknown>[];
+  return rows.map((r) => rowToRange(r, dmrId));
+}
+
+/**
+ * channelKey 拆回它取值用的那一列。'ch:'/'tg:'/'fq:' 前缀对应 cluster.ts 里
+ * channelKey() 的三条取值分支，没有前缀就是回退到 origin 那一支。
+ */
+function channelClause(key: string): { sql: string; value: string | number } {
+  if (key.startsWith('tg:')) return { sql: 'a.talkgroup = ?', value: Number(key.slice(3)) };
+  if (key.startsWith('ch:')) return { sql: 'a.channel = ?', value: key.slice(3) };
+  if (key.startsWith('fq:')) return { sql: 'a.freq_mhz = ?', value: Number(key.slice(3)) };
+  return { sql: 'a.origin = ?', value: key };
+}
+
+/**
+ * 一条信道在一个时间范围内的行，全部状态。链式扩展和未入库/搜索的每信道
+ * 窗口都靠它按小段小段地读，不是整个保留期一次读完。
+ */
+export function selectChannelRange(
+  db: DatabaseSync,
+  key: string,
+  fromInclusive: number,
+  toExclusive: number,
+  dmrId: number,
+): RangeRow[] {
+  const { sql, value } = channelClause(key);
+  const rows = db
+    .prepare(`
+      SELECT a.*, r.activity_id AS resolved_id, r.qso_id AS resolved_qso FROM activity a
+      LEFT JOIN resolved_activity r ON r.activity_id = a.id
+      WHERE ${sql} AND a.start_at >= ? AND a.start_at < ?
+      ORDER BY a.start_at
+    `)
+    .all(value, fromInclusive, toExclusive) as Record<string, unknown>[];
+  return rows.map((r) => rowToRange(r, dmrId));
+}
+
+/**
+ * 未入库视图的种子：有本台成员（模拟侧存的 mine，或者数字侧按 dmrId 推）、
+ * 没结算、最后一次发射已经出了待确认窗口、还没超出保留期。
+ */
+export function selectUnloggedSeeds(
+  db: DatabaseSync,
+  dmrId: number,
+  pendingCutoff: number,
+  retentionCutoff: number,
+): Activity[] {
+  const rows = db
+    .prepare(`
+      SELECT a.* FROM activity a
+      LEFT JOIN resolved_activity r ON r.activity_id = a.id
+      WHERE r.activity_id IS NULL
+        AND (a.mine = 1 OR a.dmr_id = ?)
+        AND a.start_at <= ?
+        AND a.start_at >= ?
+      ORDER BY a.start_at
+    `)
+    .all(dmrId, pendingCutoff, retentionCutoff) as Record<string, unknown>[];
+  return rows.map((r) => rowToActivity(r, dmrId));
+}
+
+/** 搜索种子之一：呼号落在前缀范围内的发射行，本台和对方都在内。 */
+export function selectCallsignSeeds(
+  db: DatabaseSync,
+  prefix: string,
+  prefixNext: string,
+  retentionCutoff: number,
+  beforeStartAt: number,
+  limit: number,
+  dmrId: number,
+): Activity[] {
+  const rows = db
+    .prepare(`
+      SELECT * FROM activity
+      WHERE callsign >= ? AND callsign < ?
+        AND start_at >= ? AND start_at < ?
+      ORDER BY start_at DESC
+      LIMIT ?
+    `)
+    .all(prefix, prefixNext, retentionCutoff, beforeStartAt, limit) as Record<string, unknown>[];
+  return rows.map((r) => rowToActivity(r, dmrId));
+}
+
+/**
+ * 搜索种子之二：呼号来自日志，不来自发射行本身。模拟侧的发射不带呼号，
+ * 入库之后日志里才有，所以日志里的呼号也要参与匹配。qso 表没有保留期，
+ * 这条不按 retentionCutoff 卡，老通联也要能搜到。
+ */
+export function selectQsoCallSeeds(
+  db: DatabaseSync,
+  prefix: string,
+  prefixNext: string,
+  beforeStartAt: number,
+  limit: number,
+  dmrId: number,
+): Activity[] {
+  const rows = db
+    .prepare(`
+      SELECT a.* FROM activity a
+      JOIN resolved_activity r ON r.activity_id = a.id
+      JOIN qso q ON q.id = r.qso_id
+      WHERE q.call >= ? AND q.call < ?
+        AND a.start_at < ?
+      ORDER BY a.start_at DESC
+      LIMIT ?
+    `)
+    .all(prefix, prefixNext, beforeStartAt, limit) as Record<string, unknown>[];
+  return rows.map((r) => rowToActivity(r, dmrId));
+}
+
+/**
+ * 一条通联结算过的全部成员，不管它们落在哪个时间窗口里。
+ *
+ * 按信道窗口读到它其中一行时就该整条补全，否则同一条通联在天视图和搜索里
+ * 会因为窗口切在半截而长得不一样。
+ */
+export function selectQsoMembers(db: DatabaseSync, qsoId: string, dmrId: number): Activity[] {
+  const rows = db
+    .prepare(`
+      SELECT a.* FROM activity a
+      JOIN resolved_activity r ON r.activity_id = a.id
+      WHERE r.qso_id = ?
+      ORDER BY a.start_at
+    `)
+    .all(qsoId) as Record<string, unknown>[];
+  return rows.map((r) => rowToActivity(r, dmrId));
+}
+
+/** 挂在已入库对话上的那几个字段：对方呼号和双向 RST。 */
+export function selectQsoBriefs(db: DatabaseSync, ids: string[]): Map<string, { id: string; call: string; rstSent: string; rstRcvd: string }> {
+  const out = new Map<string, { id: string; call: string; rstSent: string; rstRcvd: string }>();
+  if (ids.length === 0) return out;
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db
+    .prepare(`SELECT id, call, rst_sent, rst_rcvd FROM qso WHERE id IN (${placeholders})`)
+    .all(...ids) as { id: string; call: string; rst_sent: string; rst_rcvd: string }[];
+  for (const r of rows) out.set(r.id, { id: r.id, call: r.call, rstSent: r.rst_sent, rstRcvd: r.rst_rcvd });
+  return out;
+}
+
+/** 结算检查要用的那几个 id，带上是不是已经结算过。 */
+export function selectActivitiesByIds(
+  db: DatabaseSync,
+  ids: string[],
+  dmrId: number,
+): Map<string, { activity: Activity; resolved: boolean }> {
+  const out = new Map<string, { activity: Activity; resolved: boolean }>();
+  if (ids.length === 0) return out;
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db
+    .prepare(`
+      SELECT a.*, r.activity_id AS resolved_id FROM activity a
+      LEFT JOIN resolved_activity r ON r.activity_id = a.id
+      WHERE a.id IN (${placeholders})
+    `)
+    .all(...ids) as Record<string, unknown>[];
+  for (const r of rows) {
+    out.set(String(r.id), { activity: rowToActivity(r, dmrId), resolved: r.resolved_id !== null });
+  }
+  return out;
+}
+
+/**
+ * 每条通联挂着的发射：id、开始时刻、时长。一次 join 拿齐全部通联的，不是
+ * 每条通联各查一次。手工补录和 ADIF 导入的通联没有任何观测，不在这张表里。
+ */
+export function selectQsoActivitiesMap(
+  db: DatabaseSync,
+): Map<string, { id: string; startAt: number; durationS: number }[]> {
+  const rows = db
+    .prepare(`
+      SELECT r.qso_id AS qso_id, a.id AS id, a.start_at AS start_at, a.duration_s AS duration_s
+      FROM resolved_activity r JOIN activity a ON a.id = r.activity_id
+      WHERE r.qso_id IS NOT NULL
+      ORDER BY a.start_at
+    `)
+    .all() as { qso_id: string; id: string; start_at: number; duration_s: number }[];
+  const out = new Map<string, { id: string; startAt: number; durationS: number }[]>();
+  for (const r of rows) {
+    const item = { id: r.id, startAt: Number(r.start_at), durationS: Number(r.duration_s) };
+    const list = out.get(r.qso_id);
+    if (list) list.push(item);
+    else out.set(r.qso_id, [item]);
+  }
+  return out;
+}
+
+/**
+ * 一个 DMR ID 最近见过的非空呼号，只看还没结算的行。
+ *
+ * 按 (dmr_id, start_at) 索引查一条，比 knownCalls() 扫整个保留期建一整张表
+ * 便宜几百倍——大多数对话自己就带着对方呼号，用不上这张表。
+ */
+export function resolveKnownCall(db: DatabaseSync, dmrId: number): string | undefined {
+  const row = db
+    .prepare(`
+      SELECT a.callsign FROM activity a
+      LEFT JOIN resolved_activity r ON r.activity_id = a.id
+      WHERE a.dmr_id = ? AND a.callsign IS NOT NULL AND a.callsign <> '' AND r.activity_id IS NULL
+      ORDER BY a.start_at DESC
+      LIMIT 1
+    `)
+    .get(dmrId) as { callsign: string } | undefined;
+  return row?.callsign;
 }

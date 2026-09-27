@@ -28,6 +28,8 @@ const config: Config = {
   station: { myGridsquare: 'OM24', myQth: '成都', networkFreqMhz: 439.525 },
   channels: [{ name: '439.525 中继', freqMhz: 439.525, mode: 'FM' }],
   queries: [],
+  brandmeisterEnabled: true,
+  recordingsDir: '/tmp/openheard-test-recordings',
 };
 
 const act = (id: string, over: Partial<Activity> = {}): Activity => ({
@@ -39,14 +41,14 @@ const act = (id: string, over: Partial<Activity> = {}): Activity => ({
   ...over,
 });
 
-function setup(activities: Activity[] = []) {
+function setup(activities: Activity[] = [], cfg: Config = config) {
   const db = openDb(':memory:');
   if (activities.length > 0) {
     insertActivities(db, activities.map((a) => ({ activity: a, raw: '{}' })), 1);
   }
-  return createApp(createStore(db, config), config.ingestToken, {
-    passwordHash: config.adminPasswordHash,
-    sessionSecret: config.sessionSecret,
+  return createApp(createStore(db, cfg), cfg.ingestToken, {
+    passwordHash: cfg.adminPasswordHash,
+    sessionSecret: cfg.sessionSecret,
   });
 }
 
@@ -127,7 +129,7 @@ describe('GET /api/pending', () => {
   });
 });
 
-describe('提升', () => {
+describe('提升（按发射 id）', () => {
   const two = () => {
     const t = Math.floor(Date.now() / 1000) - 600;
     return setup([
@@ -136,12 +138,17 @@ describe('提升', () => {
     ]);
   };
 
-  it('整段一起离开队列，并出现在日志里', async () => {
+  it('挑中的发射一起离开队列，并出现在日志里，回 201', async () => {
     const app = two();
-    const res = await send(app, 'POST', '/api/pending/a/promote', { ...complete, call: 'BD7KLO' });
-    assert.equal(res.status, 200);
+    const res = await send(app, 'POST', '/api/conversations/promote', {
+      ...complete,
+      call: 'BD7KLO',
+      activityIds: ['a', 'b'],
+    });
+    assert.equal(res.status, 201);
     const qso = (await res.json()) as Qso;
     assert.ok(qso.id);
+    // clusterId 取 (start_at, id) 最小的那个，和 clusterActivities 同一个顺序。
     assert.equal(qso.clusterId, 'a');
 
     assert.deepEqual(await (await get(app, '/api/pending')).json(), []);
@@ -149,26 +156,29 @@ describe('提升', () => {
   });
 
   it('缺字段回 422 并说清缺什么', async () => {
-    const res = await send(app422(), 'POST', '/api/pending/a/promote', { startAt: 1 });
+    const t = Math.floor(Date.now() / 1000) - 600;
+    const app = setup([act('a', { startAt: t, dmrId: MY_ID })]);
+    const res = await send(app, 'POST', '/api/conversations/promote', { startAt: 1, activityIds: ['a'] });
     assert.equal(res.status, 422);
     const body = (await res.json()) as { missing: string[] };
     assert.ok(body.missing.includes('call'));
   });
 
-  it('段的 id 对不上回 409', async () => {
-    const res = await send(two(), 'POST', '/api/pending/nope/promote', complete);
+  it('id 不存在回 409', async () => {
+    const res = await send(two(), 'POST', '/api/conversations/promote', { ...complete, activityIds: ['nope'] });
     assert.equal(res.status, 409);
   });
 
-  function app422() {
-    const t = Math.floor(Date.now() / 1000) - 600;
-    return setup([act('a', { startAt: t, dmrId: MY_ID })]);
-  }
+  it('activityIds 不是字符串数组就 422', async () => {
+    for (const body of [complete, { ...complete, activityIds: 'a' }, { ...complete, activityIds: [1] }]) {
+      assert.equal((await send(two(), 'POST', '/api/conversations/promote', body)).status, 422);
+    }
+  });
 });
 
 // 聚类按一个间隔阈值猜，会猜错。两段对话并成一段时，整段提升会把两边
 // 记成一条，整段忽略又把两边都丢掉。
-describe('只处理一段里的几次发射', () => {
+describe('只处理挑中的那几次发射', () => {
   const start = Math.floor(Date.now() / 1000) - 3600;
   // 两段对话挨得太近被并成一段：本台和 A，接着本台和 B。
   const merged = () =>
@@ -186,14 +196,11 @@ describe('只处理一段里的几次发射', () => {
 
   it('提升时只结算挑中的那几次，剩下的回到队列', async () => {
     const app = merged();
-    const [seg] = await pendingOf(app);
-    assert.equal(seg.cluster.activities.length, 4);
-
-    const res = await send(app, 'POST', `/api/pending/${seg.cluster.id}/promote`, {
+    const res = await send(app, 'POST', '/api/conversations/promote', {
       ...complete,
       activityIds: ['m1', 'x1'],
     });
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 201);
 
     // 剩下那半边没被结算，重新聚类之后自己成一段
     const after = await pendingOf(app);
@@ -203,27 +210,28 @@ describe('只处理一段里的几次发射', () => {
 
   it('忽略也能只挑几次', async () => {
     const app = merged();
-    const [seg] = await pendingOf(app);
-
-    const res = await send(app, 'DELETE', `/api/pending/${seg.cluster.id}?activityIds=x2`);
-    assert.equal(res.status, 204);
+    const res = await send(app, 'POST', '/api/conversations/ignore', {
+      picks: [{ id: 'm1', activityIds: ['x2'] }],
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ignored: 1, missing: [] });
 
     const after = await pendingOf(app);
     assert.deepEqual(after[0].cluster.activities.map((a) => a.id).sort(), ['m1', 'm2', 'x1']);
   });
 
-  it('不给就是整段，和以前一样', async () => {
+  // 省掉 activityIds 不再等于整段：界面必须带上看到的那几次发射的 id。
+  it('不给 activityIds 就 422，不当成整段', async () => {
     const app = merged();
-    const [seg] = await pendingOf(app);
-    await send(app, 'POST', `/api/pending/${seg.cluster.id}/promote`, complete);
-    assert.equal((await pendingOf(app)).length, 0);
+    const res = await send(app, 'POST', '/api/conversations/promote', complete);
+    assert.equal(res.status, 422);
+    assert.equal((await pendingOf(app))[0].cluster.activities.length, 4);
   });
 
   // 界面上拿的是一份快照，挑中的那几次可能已经被别处结算了。
-  it('挑了不在这一段里的就 409，什么都不结算', async () => {
+  it('挑了不存在的 id 就 409，什么都不结算', async () => {
     const app = merged();
-    const [seg] = await pendingOf(app);
-    const res = await send(app, 'POST', `/api/pending/${seg.cluster.id}/promote`, {
+    const res = await send(app, 'POST', '/api/conversations/promote', {
       ...complete,
       activityIds: ['m1', '别的段的'],
     });
@@ -232,18 +240,17 @@ describe('只处理一段里的几次发射', () => {
   });
 
   // 把勾全去掉再点确认。当成「不给就是整段」的话，另一边的发射也一起没了。
-  it('一次都没挑就 422，不当成整段', async () => {
+  it('一次都没挑就 422，忽略那边同样一条都没挑就算认不出来', async () => {
     const app = merged();
-    const [seg] = await pendingOf(app);
 
-    const promoted = await send(app, 'POST', `/api/pending/${seg.cluster.id}/promote`, {
-      ...complete,
-      activityIds: [],
+    const promoted = await send(app, 'POST', '/api/conversations/promote', { ...complete, activityIds: [] });
+    const ignored = await send(app, 'POST', '/api/conversations/ignore', {
+      picks: [{ id: 'm1', activityIds: [] }],
     });
-    const ignored = await send(app, 'DELETE', `/api/pending/${seg.cluster.id}?activityIds=`);
 
     assert.equal(promoted.status, 422);
-    assert.notEqual(ignored.status, 204);
+    assert.equal(ignored.status, 200);
+    assert.deepEqual(await ignored.json(), { ignored: 0, missing: ['m1'] });
     assert.equal((await pendingOf(app))[0].cluster.activities.length, 4);
   });
 
@@ -269,12 +276,9 @@ describe('只处理一段里的几次发射', () => {
     insertActivities(db, [{ activity: late, raw: '{}' }], 2);
     assert.equal((await pendingOf(app))[0].cluster.id, seg.cluster.id);
 
-    const res = await send(app, 'POST', `/api/pending/${seg.cluster.id}/promote`, {
-      ...complete,
-      activityIds: seen,
-    });
+    const res = await send(app, 'POST', '/api/conversations/promote', { ...complete, activityIds: seen });
 
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 201);
     const left = db.prepare(
       'SELECT id FROM activity WHERE id NOT IN (SELECT activity_id FROM resolved_activity)',
     ).all() as { id: string }[];
@@ -282,19 +286,22 @@ describe('只处理一段里的几次发射', () => {
   });
 });
 
-describe('忽略', () => {
-  it('整段离开队列，也不产生通联', async () => {
+describe('忽略（按发射 id）', () => {
+  it('挑中的发射离开队列，也不产生通联，回 200', async () => {
     const t = Math.floor(Date.now() / 1000) - 600;
-    const app = setup([act('a', { startAt: t, dmrId: MY_ID }), act('b', { startAt: t + 30 })]);
-    const res = await send(app, 'DELETE', '/api/pending/a');
-    assert.equal(res.status, 204);
+    const app = setup([act('a', { startAt: t, dmrId: MY_ID }), act('b', { startAt: t + 30, dmrId: MY_ID })]);
+    const res = await send(app, 'POST', '/api/conversations/ignore', {
+      picks: [{ id: 'a', activityIds: ['a', 'b'] }],
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ignored: 1, missing: [] });
     assert.deepEqual(await (await get(app, '/api/pending')).json(), []);
     assert.deepEqual(await (await get(app, '/api/qsos')).json(), []);
   });
 });
 
 // 一条一条调的话，每忽略一段就重新聚类一次，剩下那些段的 id 会变，后面全 409。
-describe('一次忽略好几段', () => {
+describe('一次忽略好几段（按发射 id）', () => {
   const start = Math.floor(Date.now() / 1000) - 3600;
   const three = () =>
     setup([
@@ -306,17 +313,14 @@ describe('一次忽略好几段', () => {
   type Seg = { cluster: { id: string; activities: { id: string }[] } };
   const segs = async (app: ReturnType<typeof setup>) =>
     (await (await get(app, '/api/pending')).json()) as Seg[];
-  const pickOf = (p: Seg) => ({
-    clusterId: p.cluster.id,
-    activityIds: p.cluster.activities.map((a) => a.id),
-  });
+  const pickOf = (p: Seg) => ({ id: p.cluster.id, activityIds: p.cluster.activities.map((a) => a.id) });
 
   it('三段一次忽略掉，队列空了', async () => {
     const app = three();
     const before = await segs(app);
     assert.equal(before.length, 3);
 
-    const res = await send(app, 'POST', '/api/pending/ignore', { picks: before.map(pickOf) });
+    const res = await send(app, 'POST', '/api/conversations/ignore', { picks: before.map(pickOf) });
 
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), { ignored: 3, missing: [] });
@@ -327,7 +331,7 @@ describe('一次忽略好几段', () => {
     const app = three();
     const before = await segs(app);
 
-    await send(app, 'POST', '/api/pending/ignore', { picks: [pickOf(before[0])] });
+    await send(app, 'POST', '/api/conversations/ignore', { picks: [pickOf(before[0])] });
 
     assert.equal((await segs(app)).length, 2);
   });
@@ -336,8 +340,8 @@ describe('一次忽略好几段', () => {
     const app = three();
     const before = await segs(app);
 
-    const res = await send(app, 'POST', '/api/pending/ignore', {
-      picks: [pickOf(before[0]), { clusterId: '不存在', activityIds: ['a1'] }],
+    const res = await send(app, 'POST', '/api/conversations/ignore', {
+      picks: [pickOf(before[0]), { id: '不存在', activityIds: ['a1'] }],
     });
 
     assert.deepEqual(await res.json(), { ignored: 1, missing: ['不存在'] });
@@ -358,7 +362,7 @@ describe('一次忽略好几段', () => {
     insertActivities(db, [{ activity: reply, raw: '{}' }], 2);
     assert.equal((await segs(app))[0].cluster.id, picked.cluster.id);
 
-    const res = await send(app, 'POST', '/api/pending/ignore', { picks: [pickOf(picked)] });
+    const res = await send(app, 'POST', '/api/conversations/ignore', { picks: [pickOf(picked)] });
 
     assert.deepEqual(await res.json(), { ignored: 1, missing: [] });
     const after = await segs(app);
@@ -374,8 +378,8 @@ describe('一次忽略好几段', () => {
     const app = three();
     const before = await segs(app);
 
-    const res = await send(app, 'POST', '/api/pending/ignore', {
-      picks: [{ clusterId: before[0].cluster.id, activityIds: [] }],
+    const res = await send(app, 'POST', '/api/conversations/ignore', {
+      picks: [{ id: before[0].cluster.id, activityIds: [] }],
     });
 
     assert.deepEqual(await res.json(), { ignored: 0, missing: [before[0].cluster.id] });
@@ -386,13 +390,13 @@ describe('一次忽略好几段', () => {
     const bad = [
       { picks: 'x' },
       { picks: [1] },
-      { picks: [{ clusterId: 'a1' }] },
-      { picks: [{ clusterId: 'a1', activityIds: [1] }] },
-      // 旧的请求体。它按段 id 整段忽略，正是要去掉的那个行为。
+      { picks: [{ id: 'a1' }] },
+      { picks: [{ id: 'a1', activityIds: [1] }] },
+      // 旧的请求体，按段 id 整段忽略，正是要去掉的那个行为。
       { clusterIds: ['a1'] },
     ];
     for (const body of bad) {
-      assert.equal((await send(three(), 'POST', '/api/pending/ignore', body)).status, 422);
+      assert.equal((await send(three(), 'POST', '/api/conversations/ignore', body)).status, 422);
     }
   });
 });
@@ -427,8 +431,8 @@ describe('收听记录', () => {
       act('x1', { dmrId: 4616472, startAt: t + 10, talkgroup: 46001 }),
       act('m2', { dmrId: MY_ID, startAt: t + 1000, talkgroup: 46001 }),
     ]);
-    await send(app, 'POST', '/api/pending/m1/promote', { ...complete, activityIds: ['m1', 'x1'] });
-    await send(app, 'DELETE', '/api/pending/m2?activityIds=m2');
+    await send(app, 'POST', '/api/conversations/promote', { ...complete, activityIds: ['m1', 'x1'] });
+    await send(app, 'POST', '/api/conversations/ignore', { picks: [{ id: 'm2', activityIds: ['m2'] }] });
 
     const p = await page(app, 'origin=brandmeister');
 
@@ -571,11 +575,14 @@ describe('改一条已入库的通联', () => {
       act('s1', { dmrId: MY_ID, startAt: start, talkgroup: 46001 }),
       act('s2', { dmrId: 4600999, startAt: start + 10, talkgroup: 46001 }),
     ]);
-    const pending = (await (await get(app, '/api/pending')).json()) as { cluster: { id: string } }[];
+    const pending = (await (await get(app, '/api/pending')).json()) as {
+      cluster: { id: string; activities: { id: string }[] };
+    }[];
     const promoted = (await (
-      await send(app, 'POST', `/api/pending/${pending[0].cluster.id}/promote`, {
+      await send(app, 'POST', '/api/conversations/promote', {
         ...complete,
         startAt: start,
+        activityIds: pending[0].cluster.activities.map((a) => a.id),
       })
     ).json()) as Qso;
     assert.equal(promoted.clusterId, pending[0].cluster.id);
@@ -974,7 +981,7 @@ describe('没接住的异常', () => {
   it('回 JSON 而不是纯文本 500', async () => {
     const broken = {
       ...createStore(openDb(':memory:'), config),
-      qsos: () => {
+      qsosWithActivities: () => {
         throw new Error('库炸了');
       },
     };
@@ -997,6 +1004,13 @@ describe('没接住的异常', () => {
 // 而设置页还显示旧的那个，看起来就像「改了没生效」。
 // 没有这个的话，「天线听不见」和「没人在发」在界面上长得一模一样。
 describe('电台状态', () => {
+  // 这一档测的是状态本身的记录和整理，不是开关。模拟守听开着，
+  // 关着的情形（radios 一律是空数组）在「开关」那一档测。
+  const radioConfig: Config = {
+    ...config,
+    analog: { channels: [{ freqMhz: 438.5, channel: '438.500 中继' }], enabled: true, openMarginDb: 12, closeMarginDb: 7 },
+  };
+
   const push = (app: ReturnType<typeof setup>, body: unknown) =>
     app.fetch(
       new Request('http://local/api/ingest/radio', {
@@ -1034,11 +1048,11 @@ describe('电台状态', () => {
   const other = { ...good, freqMhz: 438.975, channel: '438.975', noiseDb: 88.0 };
 
   it('没收到过状态时 ops 里是空的', async () => {
-    assert.deepEqual(await ops(setup()), []);
+    assert.deepEqual(await ops(setup([], radioConfig)), []);
   });
 
   it('一支接收机守两个信道，一批报两条，ops 里两个都读得到，都是新鲜的', async () => {
-    const app = setup();
+    const app = setup([], radioConfig);
     assert.equal((await push(app, [good, other])).status, 204);
 
     const r = await ops(app);
@@ -1054,14 +1068,14 @@ describe('电台状态', () => {
 
   // 只守一个信道时报的是单个对象，还没升级的守护进程照样认。
   it('单个对象也认', async () => {
-    const app = setup();
+    const app = setup([], radioConfig);
     await push(app, good);
     assert.equal((await ops(app))[0]?.freqMhz, 438.5);
   });
 
   // 守护进程或者 rtl_sdr 出事时状态就停在那里，界面要能看出来是停了。
   it('太久没报就不算新鲜', async () => {
-    const app = setup();
+    const app = setup([], radioConfig);
     await push(app, [{ ...good, at: Math.floor(Date.now() / 1000) - 60 }]);
 
     const r = (await ops(app))[0];
@@ -1072,7 +1086,7 @@ describe('电台状态', () => {
   // 运维页 20 秒拉一次，看到的只是那一瞬。光看一个瞬时值答不了
   // 「这个信号够不够得着门限」，得记住最接近的那一次。每个信道各记各的。
   it('每个信道各自记住这次守听里最接近门限的一刻', async () => {
-    const app = setup();
+    const app = setup([], radioConfig);
     await push(app, [{ ...good, noiseDb: 90.1 }, { ...other, noiseDb: 88.0 }]);
     await push(app, [{ ...good, noiseDb: 82.0 }, { ...other, noiseDb: 89.0 }]);
     await push(app, [{ ...good, noiseDb: 89.0 }, { ...other, noiseDb: 90.0 }]);
@@ -1083,7 +1097,7 @@ describe('电台状态', () => {
   });
 
   it('换了信道表，新信道从头记，去掉的信道不再出现', async () => {
-    const app = setup();
+    const app = setup([], radioConfig);
     await push(app, [{ ...good, noiseDb: 82.0 }, other]);
     await push(app, [{ ...good, noiseDb: 90.1 }, { ...good, freqMhz: 145.5, channel: '145.500 直频', noiseDb: 90.1 }]);
 
@@ -1099,7 +1113,7 @@ describe('电台状态', () => {
 
   // 抢不到 USB 设备时 rtl_sdr 不往 stdout 写东西，只有这条路能把原因带出来。
   it('带上 rtl_sdr 最后一句和重开次数', async () => {
-    const app = setup();
+    const app = setup([], radioConfig);
     await push(app, [
       {
         freqMhz: 438.5,
@@ -1118,7 +1132,7 @@ describe('电台状态', () => {
   });
 
   it('形状不对的那条当没收到，但不让请求失败', async () => {
-    const app = setup();
+    const app = setup([], radioConfig);
     assert.equal((await push(app, { 乱七八糟: 1 })).status, 204);
     assert.deepEqual(await ops(app), []);
     await push(app, [good, { 乱七八糟: 1 }]);
@@ -1126,7 +1140,7 @@ describe('电台状态', () => {
   });
 
   it('要 bearer token，不看会话', async () => {
-    const app = setup();
+    const app = setup([], radioConfig);
     const res = await app.fetch(
       new Request('http://local/api/ingest/radio', {
         method: 'POST',

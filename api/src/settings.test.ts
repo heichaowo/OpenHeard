@@ -118,9 +118,12 @@ describe('checkSettings', () => {
   it('只提交一个余量时，按合并之后的那一对验', () => {
     const only = (o: Record<string, unknown>) =>
       checkSettings({ ...ok, analog: { channels: [{ freqMhz: 145.5, channel: 'x' }], ...o } }, {
-        channels: [{ freqMhz: 145.5, channel: 'x' }],
-        openMarginDb: 12,
-        closeMarginDb: 7,
+        analog: {
+          channels: [{ freqMhz: 145.5, channel: 'x' }],
+          enabled: true,
+          openMarginDb: 12,
+          closeMarginDb: 7,
+        },
       });
     // 只改打开，和原来的 close 7 凑成 8/7，差 1，不行
     assert.ok(only({ openMarginDb: 8 }).length > 0);
@@ -145,9 +148,12 @@ describe('checkSettings', () => {
   it('清空一个余量就是回到缺省值，按缺省值去凑那一对', () => {
     const clear = (k: string) =>
       checkSettings({ ...ok, analog: { ...ok.analog, [k]: null } }, {
-        channels: [{ freqMhz: 145.5, channel: 'x' }],
-        openMarginDb: 20,
-        closeMarginDb: 18,
+        analog: {
+          channels: [{ freqMhz: 145.5, channel: 'x' }],
+          enabled: true,
+          openMarginDb: 20,
+          closeMarginDb: 18,
+        },
       });
     // 关闭回到 7，和 20 差 13，可以
     assert.deepEqual(clear('closeMarginDb'), []);

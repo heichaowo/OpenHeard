@@ -11,9 +11,17 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 
 const posNumber = (v: unknown): v is number => typeof v === 'number' && v > 0;
 
-/** 返回问题清单，空数组表示没问题。 */
-export function checkQueries(queries: unknown): string[] {
-  if (!Array.isArray(queries) || queries.length === 0) return ['queries 必填，至少一条'];
+/**
+ * 返回问题清单，空数组表示没问题。
+ *
+ * @param required BrandMeister 关着时传 false：queries 这时可以缺失或是空
+ *   数组，原来配置过的那些留在文件里也不算错。传了的条目还是照样验，
+ *   关着不等于放过写错的查询。
+ */
+export function checkQueries(queries: unknown, required = true): string[] {
+  if (queries === undefined && !required) return [];
+  if (!Array.isArray(queries)) return [required ? 'queries 必填，至少一条' : 'queries 要是数组'];
+  if (queries.length === 0) return required ? ['queries 必填，至少一条'] : [];
 
   const problems: string[] = [];
   queries.forEach((q, i) => {
