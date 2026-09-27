@@ -20,6 +20,24 @@ html {
   color-scheme: light dark;
 }
 
+/* antd 没有柔和底色/悬停底色这一档 token，Preferences 把亮暗写进
+   documentElement.dataset.theme，这两个自定义变量跟着它走，供表头、
+   胶囊导航悬停和 hover 底色用。不是 --ant-* 变量，html 上也能用。 */
+:root[data-theme="light"] {
+  --surface-soft: #eef4fb;
+  --surface-hover: #f7faff;
+}
+
+:root[data-theme="dark"] {
+  --surface-soft: #1b293c;
+  --surface-hover: #1d2b40;
+}
+
+/* 时刻和数字用等宽数位，跳动的时候不挤旁边的字。对没有数字的文字无影响。 */
+body {
+  font-variant-numeric: tabular-nums;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -31,6 +49,11 @@ select {
   font: inherit;
 }
 
+/* 标签一律改成完全的胶囊角。徽标（Badge）本来就是圆的，不用管。 */
+.ant-tag {
+  border-radius: 999px;
+}
+
 /* ---- 外壳 ---- */
 
 .app-shell,
@@ -39,28 +62,30 @@ select {
   background: var(--ant-color-bg-layout);
 }
 
-.app-sider {
-  position: fixed !important;
-  inset-block: 0;
-  inset-inline-start: 0;
-  z-index: 30;
-  overflow: hidden;
-  border-inline-end: 1px solid var(--ant-color-border-secondary);
-  /* antd 在同一帧把 width、min-width、max-width 一起换掉，
-     只给 width 过渡的话会被 max-width 立刻钳住，看上去就是瞬间跳。 */
-  transition:
-    width 160ms cubic-bezier(.2, 0, 0, 1),
-    min-width 160ms cubic-bezier(.2, 0, 0, 1),
-    max-width 160ms cubic-bezier(.2, 0, 0, 1) !important;
+/* 淡淡的主色径向渐变，垫在最底下。app-shell 是整页的容器，宽高跟内容走，
+   渐变只贴着它自己这一层，不会在滚动很长的页面上重复或者拉伸变形。 */
+.app-shell {
+  position: relative;
 }
 
-.app-sider .ant-layout-sider-children {
-  display: flex;
-  flex-direction: column;
+.app-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    900px 480px at 50% -8%,
+    color-mix(in srgb, var(--ant-color-primary) 11%, transparent),
+    transparent 60%
+  );
 }
 
-.shell-main {
-  min-width: 0;
+.app-shell > .ant-layout-header,
+.app-shell > .ant-layout-content,
+.bottom-tabs {
+  position: relative;
+  z-index: 1;
 }
 
 .shell-header {
@@ -73,9 +98,9 @@ select {
   height: 64px;
   padding-inline: 20px !important;
   border-block-end: 1px solid var(--ant-color-border-secondary);
-  /* 半透明加模糊，内容滚到下面时还能看出层次 */
-  background: color-mix(in srgb, var(--ant-color-bg-container) 88%, transparent) !important;
-  backdrop-filter: blur(10px);
+  /* 半透明加模糊，内容滚到下面时还能看出层次，真正的玻璃质感。 */
+  background: color-mix(in srgb, var(--ant-color-bg-layout) 88%, transparent) !important;
+  backdrop-filter: blur(18px);
 }
 
 .shell-content {
@@ -98,14 +123,12 @@ select {
   min-height: 40px;
 }
 
-/* ---- 侧栏 ---- */
+/* ---- 品牌和导航 ---- */
 
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 64px;
-  padding-inline: 16px;
   overflow: hidden;
   white-space: nowrap;
 }
@@ -137,15 +160,77 @@ select {
   line-height: 1.2;
 }
 
-.sidebar-menu {
-  flex: 1;
-  padding: 8px;
-  border-inline-end: 0 !important;
+/* 桌面顶栏里的胶囊页签，替掉原来的侧边栏菜单。 */
+.nav-pills {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  margin-inline-start: 12px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  overflow-x: auto;
 }
 
-.sidebar-foot {
-  padding: 8px;
+.nav-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 7px 14px;
+  border-radius: 999px;
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 120ms, color 120ms;
+}
+
+.nav-pill:hover {
+  color: var(--ant-color-text);
+  background: var(--surface-hover);
+}
+
+.nav-pill.active {
+  color: var(--ant-color-primary);
+  background: color-mix(in srgb, var(--ant-color-primary) 12%, transparent);
+}
+
+/* 手机上贴底的标签栏，替掉原来的汉堡抽屉。 */
+.bottom-tabs {
+  position: fixed;
+  inset-inline: 0;
+  inset-block-end: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  background: color-mix(in srgb, var(--ant-color-bg-container) 92%, transparent);
+  backdrop-filter: blur(18px);
   border-block-start: 1px solid var(--ant-color-border-secondary);
+  padding-block-end: env(safe-area-inset-bottom);
+}
+
+.bottom-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 52px;
+  padding-block: 6px;
+  color: var(--ant-color-text-tertiary);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bottom-tab .anticon {
+  font-size: 18px;
+}
+
+.bottom-tab.active {
+  color: var(--ant-color-primary);
 }
 
 /* ---- 页头 ---- */
@@ -281,8 +366,15 @@ select {
 /* ---- 杂项 ---- */
 
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   overflow-wrap: anywhere;
+}
+
+/* 呼号：等宽、加粗、主色，界面上除了它和大数字，没有别的地方用等宽字体。 */
+.callsign {
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--ant-color-primary);
+  font-weight: 700;
 }
 
 /* 查询名这类短记号不从中间断开，src:4616460 断成两行就认不出来了。
@@ -296,29 +388,26 @@ select {
   vertical-align: bottom;
 }
 
-.only-narrow {
-  display: none !important;
+@media (max-width: 900px) {
+  .page-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
-@media (max-width: 900px) {
-  .app-sider {
-    display: none;
-  }
-  .shell-main {
-    margin-inline-start: 0 !important;
-  }
-  .only-narrow {
-    display: inline-flex !important;
-  }
+/* 顶栏胶囊导航换成底部标签栏的断点，和 AppShell、别的页面判断宽窄用的
+   Grid.useBreakpoint().md 是同一条线，CSS 和 JS 不能各算各的。 */
+@media (max-width: 767px) {
   .shell-header {
     padding-inline: 12px !important;
   }
   .shell-content {
     padding: 16px;
+    /* 留出底部标签栏的高度，最后一条内容不能被它挡住。 */
+    padding-block-end: calc(68px + env(safe-area-inset-bottom));
   }
-  .page-head {
-    flex-direction: column;
-    align-items: stretch;
+  .nav-pills {
+    display: none;
   }
 }
 
@@ -399,8 +488,10 @@ select {
 }
 
 .pending-card-call {
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--ant-color-primary);
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 700;
   margin-block-end: 8px;
 }
 
@@ -436,28 +527,37 @@ select {
   margin-block-end: 12px;
 }
 
-/* 快速补录的入库按钮。手机上贴着底边，表单十几格，填完不用滑到最底下。 */
+/* 快速补录的入库按钮。手机上贴着底边标签栏的上沿，表单十几格，填完
+   不用滑到最底下，也不会被标签栏挡住。 */
 @media (max-width: 767px) {
   .form-submit {
     position: sticky;
-    inset-block-end: 0;
-    z-index: 10;
-    padding-block: 12px calc(12px + env(safe-area-inset-bottom));
+    inset-block-end: calc(53px + env(safe-area-inset-bottom));
+    z-index: 21;
+    padding-block: 12px;
     background: var(--ant-color-bg-container);
   }
 }
 
-/* 手机上贴着底边的保存条。表单长，填完就地存，不用滚回顶上。
-   要压在输入框上面：数字框的前后缀自己带层级，不给的话会画到保存条上。 */
+/* 手机上贴着底边标签栏上沿的保存条。表单长，填完就地存，不用滚回顶上。
+   要压在输入框上面：数字框的前后缀自己带层级，不给的话会画到保存条上。
+   桌面没有标签栏，直接贴视口底边。 */
 .sticky-save {
-  z-index: 10;
+  z-index: 21;
   position: sticky;
   inset-block-end: 0;
   margin-block-start: 16px;
   margin-inline: -16px;
-  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  padding: 12px 16px;
   background: var(--ant-color-bg-container);
   border-block-start: 1px solid var(--ant-color-border-secondary);
+}
+
+@media (max-width: 767px) {
+  .sticky-save {
+    inset-block-end: calc(53px + env(safe-area-inset-bottom));
+    padding-block-end: 12px;
+  }
 }
 
 /* 待确认队列上方那一条批量操作。flush-card 把卡片内边距清成 0，这里自己补回来。 */
@@ -472,4 +572,105 @@ select {
 
 .sweep-bar .ant-btn {
   flex: 0 0 auto;
+}
+
+/* ---- 加载态：电波纹 ---- */
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.radio-loader {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+}
+
+.radio-loader-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: 2px solid var(--ant-color-primary);
+  opacity: 0;
+  animation: radio-wave 2.1s ease-out infinite;
+}
+
+.radio-loader-ring:nth-child(2) {
+  animation-delay: .7s;
+}
+
+.radio-loader-ring:nth-child(3) {
+  animation-delay: 1.4s;
+}
+
+.radio-loader-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--ant-color-primary);
+}
+
+@keyframes radio-wave {
+  0% {
+    transform: scale(.3);
+    opacity: .55;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+/* ---- 播放器 ---- */
+
+/* 播放中的文字比闲着的长（「❚❚ 1.4 / 3.6 秒」比「▶ 3.2 秒」宽），
+   固定的最小宽度按最长的那种算，秒表跳字的时候不推着旁边的按钮挪位置。 */
+.audio-pill,
+.playall-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 118px;
+  padding: 6px 14px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border);
+  border-radius: 999px;
+  background: var(--ant-color-bg-container);
+  color: var(--ant-color-text);
+  font-size: 12px;
+}
+
+.audio-pill:disabled,
+.playall-pill:disabled {
+  color: var(--ant-color-text-tertiary);
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+.audio-pill.playing,
+.playall-pill.playing {
+  border-color: var(--ant-color-primary);
+  color: var(--ant-color-primary);
+}
+
+.audio-pill-fill {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 100%;
+  transform-origin: left;
+  background: color-mix(in srgb, var(--ant-color-primary) 16%, transparent);
+  transition: transform .15s linear;
+}
+
+.audio-pill-label {
+  position: relative;
+  z-index: 1;
 }

@@ -1,5 +1,5 @@
 import { ReloadOutlined } from '@ant-design/icons'
-import { Alert, Button, Empty, Result, Skeleton } from 'antd'
+import { Alert, Button, Empty, Result, Typography } from 'antd'
 import type { ReactNode } from 'react'
 
 interface Props {
@@ -23,7 +23,15 @@ export function AsyncContent({ loading, error, empty, emptyText, onRetry, childr
   if (loading) {
     return (
       <div className="state-box">
-        <Skeleton active paragraph={{ rows: 4 }} />
+        <div className="loading-state">
+          <div className="radio-loader" role="status" aria-label="加载中">
+            <span className="radio-loader-ring" />
+            <span className="radio-loader-ring" />
+            <span className="radio-loader-ring" />
+            <span className="radio-loader-dot" />
+          </div>
+          <Typography.Text type="secondary">正在加载</Typography.Text>
+        </div>
       </div>
     )
   }
