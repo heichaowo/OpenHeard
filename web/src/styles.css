@@ -97,6 +97,8 @@ select {
   gap: 12px;
   height: 64px;
   padding-inline: 20px !important;
+  /* antd 给顶栏的行高等于栏高，胶囊页签继承了就被撑成 78px 高的椭圆。 */
+  line-height: 1.4 !important;
   border-block-end: 1px solid var(--ant-color-border-secondary);
   /* 半透明加模糊，内容滚到下面时还能看出层次，真正的玻璃质感。 */
   background: color-mix(in srgb, var(--ant-color-bg-layout) 88%, transparent) !important;
