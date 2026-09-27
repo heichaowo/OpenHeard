@@ -2,6 +2,7 @@ export * from './types.ts';
 export * from './band.ts';
 export * from './callsign.ts';
 export * from './cluster.ts';
+export * from './conversation.ts';
 export * from './draft.ts';
 export * from './known-calls.ts';
 export * from './recall.ts';

@@ -21,6 +21,7 @@ export interface Migration {
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'initial', file: './schema.sql' },
   { version: 2, name: 'qso-history', file: './002-qso-history.sql' },
+  { version: 3, name: 'conversations', file: './003-conversations.sql' },
 ];
 
 export const LATEST = MIGRATIONS[MIGRATIONS.length - 1].version;

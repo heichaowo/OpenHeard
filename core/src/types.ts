@@ -95,8 +95,31 @@ export interface PendingItem {
   draft: QsoDraft;
 }
 
-/** 一段里挑中的那几次发射。结算按它们来，不按段 id 整段来，因为段会长。 */
-export interface ClusterPick {
-  clusterId: string;
-  activityIds: string[];
+/** 对话的五档。 */
+export type ConversationStatus = 'pending' | 'unlogged' | 'logged' | 'ignored' | 'overheard';
+
+/** 收听记录里的一行。结算过的带上结算成了什么。 */
+export type HeardItem = Activity & { settled?: 'logged' | 'ignored' };
+
+/**
+ * 收听页列出的一次对话。取代待确认队列的 Cluster，五档共用同一个形状，
+ * 行和卡片组件才不用为每一档各写一套。
+ */
+export interface Conversation {
+  /** 成员里 (startAt, id) 最小的那个，和 clusterActivities 同一个顺序。 */
+  id: string;
+  /** Unix 秒，成员里最早的开始时刻。 */
+  startAt: number;
+  /** Unix 秒，成员里 start + duration 的最大值。 */
+  endAt: number;
+  channel: string;
+  /** 第一个成员的来源。 */
+  origin: Origin;
+  status: ConversationStatus;
+  /** 按时间升序。 */
+  activities: HeardItem[];
+  /** 只在已入库时才有。 */
+  qso?: { id: string; call: string; rstSent: string; rstRcvd: string };
+  /** 只在没结算时才有：待确认、未入库、旁听共用同一个草稿构建方式。 */
+  draft?: QsoDraft;
 }
