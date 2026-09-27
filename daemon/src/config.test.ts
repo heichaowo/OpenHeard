@@ -66,3 +66,60 @@ describe('analog 的信道表', () => {
     assert.ok(!fm.ok && fm.problems.some((p) => p.includes('2m 或 70cm')));
   });
 });
+
+describe('开关的生效值', () => {
+  const withRaw = (extra: Record<string, unknown>) => {
+    const dir = mkdtempSync(join(tmpdir(), 'openheard-dcfg-'));
+    const path = join(dir, 'openheard.config.json');
+    writeFileSync(path, JSON.stringify({ ...base, ...extra }));
+    return loadConfig(path);
+  };
+
+  it('BrandMeister 关着时 queries 生效值是空数组，不管文件里配了多少条', () => {
+    const r = withRaw({ brandmeisterEnabled: false });
+    assert.ok(r.ok);
+    assert.deepEqual(r.config.queries, []);
+  });
+
+  it('BrandMeister 关着、queries 缺失也不算错', () => {
+    const r = withRaw({ brandmeisterEnabled: false, queries: undefined });
+    assert.ok(r.ok);
+    assert.deepEqual(r.config.queries, []);
+  });
+
+  it('BrandMeister 关着，传了的 queries 条目还是照样验', () => {
+    const r = withRaw({
+      brandmeisterEnabled: false,
+      queries: [{ key: 'dst:91', rule: { id: 'DestinationID', operator: 'equal' } }], // 缺 amount、intervalS、value
+    });
+    assert.equal(r.ok, false);
+  });
+
+  it('BrandMeister 缺省是开的', () => {
+    const r = withRaw({});
+    assert.ok(r.ok);
+    assert.equal(r.config.queries.length, 1);
+  });
+
+  it('模拟守听关着时生效值是 undefined，信道表不读也不验', () => {
+    const r = withRaw({ analog: { enabled: false, channels: [{ freqMhz: 100, channel: 'x' }] } });
+    assert.ok(r.ok);
+    assert.equal(r.config.analog, undefined);
+  });
+
+  it('模拟守听关着、压根没有信道表也不算错', () => {
+    const r = withRaw({ analog: { enabled: false } });
+    assert.ok(r.ok);
+    assert.equal(r.config.analog, undefined);
+  });
+
+  it('模拟守听开着（缺省或者显式 true）时照常读信道表', () => {
+    const on = withRaw({ analog: { channels: [{ freqMhz: 438.5, channel: 'a' }] } });
+    assert.ok(on.ok);
+    assert.equal(on.config.analog?.channels.length, 1);
+
+    const explicit = withRaw({ analog: { enabled: true, channels: [{ freqMhz: 438.5, channel: 'a' }] } });
+    assert.ok(explicit.ok);
+    assert.equal(explicit.config.analog?.channels.length, 1);
+  });
+});

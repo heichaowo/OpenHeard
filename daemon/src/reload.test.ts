@@ -67,7 +67,7 @@ async function writeUntil(write: (next: unknown) => void, next: unknown, ok: () 
 const start = (path: string) => {
   const r = loadConfig(path);
   assert.ok(r.ok);
-  const seen: { queries: Query[][]; analog: AnalogConfig[] } = { queries: [], analog: [] };
+  const seen: { queries: Query[][]; analog: (AnalogConfig | undefined)[] } = { queries: [], analog: [] };
   const stop = watchConfig(path, r.config, {
     queries: (q) => seen.queries.push(q),
     analog: (a) => seen.analog.push(a),
@@ -84,7 +84,7 @@ describe('watchConfig', () => {
     stop();
 
     assert.equal(seen.analog.length, 1);
-    assert.equal(seen.analog[0].channels[0]!.freqMhz, 145.5);
+    assert.equal(seen.analog[0]!.channels[0]!.freqMhz, 145.5);
     assert.equal(seen.queries.length, 0);
   });
 
@@ -130,6 +130,75 @@ describe('watchConfig', () => {
 
     // 坏的那次没生效，后面改好的那次照常生效
     assert.equal(seen.analog.length, 1);
-    assert.equal(seen.analog[0].channels[0]!.freqMhz, 439.525);
+    assert.equal(seen.analog[0]!.channels[0]!.freqMhz, 439.525);
+  });
+});
+
+describe('watchConfig：开关', () => {
+  it('BrandMeister 关掉再开：先通知空数组，再通知原来那份', async () => {
+    const { path, write } = setup();
+    const { seen, stop } = start(path);
+
+    await writeUntil(write, { ...base, brandmeisterEnabled: false }, () => seen.queries.length > 0);
+    await writeUntil(write, { ...base, brandmeisterEnabled: true }, () => seen.queries.length > 1);
+    stop();
+
+    assert.deepEqual(seen.queries[0], []);
+    assert.equal(seen.queries[1]?.[0]?.key, 'dst:46001');
+  });
+
+  it('模拟守听关掉：只通知一次 analog(undefined)，不当成频率变了去重调', async () => {
+    const { path, write } = setup();
+    const { seen, stop } = start(path);
+
+    await writeUntil(write, { ...base, analog: { ...base.analog, enabled: false } }, () => seen.analog.length > 0);
+    stop();
+
+    assert.equal(seen.analog.length, 1);
+    assert.equal(seen.analog[0], undefined);
+    assert.equal(seen.queries.length, 0);
+  });
+
+  it('模拟守听开着又关掉又开起来：undefined、然后是信道表，不多不少', async () => {
+    const { path, write } = setup();
+    const { seen, stop } = start(path);
+
+    await writeUntil(write, { ...base, analog: { ...base.analog, enabled: false } }, () => seen.analog.length > 0);
+    await writeUntil(
+      write,
+      { ...base, analog: { ...base.analog, enabled: true } },
+      () => seen.analog.length > 1,
+    );
+    stop();
+
+    assert.equal(seen.analog.length, 2);
+    assert.equal(seen.analog[0], undefined);
+    assert.equal(seen.analog[1]?.channels[0]!.freqMhz, 438.7);
+  });
+
+  // 从没配过模拟守听到配上，以前要重启进程才生效，现在不用。
+  it('从没有 analog 变成有：直接通知开，不再要求重启', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'openheard-reload-'));
+    const path = join(dir, 'openheard.config.json');
+    const { dmrId, ingestToken, queries } = base;
+    writeFileSync(path, JSON.stringify({ dmrId, ingestToken, queries }));
+    const r = loadConfig(path);
+    assert.ok(r.ok);
+    assert.equal(r.config.analog, undefined);
+    const seen: { analog: (AnalogConfig | undefined)[] } = { analog: [] };
+    const stop = watchConfig(path, r.config, {
+      queries: () => undefined,
+      analog: (a) => seen.analog.push(a),
+    });
+
+    const write = (next: unknown) => {
+      writeFileSync(`${path}.tmp`, JSON.stringify(next));
+      renameSync(`${path}.tmp`, path);
+    };
+    await writeUntil(write, { dmrId, ingestToken, queries, analog: base.analog }, () => seen.analog.length > 0);
+    stop();
+
+    assert.equal(seen.analog.length, 1);
+    assert.equal(seen.analog[0]?.channels[0]!.freqMhz, 438.7);
   });
 });

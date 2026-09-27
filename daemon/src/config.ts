@@ -33,10 +33,12 @@ export interface AnalogConfig {
 
 export interface DaemonConfig {
   dmrId: number;
+  /** 生效值：BrandMeister 关着时是空数组，不管文件里原来配了多少条。 */
   queries: Query[];
   apiUrl: string;
   ingestToken: string;
   spoolDir: string;
+  /** 生效值：模拟守听关着（或者压根没配）时是 undefined，不起 rtl_sdr。 */
   analog?: AnalogConfig;
 }
 
@@ -62,14 +64,16 @@ export function loadConfig(path: string): ConfigResult {
 
   const problems: string[] = [];
   const dmrId = raw.dmrId;
-  const queries = raw.queries;
   const token = raw.ingestToken;
+  // 缺省开。关着时 queries 可以是空的或者缺失，文件里原来配的那些不用管。
+  const brandmeisterEnabled = raw.brandmeisterEnabled !== false;
+  const queries = raw.queries;
 
   if (typeof dmrId !== 'number' || dmrId <= 0) {
     problems.push('dmrId 必填。没有它就判不出哪次发射是本台的，队列会一直是空的');
   }
   if (typeof token !== 'string' || token.length < 16) problems.push('ingestToken 必填');
-  problems.push(...checkQueries(queries));
+  problems.push(...checkQueries(queries, brandmeisterEnabled));
 
   if (problems.length > 0) return { ok: false, problems };
 
@@ -77,8 +81,11 @@ export function loadConfig(path: string): ConfigResult {
   const near = (p: string) => resolve(dirname(path), p);
 
   const a = raw.analog;
+  // 缺省开。关着时这段直接当没配过：不读也不验它的信道表，daemon 反正不会
+  // 拿它去起 rtl_sdr，装了坏数据也不该拦住这台机器起来。
+  const analogEnabled = isObject(a) && a.enabled !== false;
   let analog: AnalogConfig | undefined;
-  if (isObject(a)) {
+  if (analogEnabled) {
     // 和 api 读配置、设置页校验是同一个函数，三处收的是同一种信道表。
     const { channels, problems: bad } = readAnalogChannels(a);
     if (channels === undefined) {
@@ -107,7 +114,7 @@ export function loadConfig(path: string): ConfigResult {
     config: {
       analog,
       dmrId: dmrId as number,
-      queries: queries as Query[],
+      queries: brandmeisterEnabled ? (queries as Query[]) : [],
       apiUrl: typeof raw.apiUrl === 'string' ? raw.apiUrl : 'http://127.0.0.1:3000',
       ingestToken: token as string,
       spoolDir: near(typeof raw.spoolDir === 'string' ? raw.spoolDir : './spool'),

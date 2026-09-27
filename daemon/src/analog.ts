@@ -6,6 +6,7 @@ import { AUDIO_RATE, Channelizer } from './channelizer.ts';
 import { planTuning } from './core.ts';
 import type { Activity } from './core.ts';
 import { SquelchDetector } from './detector.ts';
+import type { SquelchEvent } from './detector.ts';
 import { decodeMdc } from './mdc.ts';
 
 export interface AnalogChannel {

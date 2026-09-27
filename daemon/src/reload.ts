@@ -22,7 +22,7 @@ const sameAnalog = (a?: AnalogConfig, b?: AnalogConfig) => JSON.stringify(a) ===
 export function watchConfig(
   path: string,
   applied: DaemonConfig,
-  apply: { queries: (q: Query[]) => void; analog: (a: AnalogConfig) => void },
+  apply: { queries: (q: Query[]) => void; analog: (a: AnalogConfig | undefined) => void },
 ): () => void {
   let current = applied;
   let timer: NodeJS.Timeout | undefined;
@@ -37,12 +37,10 @@ export function watchConfig(
 
     if (!sameQueries(current.queries, next.queries)) apply.queries(next.queries);
 
-    // 只有原来就在守听时才换。从没有 analog 变成有，要重启进程才拿得到接收机。
-    if (next.analog && current.analog && !sameAnalog(current.analog, next.analog)) {
-      apply.analog(next.analog);
-    } else if (Boolean(next.analog) !== Boolean(current.analog)) {
-      console.error('analog 那一段是加上或去掉了，要重启守护进程才生效');
-    }
+    // 关掉、开起来、换信道，三种都在这一条里：apply.analog 收 undefined
+    // 就是关，从 undefined 变成有值就是开，两头都有值就是换。开关一变
+    // 也算数，不用等两头都配过才生效。
+    if (!sameAnalog(current.analog, next.analog)) apply.analog(next.analog);
 
     current = next;
   };

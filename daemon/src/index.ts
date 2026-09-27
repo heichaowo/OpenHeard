@@ -10,6 +10,7 @@ import { Ingest } from './ingest.ts';
 import { normalise } from './normalise.ts';
 import { watchConfig } from './reload.ts';
 import { start, startAnalog } from './runner.ts';
+import type { AnalogHandle } from './runner.ts';
 
 const { values } = parseArgs({
   options: {
@@ -148,7 +149,8 @@ if (values['mdc-probe']) {
       `${analog ? `，守听 ${analog.channels.map((c) => `${c.freqMhz} MHz`).join('、')}` : '，没配模拟守听'}，推给 ${apiUrl}`,
   );
   const digital = start(queries, dmrId, ingest);
-  const radio = analog ? startAnalog(analog, ingest) : undefined;
+  // 可变的句柄：开关一变，这里在起、停、换之间切换，不再需要重启整个进程。
+  let radio: AnalogHandle | undefined = analog ? startAnalog(analog, ingest) : undefined;
   // launchd 停这个任务时发 SIGTERM。挂了监听，Node 就不再自己退出，
   // 所以这里要明说退出，否则 launchd 要等 20 秒再补一个 SIGKILL。
   process.once('SIGTERM', () => {
@@ -159,6 +161,15 @@ if (values['mdc-probe']) {
   // 界面改设置时 api 把配置文件写回去，这边看着文件跟着变，不用再开一条接口。
   watchConfig(path, result.config, {
     queries: (q) => digital.restart(q),
-    analog: (a) => radio?.retune(a),
+    analog: (a) => {
+      if (a === undefined) {
+        radio?.stop();
+        radio = undefined;
+      } else if (radio === undefined) {
+        radio = startAnalog(a, ingest);
+      } else {
+        radio.retune(a);
+      }
+    },
   });
 }
