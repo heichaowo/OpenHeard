@@ -216,14 +216,16 @@ describe('一段里的发射很多时', () => {
     expect(container.querySelector('.ant-table-expanded-row .ant-pagination')).not.toBeNull()
   })
 
+  // 数复选框不用 getAllByRole：几十个框时它要把无障碍树整个算一遍，CI 上超过 5 秒。
   it('手机上先列 20 次，按一下再多 20 次', async () => {
     setViewportWidth(375)
-    render(tree([row(many)]))
+    const { container } = render(tree([row(many)]))
+    const boxes = () => container.querySelectorAll('input[type="checkbox"]').length
     await userEvent.click(screen.getByText(/逐次发射/))
 
-    expect(screen.getAllByRole('checkbox').length).toBe(1 + 20)
-    await userEvent.click(screen.getByRole('button', { name: /再显示 20 次/ }))
-    expect(screen.getAllByRole('checkbox').length).toBe(1 + 40)
+    expect(boxes()).toBe(1 + 20)
+    await userEvent.click(screen.getByText(/再显示 20 次/))
+    expect(boxes()).toBe(1 + 40)
   })
 
   // 聚类猜错时，桌面上也要能把不属于这次通联的那几次拿掉。
