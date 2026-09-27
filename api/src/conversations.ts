@@ -46,10 +46,11 @@ export interface ConversationPage {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
-/** 请求里这三样通用参数，三个视图都要验、都要用同一套规则。 */
+/** 请求里这几样通用参数，三个视图都要验、都要用同一套规则。 */
 function checkFilters(q: {
   origin?: string;
   status?: string;
+  channel?: string;
   limit?: string;
   cursor?: string;
 }): ConversationFilters {
@@ -69,6 +70,7 @@ function checkFilters(q: {
   return {
     origin: q.origin,
     status: q.status as ConversationStatus | undefined,
+    channel: q.channel,
     limit,
     cursor: q.cursor,
   };
@@ -181,6 +183,36 @@ function buildChannelWindow(
   return out;
 }
 
+/**
+ * 一条信道的种子按窗口分了组，两个窗口本该不相交，但窗口之间那段死区里
+ * 可能藏着一条把两边连起来的发射——它自己不是种子，两边窗口各自的扩窗
+ * 检查也都摸不到它（各自离自己窗口的边界都够远）。结果同一条真实对话
+ * 被两个窗口各建出一份，id 不一样，膜起来看却有共同成员。按成员是否
+ * 重叠合并：真正不相干的对话永远不共享一个 activity id，共享了就是同一条。
+ */
+function mergeOverlapping(built: Built[], config: Config): Built[] {
+  const groups: Built[][] = [];
+  for (const b of built) {
+    if (b.qsoId !== undefined) {
+      groups.push([b]); // 已入库的成员由 resolved_activity 定死，不会和别的对话重叠
+      continue;
+    }
+    const ids = new Set(b.cluster.activities.map((a) => a.id));
+    const hit = groups.find((g) => g.some((x) => x.qsoId === undefined && x.cluster.activities.some((a) => ids.has(a.id))));
+    if (hit) hit.push(b);
+    else groups.push([b]);
+  }
+  return groups.map((g) => {
+    if (g.length === 1) return g[0]!;
+    const union = new Map<string, Activity>();
+    for (const b of g) for (const a of b.cluster.activities) union.set(a.id, a);
+    const cluster = clusterOfGroup([...union.values()]);
+    const status: ConversationStatus =
+      g[0]!.status === 'ignored' ? 'ignored' : unresolvedStatus(cluster.activities, nowS(), config.pendingWindowDays * 86400);
+    return { cluster, status };
+  });
+}
+
 function toConversations(db: DatabaseSync, config: Config, built: Built[]): Conversation[] {
   const loggedIds = [...new Set(built.filter((b) => b.qsoId !== undefined).map((b) => b.qsoId!))];
   const briefs = selectQsoBriefs(db, loggedIds);
@@ -268,14 +300,14 @@ export function unloggedConversations(
     else byChannel.set(key, [s.startAt]);
   }
 
-  const built: Built[] = [];
+  let built: Built[] = [];
   for (const [key, times] of byChannel) {
     for (const w of mergeWindows(times, EXTEND_STEP_S)) {
-      for (const b of buildChannelWindow(db, config, key, w.start, w.end, config.dmrId)) {
-        if (b.status === 'unlogged') built.push(b);
-      }
+      built.push(...buildChannelWindow(db, config, key, w.start, w.end, config.dmrId));
     }
   }
+  // 两个窗口之间可能藏着一条两边都摸不到的发射，把同一条对话各建了一份。
+  built = mergeOverlapping(built, config).filter((b) => b.status === 'unlogged');
 
   let items = toConversations(db, config, built);
   items = applyFilters(items, filters);
@@ -329,12 +361,15 @@ export function searchConversations(
       else byChannel.set(key, [a.startAt]);
     }
 
-    const built: Built[] = [];
+    let built: Built[] = [];
     for (const [key, times] of byChannel) {
       for (const w of mergeWindows(times, EXTEND_STEP_S)) {
         built.push(...buildChannelWindow(db, config, key, w.start, w.end, config.dmrId));
       }
     }
+    // 两颗种子隔得太远、窗口不重叠，但中间藏着一条两边都摸不到的发射，把
+    // 同一条真实对话各建了一份：按成员重叠合并回一份。
+    built = mergeOverlapping(built, config);
     // 只留下真的含种子的对话：窗口合并会把邻近但不相干的对话也读进来。
     const withSeed = built.filter((b) => b.cluster.activities.some((a) => batch.has(a.id)));
 
