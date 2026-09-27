@@ -38,9 +38,9 @@
 
 | 方法和路径 | 响应 |
 |---|---|
-| `GET /api/station` | `{"station": StationDefaults, "channels": Channel[]}` |
+| `GET /api/station` | `{"station": StationDefaults, "channels": Channel[], "analogEnabled": boolean, "brandmeisterEnabled": boolean}` |
 
-两者都来自配置，不入库。`channels` 是频谱表，快速补录的信道下拉用它。
+`station` 和 `channels` 都来自配置，不入库。`channels` 是频谱表，快速补录的信道下拉用它。`analogEnabled` 和 `brandmeisterEnabled` 是两个开关此刻的值。界面靠这条接口就能拿到，不用等 `/api/radios` 或者 `/api/ops`。
 
 ## 待确认队列
 
@@ -296,10 +296,13 @@ that are still absent.
 
 | Method and path | Response |
 |---|---|
-| `GET /api/station` | `{"station": StationDefaults, "channels": Channel[]}` |
+| `GET /api/station` | `{"station": StationDefaults, "channels": Channel[], "analogEnabled": boolean, "brandmeisterEnabled": boolean}` |
 
-Both come from the config and are never stored. `channels` is the spectrum
-table behind the quick-entry channel picker.
+`station` and `channels` come from the config and are never stored.
+`channels` is the spectrum table behind the quick-entry channel picker.
+`analogEnabled` and `brandmeisterEnabled` are the two switches' effective
+values, available here so the web store knows them before `/api/radios` or
+`/api/ops` are ever polled.
 
 ## Pending queue
 
