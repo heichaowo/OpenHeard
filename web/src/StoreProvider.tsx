@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { missingFields } from '@core'
 import type { Channel, PendingItem, Qso, StationDefaults } from '@core'
-import { api, errorText } from './api'
+import { ApiError, api, errorText } from './api'
 import { StoreContext } from './store'
 import type { PendingRow, Store } from './store'
 
@@ -15,6 +15,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<PendingItem[]>([])
   const [qsos, setQsos] = useState<Qso[]>([])
   const [recordings, setRecordings] = useState<Set<string>>(() => new Set())
+  // 配置里缺省都是开，请求还没回来之前也当作开，免得界面在首屏闪一下「关着」。
+  const [analogEnabled, setAnalogEnabled] = useState(true)
+  const [brandmeisterEnabled, setBrandmeisterEnabled] = useState(true)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | undefined>()
 
@@ -41,6 +44,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setPending(p)
       setQsos(q)
       setRecordings(new Set(r))
+      // 配置里缺省是开；?? true 只是兜底旧响应漏了这两个字段的情况。
+      setAnalogEnabled(s.analogEnabled ?? true)
+      setBrandmeisterEnabled(s.brandmeisterEnabled ?? true)
       setError(undefined)
     } catch (e) {
       if (mine !== seq.current) return
@@ -80,25 +86,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       pending: rows,
       qsos,
       recordings,
+      analogEnabled,
+      brandmeisterEnabled,
       loading,
       error,
       refresh,
-      promote: async (clusterId, draft, activityIds) => {
-        await api.promote(clusterId, draft, activityIds)
+      promote: async (activityIds, draft) => {
+        const qso = await api.promoteActivities(activityIds, draft)
         await refresh()
+        return qso
       },
-      ignore: async (clusterId, activityIds) => {
-        await api.ignore(clusterId, activityIds)
+      ignore: async (id, activityIds) => {
+        // /conversations/ignore 永远 200，结算不了的那一段报在 missing 里，
+        // 不是抛错。这里翻回抛错，单段忽略的调用方照旧用 .catch 接。
+        const r = await api.ignoreActivities([{ id, activityIds }])
+        if (r.missing.includes(id)) {
+          throw new ApiError(409, '这几次发射结算不了，可能已经变了，刷新后重试')
+        }
         await refresh()
       },
       ignoreMany: async (picks) => {
-        const r = await api.ignoreMany(picks)
+        const r = await api.ignoreActivities(picks)
         await refresh()
         return r
       },
       addQso: async (draft) => {
-        await api.addQso(draft)
+        const qso = await api.addQso(draft)
         await refresh()
+        return qso
       },
       editQso: async (id, draft) => {
         await api.editQso(id, draft)
@@ -114,7 +129,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return r
       },
     }),
-    [station, channels, rows, qsos, recordings, loading, error, refresh],
+    [station, channels, rows, qsos, recordings, analogEnabled, brandmeisterEnabled, loading, error, refresh],
   )
 
   return <StoreContext value={value}>{children}</StoreContext>

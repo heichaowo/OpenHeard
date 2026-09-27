@@ -23,8 +23,9 @@ import { FIELD_LABELS as LABELS } from "../fields";
 import type { QsoFormValues } from "../components/QsoFields";
 import { missingFields, normalizeCallsign } from "@core";
 import { ApiError, errorText } from "../api";
+import type { ConversationPick } from "../api";
 import { confirmDiscard } from "../discard";
-import type { Activity, ClusterPick, QsoDraft, QsoField } from "@core";
+import type { Activity, QsoDraft, QsoField } from "@core";
 import { useRecall } from "../recall";
 import { useStore } from "../store";
 import type { PendingRow } from "../store";
@@ -283,7 +284,8 @@ export default function PendingQueue() {
   const narrowed = (row: PendingRow) =>
     chosen(row).length !== row.cluster.activities.length;
 
-  const draftOf = (row: PendingRow) => draftFor(row, chosen(row));
+  const draftOf = (row: PendingRow) =>
+    draftFor(row.cluster.activities, row.draft, chosen(row));
   const missingOf = (row: PendingRow) => missingFields(draftOf(row));
 
   const ignoreTitle = (row: PendingRow) =>
@@ -305,7 +307,7 @@ export default function PendingQueue() {
 
   const open = (row: PendingRow) => {
     const ids = chosen(row);
-    const draft = draftFor(row, ids);
+    const draft = draftFor(row.cluster.activities, row.draft, ids);
     setEditing({ row, ids, draft });
     resetRecall();
     form.setFieldsValue({
@@ -339,8 +341,8 @@ export default function PendingQueue() {
     if (pickedCount === 0) return;
     setClearing(true);
     try {
-      const picks: ClusterPick[] = Object.entries(picked).map(
-        ([clusterId, activityIds]) => ({ clusterId, activityIds }),
+      const picks: ConversationPick[] = Object.entries(picked).map(
+        ([id, activityIds]) => ({ id, activityIds }),
       );
       const r = await ignoreMany(picks);
       setPicked({});
@@ -417,7 +419,7 @@ export default function PendingQueue() {
     const draft = draftOf(row);
     setBusyId(row.cluster.id);
     try {
-      await promote(row.cluster.id, draft, chosen(row));
+      await promote(chosen(row), draft);
       message.success(`${draft.call} 已入库`);
     } catch (e) {
       fail(e);
@@ -445,7 +447,7 @@ export default function PendingQueue() {
     // 就是两个入库请求同时在路上。
     setBusyId(editing.row.cluster.id);
     try {
-      await promote(editing.row.cluster.id, draft, editing.ids);
+      await promote(editing.ids, draft);
       setEditing(null);
       message.success(`${draft.call} 已入库`);
     } catch (e) {

@@ -42,6 +42,8 @@ const snapshot = (radios: Radio[]): Ops => ({
   activityRetentionDays: 90,
   pendingWindowDays: 7,
   now,
+  analogEnabled: true,
+  brandmeisterEnabled: true,
 })
 
 const mount = () =>

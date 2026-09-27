@@ -38,6 +38,8 @@ const store = (qsos: Qso[]): Store => ({
   pending: [],
   qsos,
   recordings: new Set<string>(),
+  analogEnabled: true,
+  brandmeisterEnabled: true,
   loading: false,
   error: undefined,
   promote: vi.fn(),

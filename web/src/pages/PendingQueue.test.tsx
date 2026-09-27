@@ -55,6 +55,8 @@ const store = (pending: PendingRow[]): Store => ({
   pending,
   qsos: [],
   recordings: new Set<string>(),
+  analogEnabled: true,
+  brandmeisterEnabled: true,
   loading: false,
   error: undefined,
   promote,
@@ -107,7 +109,7 @@ describe('结算的是人看过的那几次', () => {
     await userEvent.click(button('直接入库'))
 
     await waitFor(() => expect(promote).toHaveBeenCalledOnce())
-    expect(promote.mock.calls[0][2]).toEqual(['m1', 'x1'])
+    expect(promote.mock.calls[0][0]).toEqual(['m1', 'x1'])
   })
 
   it('抽屉开着时段长了，确认只结算打开时那几次', async () => {
@@ -119,8 +121,7 @@ describe('结算的是人看过的那几次', () => {
     await userEvent.click(button('入库'))
 
     await waitFor(() => expect(promote).toHaveBeenCalledOnce())
-    expect(promote.mock.calls[0][0]).toBe('m1')
-    expect(promote.mock.calls[0][2]).toEqual(['m1', 'x1'])
+    expect(promote.mock.calls[0][0]).toEqual(['m1', 'x1'])
   })
 
   it('选中没人回的之后对方回了，批量忽略只带选中时那一次', async () => {
@@ -133,7 +134,7 @@ describe('结算的是人看过的那几次', () => {
     await confirm()
 
     await waitFor(() => expect(ignoreMany).toHaveBeenCalledOnce())
-    expect(ignoreMany.mock.calls[0][0]).toEqual([{ clusterId: 'a1', activityIds: ['a1'] }])
+    expect(ignoreMany.mock.calls[0][0]).toEqual([{ id: 'a1', activityIds: ['a1'] }])
   })
 })
 
@@ -180,7 +181,7 @@ describe('手机上只挑一段里的几次', () => {
     await userEvent.click(button('直接入库'))
 
     await waitFor(() => expect(promote).toHaveBeenCalledOnce())
-    const [, draft, ids] = promote.mock.calls[0]
+    const [ids, draft] = promote.mock.calls[0]
     expect(draft).toMatchObject({ call: 'BD7BBB', startAt: T + 60 })
     expect(ids).toEqual(['m2', 'x2'])
   })
@@ -244,7 +245,7 @@ describe('一段里的发射很多时', () => {
     expect(await screen.findByText('挑中 2 / 3 次')).toBeInTheDocument()
     await userEvent.click(button('直接入库'))
     await waitFor(() => expect(promote).toHaveBeenCalledOnce())
-    expect(promote.mock.calls[0][2]).toEqual(['m1', 'x1'])
+    expect(promote.mock.calls[0][0]).toEqual(['m1', 'x1'])
   })
 })
 
