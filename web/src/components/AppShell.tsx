@@ -3,37 +3,31 @@ import {
   DatabaseOutlined,
   EditOutlined,
   InboxOutlined,
-  MenuFoldOutlined,
-  MenuOutlined,
-  MenuUnfoldOutlined,
   MonitorOutlined,
   PoweroffOutlined,
   SettingOutlined,
   SoundOutlined,
 } from '@ant-design/icons'
-import { Badge, Button, Drawer, Dropdown, Layout, Menu } from 'antd'
+import { Badge, Button, Dropdown, Grid, Layout } from 'antd'
 import type { MenuProps } from 'antd'
-import { useState } from 'react'
-import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import type { ReactNode } from 'react'
+import { Link, Outlet, useLocation } from 'react-router-dom'
 import { ZonePicker } from './ZonePicker'
+import { PlayerProvider } from '../PlayerProvider'
 import { useSession } from '../session'
 import { usePreferences } from '../theme'
 import { useStore } from '../store'
 
-const COLLAPSED_KEY = 'openheard.sidebar-collapsed'
-
-function Brand({ collapsed = false }: { collapsed?: boolean }) {
-  // 本台呼号跟设置走。写死的话，换了呼号侧边栏还是旧的。
+function Brand() {
+  // 本台呼号跟设置走。写死的话，换了呼号头里还是旧的。
   const { station } = useStore()
   return (
     <div className="brand">
       <div className="brand-mark">OH</div>
-      {!collapsed && (
-        <div>
-          <div className="brand-name">OpenHeard</div>
-          {station.myCallsign && <div className="brand-call">{station.myCallsign}</div>}
-        </div>
-      )}
+      <div>
+        <div className="brand-name">OpenHeard</div>
+        {station.myCallsign && <div className="brand-call">{station.myCallsign}</div>}
+      </div>
     </div>
   )
 }
@@ -56,83 +50,90 @@ function ThemeMenu() {
   )
 }
 
-export function AppShell() {
+interface NavItem {
+  key: string
+  icon: ReactNode
+  label: string
+  badge: number
+}
+
+/**
+ * 导航项。路由暂时还是今天这六个：待确认队列和收听记录合并成一页是
+ * 下一阶段页面实现者的事，这一层只管外壳换新样子。
+ */
+function useNavItems(): NavItem[] {
   const { pending } = useStore()
-  const { signOut } = useSession()
-  const location = useLocation()
-  const navigate = useNavigate()
-  const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem(COLLAPSED_KEY) === 'true',
-  )
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const width = collapsed ? 72 : 232
-
-  const items: MenuProps['items'] = [
-    {
-      key: '/pending',
-      icon: <InboxOutlined />,
-      label: (
-        <>
-          待确认队列{' '}
-          {pending.length > 0 && <Badge count={pending.length} size="small" offset={[4, -2]} />}
-        </>
-      ),
-    },
-    { key: '/log', icon: <DatabaseOutlined />, label: '日志' },
-    { key: '/heard', icon: <SoundOutlined />, label: '收听记录' },
-    { key: '/new', icon: <EditOutlined />, label: '快速补录' },
-    { key: '/ops', icon: <MonitorOutlined />, label: '运维' },
-    { key: '/settings', icon: <SettingOutlined />, label: '设置' },
+  return [
+    { key: '/pending', icon: <InboxOutlined />, label: '待确认队列', badge: pending.length },
+    { key: '/log', icon: <DatabaseOutlined />, label: '日志', badge: 0 },
+    { key: '/heard', icon: <SoundOutlined />, label: '收听记录', badge: 0 },
+    { key: '/new', icon: <EditOutlined />, label: '快速补录', badge: 0 },
+    { key: '/ops', icon: <MonitorOutlined />, label: '运维', badge: 0 },
+    { key: '/settings', icon: <SettingOutlined />, label: '设置', badge: 0 },
   ]
+}
 
-  const go: MenuProps['onClick'] = ({ key }) => {
-    navigate(key)
-    setDrawerOpen(false)
-  }
-
-  const menu = (
-    <Menu
-      className="sidebar-menu"
-      mode="inline"
-      selectedKeys={[location.pathname]}
-      items={items}
-      onClick={go}
-    />
+/** 桌面上顶栏里的胶囊页签。 */
+function NavPills({ items }: { items: NavItem[] }) {
+  const { pathname } = useLocation()
+  return (
+    <nav className="nav-pills" aria-label="页面导航">
+      {items.map((item) => {
+        const active = pathname === item.key
+        return (
+          <Link
+            key={item.key}
+            to={item.key}
+            className={active ? 'nav-pill active' : 'nav-pill'}
+            aria-current={active ? 'page' : undefined}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+            {item.badge > 0 && <Badge count={item.badge} size="small" />}
+          </Link>
+        )
+      })}
+    </nav>
   )
+}
 
-  const toggle = () => {
-    setCollapsed((v) => {
-      localStorage.setItem(COLLAPSED_KEY, String(!v))
-      return !v
-    })
-  }
+/** 手机上贴底的标签栏。安全区内边距给 Home Indicator 留位置。 */
+function BottomTabs({ items }: { items: NavItem[] }) {
+  const { pathname } = useLocation()
+  return (
+    <nav className="bottom-tabs" aria-label="页面导航">
+      {items.map((item) => {
+        const active = pathname === item.key
+        return (
+          <Link
+            key={item.key}
+            to={item.key}
+            className={active ? 'bottom-tab active' : 'bottom-tab'}
+            aria-current={active ? 'page' : undefined}
+          >
+            <Badge count={item.badge} size="small" offset={[2, 0]}>
+              {item.icon}
+            </Badge>
+            <span>{item.label}</span>
+          </Link>
+        )
+      })}
+    </nav>
+  )
+}
+
+export function AppShell() {
+  const { signOut } = useSession()
+  const items = useNavItems()
+  // 768px 以上桌面，以下手机。和别的页面判断宽窄用的同一个断点。
+  const wide = Grid.useBreakpoint().md ?? true
 
   return (
-    <Layout className="app-shell">
-      <Layout.Sider className="app-sider" width={width} collapsedWidth={72} collapsed={collapsed}>
-        <Brand collapsed={collapsed} />
-        {menu}
-        <div className="sidebar-foot">
-          <Button
-            type="text"
-            block
-            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            onClick={toggle}
-          >
-            {collapsed ? '' : '收起'}
-          </Button>
-        </div>
-      </Layout.Sider>
-
-      <Layout className="shell-main" style={{ marginInlineStart: width }}>
+    <PlayerProvider>
+      <Layout className="app-shell">
         <Layout.Header className="shell-header">
-          <Button
-            className="only-narrow"
-            type="text"
-            icon={<MenuOutlined />}
-            onClick={() => setDrawerOpen(true)}
-            aria-label="菜单"
-          />
+          <Brand />
+          {wide && <NavPills items={items} />}
           <div className="header-actions">
             <ZonePicker />
             <ThemeMenu />
@@ -147,18 +148,8 @@ export function AppShell() {
         <Layout.Content className="shell-content">
           <Outlet />
         </Layout.Content>
+        {!wide && <BottomTabs items={items} />}
       </Layout>
-
-      <Drawer
-        placement="left"
-        size={232}
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        styles={{ body: { padding: 0 } }}
-        title={<Brand />}
-      >
-        {menu}
-      </Drawer>
-    </Layout>
+    </PlayerProvider>
   )
 }
