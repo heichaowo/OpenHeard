@@ -23,7 +23,8 @@
 | `activityRetentionDays` | 是 | `activity` 的保留期。`qso` 不裁。比 `pendingWindowDays` 短时按 `pendingWindowDays` 算，队列里还没处理的段不裁 |
 | `station` | 是 | 本台信息，见下 |
 | `channels` | 是 | 频谱表，可以是空数组 |
-| `queries` | 是 | BrandMeister 查询，至少一条 |
+| `queries` | 视情况 | BrandMeister 查询。`brandmeisterEnabled` 是 `false` 时可以缺失或者是空数组，否则至少一条 |
+| `brandmeisterEnabled` | 否 | BrandMeister 查询的开关，缺省开。关掉时 `queries` 原样留在文件里，只是不轮询 |
 
 端口走环境变量 `OPENHEARD_PORT`，缺省 3000。
 
@@ -59,13 +60,14 @@ openssl rand -hex 32                            # sessionSecret 和 ingestToken
 | `dmrId`、`queries`、`ingestToken` | 是 | 和上面同一份 |
 | `apiUrl` | 否 | 推给谁，缺省 `http://127.0.0.1:3000` |
 | `spoolDir` | 否 | 推不上去时落盘的目录，缺省 `./spool` |
-| `analog` | 否 | 模拟守听，缺这一段就只跑数字侧 |
+| `analog` | 否 | 模拟守听，缺这一段或者 `enabled` 是 `false` 就只跑数字侧 |
 
 ### analog
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `channels` | 是 | 要守的信道，每个是 `{freqMhz, channel}`：频率，以及进 `Activity` 的信道名。旧写法只写一个 `freqMhz` 和一个 `channel`，仍然认 |
+| `channels` | 视情况 | 要守的信道，每个是 `{freqMhz, channel}`：频率，以及进 `Activity` 的信道名。旧写法只写一个 `freqMhz` 和一个 `channel`，仍然认。`enabled` 是 `false` 时不读也不验这张表 |
+| `enabled` | 否 | 模拟守听的开关，缺省开。关掉时这张信道表原样留在文件里，只是不起接收机 |
 | `gainDb` | 否 | 调谐器增益，缺省 32.8。收不到时先调到 49.6，见下文 |
 | `myUnitId` | 否 | 本台的 MDC-1200 unit ID，**十六进制字符串**。缺了就判不出哪次发射是本台，队列会一直是空的。旧名 `unitId` 仍然认 |
 | `openMarginDb` | 否 | 静噪打开的余量，dB，缺省 12。噪声比静默基准低这么多就算有载波 |
@@ -73,6 +75,8 @@ openssl rand -hex 32                            # sessionSecret 和 ingestToken
 | `recordingsDir` | 否 | 每次发射的音频往这里写，缺省 `./recordings` |
 
 一支接收机同时守 `channels` 里的全部信道，最多 8 个，最高和最低相差不超过 1.8 MHz。接收机调到哪、采样率多少由程序算，设置页上填的时候就看得到。两个隔得更远的波段要再加一支接收机，这一版不支持。
+
+`brandmeisterEnabled` 和 `analog.enabled` 改了，守护进程盯着配置文件跟上，不用重启。关掉模拟守听的那一刻，正在收的那次发射照常收尾：写录音、推事件，不会因为接收机停了就丢掉。
 
 两个余量按部署调。噪声本底和天线各地不一样，调大了弱信号永远打不开静噪，调小了噪声起伏就会伪造出发射，把队列和磁盘塞满。运维页上写着此刻的噪声离门限还差多少，以及这次守听里最接近的一刻差了多少，照着那两个数调。设置页上能直接改，清空一格就回到缺省值。
 
@@ -116,7 +120,8 @@ loop nobody can see.
 | `activityRetentionDays` | yes | How long `activity` is kept. `qso` is never pruned. When shorter than `pendingWindowDays`, `pendingWindowDays` applies, so nothing still waiting in the queue is pruned |
 | `station` | yes | Our own station, below |
 | `channels` | yes | The spectrum table, may be empty |
-| `queries` | yes | BrandMeister queries, at least one |
+| `queries` | conditional | BrandMeister queries. May be missing or empty when `brandmeisterEnabled` is `false`, otherwise at least one |
+| `brandmeisterEnabled` | no | Switch for BrandMeister queries, on by default. Off leaves `queries` in the file unchanged; it just stops polling |
 
 The port comes from `OPENHEARD_PORT`, default 3000.
 
@@ -163,13 +168,14 @@ src query reaches back 53 days, talkgroup 460 reaches 3.6 days, and 91 reaches
 | `dmrId`, `queries`, `ingestToken` | yes | The same ones as above |
 | `apiUrl` | no | Where to push, default `http://127.0.0.1:3000` |
 | `spoolDir` | no | Where rows land when a push fails, default `./spool` |
-| `analog` | no | Analog watch. Without it only the digital side runs |
+| `analog` | no | Analog watch. Without it, or with `enabled: false`, only the digital side runs |
 
 ### analog
 
 | Field | Required | Meaning |
 |---|---|---|
-| `channels` | yes | The channels to watch, each `{freqMhz, channel}`: the frequency and the channel name that goes into `Activity`. The old form with a single `freqMhz` and `channel` is still accepted |
+| `channels` | conditional | The channels to watch, each `{freqMhz, channel}`: the frequency and the channel name that goes into `Activity`. The old form with a single `freqMhz` and `channel` is still accepted. Not read or validated while `enabled` is `false` |
+| `enabled` | no | Switch for analog watch, on by default. Off leaves this channel table in the file unchanged; it just stops the receiver |
 | `gainDb` | no | Tuner gain, default 32.8. If nothing is heard, try 49.6 first; see below |
 | `myUnitId` | no | Our MDC-1200 unit ID, **as a hex string**. Without it nothing is ever marked as ours and the queue stays empty. The old name `unitId` is still accepted |
 | `openMarginDb` | no | dB below the calibrated idle floor that counts as a carrier, default 12 |
@@ -181,6 +187,12 @@ more than 1.8 MHz between the highest and the lowest. Where the receiver is
 tuned and at what sample rate is worked out by the program, and the settings
 page shows it while the channels are being entered. Bands further apart need a
 second receiver, which this version does not support.
+
+The daemon watches the config file and picks up `brandmeisterEnabled` and
+`analog.enabled` changes without a restart. The moment analog is switched off,
+a transmission still in progress is still closed out normally: the wav gets
+written and the event still gets pushed, instead of being lost because the
+receiver stopped.
 
 Both margins are tuned per deployment. Noise floors and antennas differ by
 site: too large and a weak signal never opens the squelch, too small and
