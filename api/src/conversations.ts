@@ -150,6 +150,11 @@ function splitRange(rows: RangeRow[]): { unresolved: Activity[]; ignored: Activi
  * 一条信道在一个读取窗口里建出来的对话：未结算和已忽略按间隔聚类，碰到窗口
  * 边界就往外扩（见 core 的 extendChannel）；已入库按 qso_id 整条补全，
  * 不受窗口边界影响——它的成员是 resolved_activity 定死的，不是猜出来的。
+ *
+ * `need` 关掉不要的那两档：未入库视图的种子只来自未结算行，已忽略和已入库
+ * 永远进不了它的结果，聚类和逐个 qso 补全（各一次额外查询）白做。25 万行
+ * 的合成库上，一条热闹信道每天上千行，多年的已入库行混在同一条信道的窗口
+ * 里时，这两档的查询数和聚类量能反超真正要的那一档。
  */
 function buildChannelWindow(
   db: DatabaseSync,
@@ -158,6 +163,7 @@ function buildChannelWindow(
   windowStart: number,
   windowEnd: number,
   dmrId: number,
+  need: { ignored: boolean; logged: boolean } = { ignored: true, logged: true },
 ): Built[] {
   const rows = selectChannelRange(db, key, windowStart, windowEnd, dmrId);
   const { unresolved, ignored, qsoIds } = splitRange(rows);
@@ -170,15 +176,17 @@ function buildChannelWindow(
       out.push({ cluster, status: unresolvedStatus(cluster.activities, nowS(), config.pendingWindowDays * 86400) });
     }
   }
-  if (ignored.length > 0) {
+  if (need.ignored && ignored.length > 0) {
     const readMore = (lo: number, hi: number) => splitRange(selectChannelRange(db, key, lo, hi, dmrId)).ignored;
     for (const cluster of extendChannel(ignored, windowStart, windowEnd, config.clusterGapS, readMore)) {
       out.push({ cluster, status: 'ignored' });
     }
   }
-  for (const qsoId of qsoIds) {
-    const members = selectQsoMembers(db, qsoId, dmrId);
-    if (members.length > 0) out.push({ cluster: clusterOfGroup(members), status: 'logged', qsoId });
+  if (need.logged) {
+    for (const qsoId of qsoIds) {
+      const members = selectQsoMembers(db, qsoId, dmrId);
+      if (members.length > 0) out.push({ cluster: clusterOfGroup(members), status: 'logged', qsoId });
+    }
   }
   return out;
 }
@@ -191,18 +199,40 @@ function buildChannelWindow(
  * 重叠合并：真正不相干的对话永远不共享一个 activity id，共享了就是同一条。
  */
 function mergeOverlapping(built: Built[], config: Config): Built[] {
+  // 按成员 id 找命中的组，不是拿每一条新记录去扫全部已有组：未入库这类视图
+  // 一次能建出几千条 built，逐条互相比对是 O(n²)，25 万行的合成库上量到
+  // 4 秒。activity id -> 组的映射把它降到摊还 O(n)。
   const groups: Built[][] = [];
+  const groupOf = new Map<string, Built[]>();
   for (const b of built) {
     if (b.qsoId !== undefined) {
       groups.push([b]); // 已入库的成员由 resolved_activity 定死，不会和别的对话重叠
       continue;
     }
-    const ids = new Set(b.cluster.activities.map((a) => a.id));
-    const hit = groups.find((g) => g.some((x) => x.qsoId === undefined && x.cluster.activities.some((a) => ids.has(a.id))));
-    if (hit) hit.push(b);
-    else groups.push([b]);
+    const touched = new Set<Built[]>();
+    for (const a of b.cluster.activities) {
+      const g = groupOf.get(a.id);
+      if (g) touched.add(g);
+    }
+    let target: Built[];
+    if (touched.size === 0) {
+      target = [];
+      groups.push(target);
+    } else {
+      const merged = [...touched];
+      target = merged[0]!;
+      for (const g of merged.slice(1)) {
+        for (const item of g) {
+          target.push(item);
+          for (const a of item.cluster.activities) groupOf.set(a.id, target);
+        }
+        g.length = 0; // 并进 target 了，留一个空组，最后统一过滤掉
+      }
+    }
+    target.push(b);
+    for (const a of b.cluster.activities) groupOf.set(a.id, target);
   }
-  return groups.map((g) => {
+  return groups.filter((g) => g.length > 0).map((g) => {
     if (g.length === 1) return g[0]!;
     const union = new Map<string, Activity>();
     for (const b of g) for (const a of b.cluster.activities) union.set(a.id, a);
@@ -303,7 +333,9 @@ export function unloggedConversations(
   let built: Built[] = [];
   for (const [key, times] of byChannel) {
     for (const w of mergeWindows(times, EXTEND_STEP_S)) {
-      built.push(...buildChannelWindow(db, config, key, w.start, w.end, config.dmrId));
+      // 种子只来自未结算行，已忽略、已入库这两档永远不会出现在结果里：
+      // 不聚类、不为每个 qso 多查一次。
+      built.push(...buildChannelWindow(db, config, key, w.start, w.end, config.dmrId, { ignored: false, logged: false }));
     }
   }
   // 两个窗口之间可能藏着一条两边都摸不到的发射，把同一条对话各建了一份。
