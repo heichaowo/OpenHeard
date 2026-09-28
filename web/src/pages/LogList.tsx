@@ -15,11 +15,13 @@ import {
   Tag,
   Typography,
 } from "antd";
+import { useSearchParams } from "react-router-dom";
 import { api, errorText } from "../api";
-import type { QsoChange } from "../api";
+import type { QsoChange, QsoWithActivities } from "../api";
 import { confirmDiscard } from "../discard";
 import { AsyncContent } from "../components/AsyncContent";
 import { PageHeader } from "../components/PageHeader";
+import { PlayAll } from "../components/PlayAll";
 import { QsoFields } from "../components/QsoFields";
 import { FIELD_LABELS } from "../fields";
 import type { QsoFormValues } from "../components/QsoFields";
@@ -29,6 +31,9 @@ import type { Qso, QsoDraft } from "@core";
 import { useRecall } from "../recall";
 import { useStore } from "../store";
 import { useTime } from "../useTime";
+
+/** /api/qsos 的实际形状带 activities，Store.qsos 的声明类型没带，见 stage1-notes.md。 */
+const activitiesOf = (q: Qso) => (q as QsoWithActivities).activities;
 
 function download(name: string, text: string) {
   const url = URL.createObjectURL(
@@ -46,7 +51,9 @@ export default function LogList() {
   const { qsos, editQso, removeQso, importAdif, loading, error, refresh } =
     useStore();
   const wide = Grid.useBreakpoint().md ?? true;
-  const [search, setSearch] = useState("");
+  // 收听页的已入库行链到这里，带着 ?q=。只认初值：改搜索框不回写地址栏。
+  const [searchParams] = useSearchParams();
+  const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const [form] = Form.useForm<QsoFormValues>();
   const [editing, setEditing] = useState<Qso | null>(null);
   const [saving, setSaving] = useState(false);
@@ -194,10 +201,10 @@ export default function LogList() {
     );
   };
 
-  /** 自动入库的那条删掉之后，它用到的发射会回到待确认队列，要先说清楚。 */
+  /** 自动入库的那条删掉之后，它用到的发射会回到收听页，要先说清楚。 */
   const deleteTitle = (q: Qso) =>
     q.clusterId
-      ? `删除与 ${q.call} 的通联？它用到的那几次发射会回到待确认队列。`
+      ? `删除与 ${q.call} 的通联？它用到的那几次发射会回到收听页，重新等你结算。`
       : `删除与 ${q.call} 的通联？`;
 
   /** 手机上的一条一张卡。和待确认队列同一个道理：表格在这个宽度里要横滚。 */
@@ -233,6 +240,9 @@ export default function LogList() {
                 {q.note}
               </Typography.Paragraph>
             )}
+            <div style={{ marginBottom: 12 }}>
+              <PlayAll activities={activitiesOf(q)} />
+            </div>
             <div className="pending-card-actions">
               <Button type="primary" block onClick={() => open(q)}>
                 编辑
@@ -267,9 +277,9 @@ export default function LogList() {
       width: 148,
       ellipsis: true,
       render: (call: string) => (
-        <Typography.Text strong title={call}>
+        <span className="callsign" title={call}>
           {call}
-        </Typography.Text>
+        </span>
       ),
     },
     {
@@ -305,6 +315,12 @@ export default function LogList() {
       key: "their",
       ellipsis: true,
       render: (_, q) => [q.qth, q.gridsquare].filter(Boolean).join(" ") || "—",
+    },
+    {
+      title: "录音",
+      key: "recording",
+      width: 140,
+      render: (_, q) => <PlayAll activities={activitiesOf(q)} />,
     },
     {
       title: "操作",
@@ -357,6 +373,7 @@ export default function LogList() {
               allowClear
               className="card-toolbar-search"
               placeholder="按呼号、QTH、网格或备注筛选"
+              value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
             <Typography.Text type="secondary">{rows.length} 条</Typography.Text>
@@ -375,8 +392,8 @@ export default function LogList() {
               rowKey="id"
               columns={columns}
               dataSource={rows}
-              // 各列定宽加起来约 950，QTH 至少留 200。
-              scroll={{ x: 1150 }}
+              // 各列定宽加起来约 1000（加了「录音」这一列），QTH 至少留 200。
+              scroll={{ x: 1200 }}
               pagination={{ pageSize: 20, hideOnSinglePage: true }}
               expandable={{
                 // 改动历史要展开才知道有没有，所以每行都可展开。
@@ -479,6 +496,7 @@ export default function LogList() {
               style={{ marginTop: 16 }}
             >
               <QsoFields
+                qsos={qsos}
                 recalledFrom={
                   recalledAt === undefined ? undefined : time.at(recalledAt)
                 }

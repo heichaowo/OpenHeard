@@ -1,9 +1,12 @@
 import { App } from 'antd'
+import { MemoryRouter } from 'react-router-dom'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Qso } from '@core'
+import type { QsoWithActivities } from '../api'
 import { Preferences } from '../Preferences'
+import { PlayerProvider } from '../PlayerProvider'
 import { setViewportWidth } from '../testSetup'
 import { StoreContext } from '../store'
 import type { Store } from '../store'
@@ -16,7 +19,9 @@ vi.mock('../api', async (importOriginal) => {
   return { ...real, api: { ...real.api, qsoHistory } }
 })
 
-const qso = (over: Partial<Qso> = {}): Qso => ({
+// 受保护的 /api/qsos 实际带 activities（QsoWithActivities），Store.qsos 的
+// 声明类型没带，见 stage1-notes.md。测试用的假数据照实际形状造。
+const qso = (over: Partial<QsoWithActivities> = {}): QsoWithActivities => ({
   id: 'q1',
   call: 'BD7KLO',
   startAt: 1_789_000_000,
@@ -26,6 +31,7 @@ const qso = (over: Partial<Qso> = {}): Qso => ({
   rstSent: '59',
   rstRcvd: '59',
   createdAt: 1_789_000_000,
+  activities: [],
   ...over,
 })
 
@@ -52,15 +58,24 @@ const store = (qsos: Qso[]): Store => ({
   refresh: vi.fn(),
 })
 
-const mount = (qsos: Qso[] = [qso()], zone?: string) => {
+const mount = (
+  qsos: Qso[] = [qso()],
+  zone?: string,
+  path = '/log',
+  recordings: Set<string> = new Set(),
+) => {
   if (zone) localStorage.setItem(ZONE_KEY, zone)
   else localStorage.removeItem(ZONE_KEY)
   return render(
     <Preferences>
       <App>
-        <StoreContext value={store(qsos)}>
-          <LogList />
-        </StoreContext>
+        <MemoryRouter initialEntries={[path]}>
+          <StoreContext value={{ ...store(qsos), recordings }}>
+            <PlayerProvider>
+              <LogList />
+            </PlayerProvider>
+          </StoreContext>
+        </MemoryRouter>
       </App>
     </Preferences>,
   )
@@ -231,10 +246,10 @@ describe('LogList 的改动历史和删除', () => {
     expect(screen.getByText(/成都/)).toBeInTheDocument()
   })
 
-  it('删自动入库的那条时说那几次发射会回到待确认队列', async () => {
+  it('删自动入库的那条时说那几次发射会回到收听页', async () => {
     mount([qso({ clusterId: 'c1' })])
     await userEvent.click(button('删除'))
-    expect((await screen.findAllByText(/会回到待确认队列/)).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText(/会回到收听页，重新等你结算/)).length).toBeGreaterThan(0)
   })
 
   it('编辑框能改本台网格', async () => {
@@ -252,3 +267,39 @@ describe('LogList 的改动历史和删除', () => {
   })
 })
 
+// 收听页的已入库行链到 /log?q=<call>，日志要拿它当搜索框的初值。
+describe('LogList 从 ?q= 带初始搜索', () => {
+  it('带着呼号打开，搜索框和列表都按它筛过', () => {
+    mount(
+      [qso({ id: 'a', call: 'BA1AA' }), qso({ id: 'b', call: 'BD7KLO' })],
+      undefined,
+      '/log?q=BD7KLO',
+    )
+
+    expect(screen.getByPlaceholderText(/按呼号、QTH、网格或备注筛选/)).toHaveValue('BD7KLO')
+    expect(screen.getByText('BD7KLO')).toBeInTheDocument()
+    expect(screen.queryByText('BA1AA')).not.toBeInTheDocument()
+  })
+
+  it('没带 ?q= 就是空的搜索框', () => {
+    mount([qso()])
+    expect(screen.getByPlaceholderText(/按呼号、QTH、网格或备注筛选/)).toHaveValue('')
+  })
+})
+
+describe('LogList 的录音', () => {
+  it('手工录入的通联没有观测，录音格是禁用的「无录音」', () => {
+    mount([qso()])
+    expect(screen.getByRole('button', { name: '没有录音' })).toBeDisabled()
+  })
+
+  it('有录音的那几次，录音格能连播', () => {
+    mount(
+      [qso({ activities: [{ id: 'a1', startAt: 1_789_000_000, durationS: 3.2 }] })],
+      undefined,
+      '/log',
+      new Set(['a1']),
+    )
+    expect(screen.getByRole('button', { name: /连播 1 段，共 3.2 秒/ })).toBeInTheDocument()
+  })
+})
