@@ -1,156 +1,104 @@
 # OpenHeard
 
-自动记录每一次通联的业余无线电日志。
+**An amateur radio logbook that automatically records every contact.**
 
-## 这是什么
+OpenHeard captures radio contacts from multiple sources—BrandMeister DMR network and analog repeaters—and assembles them into a structured log. Contacts populate automatically; operators only fill in what the machine cannot know.
 
-通联记录不用人打字，来源有两个。BrandMeister 发布逐次会话的 feed，我们轮询它的历史查询，不订阅。模拟中继不发布任何数据，所以用一台只收不发的 SDR 听中继下行，把每一次静噪开启变成事件。机器不知道的那部分由人填，模拟侧要填的只有对方呼号。
+## Quick Start
 
-名字取自 Last Heard。BrandMeister 这样称呼它的 feed，中继的「听到列表」也是这个意思。
-
-## 现状
-
-五个目录都在跑。`web/` 是管理端，五个页面：收听（听到的对话在这里确认入库）、带 ADIF 进出的日志、快速补录、运维和设置。`public/` 是公开展示页，独立应用，除 react 外零依赖，一个请求拿齐整页。`api/` 用 Hono 加内置的 `node:sqlite`，只监听回环地址。`daemon/` 同时轮询 BrandMeister 和守听模拟信道。`core/` 放它们共用的纯逻辑，不依赖框架、数据库和 HTTP。
-
-两条采集线都在真信号上验过。BrandMeister 那条一次取回 200 行入库并聚成对话。模拟那条在 438.700 上把每次按下 PTT 切成事件，并靠 MDC-1200 认出本台。
-
-聚类的间隔阈值已经有实测依据，46001 组 9636 个静默间隔的 p90 是 102 秒，取 120 秒。还差一样，公开展示页对外怎么落地没有方案，主机在国内而 `bg0cg.ampr.org` 无法备案。
-
-设计规范在 `specs/openheard.md`，只写约束代码的内容。接口文档在 `docs/`，分管理端、公开端、采集三篇，另有配置和部署各一篇。场地数据和调研过程不放在仓库里。
-
-## 已定的设计决定
-
-这几条在写代码前定死，因为事后改代价最高。
-
-- 数据模型从第一天就带齐 LoTW 要的字段，包括频率、模式、波段、双向 RST 和网格
-- 在此之上还存 QTH、设备、天线、功率和高度
-- Web 界面用 React 19 加 Ant Design 6
-- 现在不做原生客户端，浏览器够用
-- 不重复造轮子，TQSL 签名调命令行，DXCC 判定用现成库
-
-## 能自动到什么程度
-
-| 通联怎么走 | 机器能知道什么 |
-|---|---|
-| 模拟 FM 过中继 | 时间、时长、哪个信道，以及这次有没有你 |
-| 模拟 FM 的对方呼号 | 无，由人填 |
-| DMR 过 BrandMeister | 本台发射的全部字段，对方呼号要另查话务组 |
-| HF，以后 | FT8 走 WSJT-X 的 UDP，SSB 无 |
-
-模拟侧那个缺口是永久的。模拟 FM 空中不带身份信息，任何接收机和任何软件都叫不出对方呼号。语音识别能缩小缺口，不能消除，所以它是可选项。
-
-## 怎么跑
-
-后端和采集守护进程各跑一个进程，配置抄 `api/openheard.config.example.json`。
-
-```
+**Backend + daemon:**
+```bash
 cd api && npm install && OPENHEARD_CONFIG=../openheard.config.json npm start
 cd daemon && npm install && npm start -- --config ../openheard.config.json
+```
+
+**Web UI + public page:**
+```bash
 cd web && npm install && npm run dev
 cd public && npm install && npm run dev
 ```
 
-`npm test` 在 `api/`、`daemon/` 和 `web/` 下各自可跑，`web/` 那个连 `core/` 的测试一起跑，界面部分用 vitest 加 jsdom。根目录的 `npm run verify` 把类型检查、测试、lint、构建和冒烟全跑一遍，CI 跑的就是这一条。冒烟那一步（`npm run smoke`）把真正的 `api/src/index.ts` 起到一个端口上打一遍，因为别的测试都是直接调函数，从不经过入口。
+Copy `api/openheard.config.example.json` to `openheard.config.json` and configure it first.
 
-装到常驻的机器上走 `infra/install.sh`，它把 `api` 和 `daemon` 做成两个 LaunchAgent，步骤见 [docs/deployment.md](docs/deployment.md)。
+## What it Does
 
-## 许可证
+| Source | What OpenHeard Captures | What Needs Human Input |
+|--------|------------------------|----------------------|
+| **Analog FM (repeater)** | Time, duration, channel, whether you transmitted | Far station's callsign |
+| **DMR (BrandMeister)** | Your transmission details (all fields), timestamp | Far station's callsign (from talkgroup query) |
+| **HF (future)** | FT8 via WSJT-X UDP feed | SSB contacts (no automation) |
 
-**AGPL-3.0**，见 `LICENSE`。把修改过的副本跑成网络服务，就必须向使用者提供它的源码。
+Contacts are clustered into conversations using measured silence thresholds (120 seconds for analog).
+
+## Architecture
+
+- **`api/`** — Hono backend over SQLite, REST endpoints for web and daemon
+- **`daemon/`** — Polling service for BrandMeister; SDR listener for analog 438.700
+- **`web/`** — React 19 + Ant Design 6 admin interface
+  - Listening: confirm and review captured contacts
+  - Log: search, ADIF import/export, QSL management
+  - Entry: quick manual logging
+  - Operations & Settings
+- **`public/`** — Lightweight public station page (no external dependencies)
+- **`core/`** — Shared framework-free business logic and data models
+
+## Data Model
+
+The log stores every field required for LoTW (Logbook of The World):
+- Frequency, mode, band, RST (both directions), grid square
+- Plus: QTH, equipment, antenna, power, elevation
+
+## Design Decisions
+
+Fixed before code started (highest cost to change):
+
+- Full LoTW compliance from day one
+- React 19 + Ant Design 6 for the UI
+- No native client—browser-based only
+- Reuse existing tools (TQSL via CLI, DXCC libraries)
+
+## Testing & Deployment
+
+Run locally:
+```bash
+npm test           # in api/, daemon/, web/
+npm run verify     # root: typecheck, tests, lint, builds, smoke test
+```
+
+Deploy to production:
+```bash
+infra/install.sh   # macOS LaunchAgent setup
+```
+
+See [docs/deployment.md](docs/deployment.md) for details.
+
+## Documentation
+
+- **`specs/openheard.md`** — Technical specification
+- **`docs/api-admin.md`** — Admin interface API
+- **`docs/api-public.md`** — Public page API
+- **`docs/api-ingest.md`** — Data capture API
+- **`docs/config.md`** — Configuration reference
+- **`docs/deployment.md`** — Setup and deployment
+
+## License
+
+**AGPL-3.0** — See [LICENSE](LICENSE)
+
+Modified copies run as a network service must offer source to users.
 
 ---
 
-# OpenHeard (English)
+## 中文说明
 
-An amateur radio logbook that fills itself in.
+自动记录业余无线电通联的日志系统。支持 BrandMeister DMR 网络和模拟中继两个数据源。
 
-## What this is
+- **`api/`** — Hono 后端，使用 SQLite
+- **`daemon/`** — 轮询 BrandMeister，同时监听本地模拟信道 438.700
+- **`web/`** — React 19 + Ant Design 6 管理界面
+- **`public/`** — 轻量级公开展示页
+- **`core/`** — 共享的业务逻辑
 
-Contacts arrive without anyone typing them, from two sources. BrandMeister
-publishes a per-session feed, which we poll rather than subscribe to. Analog
-repeaters publish nothing, so a receive-only SDR listens to the downlink and
-turns each squelch opening into an event. A human fills in what the machine
-cannot know, which on the analog side is the other station's callsign and
-nothing else.
+快速启动见上面的 Quick Start。完整文档在 `docs/` 目录。
 
-The name is taken from Last Heard. That is what BrandMeister calls its feed,
-and a repeater's heard list means the same thing.
-
-## Status
-
-All five directories run. `web/` is the admin side, five pages: listening,
-where heard conversations are confirmed into the log, the log with ADIF import
-and export, quick entry, operations, and settings.
-`public/` is the public station page, a separate app with no dependencies
-beyond react, fetching the whole page in one request. `api/` is Hono over the
-built-in `node:sqlite`, bound to loopback only. `daemon/` polls BrandMeister
-and watches analog channels at the same time. `core/` holds the
-framework-free logic they share.
-
-Both capture paths have been verified on live signals. The BrandMeister one
-pulls 200 rows into the database and clusters them into conversations; the
-analog one turns each key-up on 438.700 into an event and recognises our own
-station from its MDC-1200 burst.
-
-The clustering gap threshold now has a measurement behind it: over 9636
-silence gaps on talkgroup 46001, p90 is 102 seconds, so it is set to 120. One thing is still open. There is no plan yet for where the public page is
-served from, since the host is in China and `bg0cg.ampr.org` cannot get an ICP
-filing.
-
-The spec is in `specs/openheard.md` and covers only what constrains the code.
-The API docs are in `docs/`, one file each for the admin, public and ingest
-surfaces plus one for configuration and one for deployment. Site data and
-research stay outside this repository.
-
-## Settled design decisions
-
-These were fixed before any code, because changing them later costs the most.
-
-- The data model carries every field LoTW requires from day one, including
-  frequency, mode, band, both RST directions and the grid square
-- On top of that it stores QTH, device, antenna, power and height
-- The web UI is React 19 with Ant Design 6
-- No native client for now. A browser is enough
-- Nothing gets reinvented. TQSL signs through its command line, and DXCC
-  resolution uses an existing library
-
-## How far automation reaches
-
-| How the contact was carried | What the machine can know |
-|---|---|
-| Analog FM through a repeater | when, how long, which channel, and whether we were in it |
-| Analog FM, the far station's callsign | nothing, a human types it |
-| DMR through BrandMeister | every field of our own transmissions; the far station's callsign needs a second query against the talkgroup |
-| HF, later | FT8 through the WSJT-X UDP feed, nothing for SSB |
-
-The analog gap is permanent. Analog FM carries no identity, so no receiver and
-no software can name the far station. Speech recognition narrows the gap
-without closing it, which is why it stays optional.
-
-## Running it
-
-The backend and the capture daemon are separate processes. Copy
-`api/openheard.config.example.json` for the config.
-
-```
-cd api && npm install && OPENHEARD_CONFIG=../openheard.config.json npm start
-cd daemon && npm install && npm start -- --config ../openheard.config.json
-cd web && npm install && npm run dev
-cd public && npm install && npm run dev
-```
-
-`npm test` works in `api/`, `daemon/` and `web/`; the one in `web/` runs the
-`core/` tests too, and the UI ones under vitest with jsdom. `npm run verify` at
-the root runs typecheck, tests, lint, both builds and the smoke test, and is
-the same command CI runs. The smoke step (`npm run smoke`) starts the real
-`api/src/index.ts` on a port and exercises it, since every other test calls
-functions directly and never goes through the entrypoint.
-
-To install on the machine it lives on, `infra/install.sh` sets `api` and
-`daemon` up as two LaunchAgents. The steps are in
-[docs/deployment.md](docs/deployment.md).
-
-## Licence
-
-**AGPL-3.0**. See `LICENSE`. Running a modified copy as a network service
-obliges you to offer its source to the people using it.
+协议：**AGPL-3.0**
