@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createApp, createBrokenApp } from './app.ts';
 import { loadConfig } from './config.ts';
-import { openDb, refreshStats } from './db.ts';
+import { openDb } from './db.ts';
 import { userVersion } from './migrations.ts';
 import { createStore } from './store.ts';
 
@@ -38,13 +38,8 @@ if (result.ok) {
   console.log(existsSync(webDist) ? `管理端界面：${webDist}` : `没有管理端界面，跑 npm run build --prefix web`);
 
   // 发射行的保留期裁剪不等轮询触发：模拟和数字两路都关着时，也不能什么都不裁。
-  // 统计跟着一起补，搜呼号才走得上呼号索引，见 refreshStats。
   store.prune();
-  refreshStats(db);
-  setInterval(() => {
-    store.prune();
-    refreshStats(db);
-  }, 3600_000);
+  setInterval(() => store.prune(), 3600_000);
 } else {
   for (const p of result.problems) console.error(`配置: ${p}`);
   app = createBrokenApp(result.problems);

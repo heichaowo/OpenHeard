@@ -35,31 +35,6 @@ export function openDb(path: string): DatabaseSync {
   return db;
 }
 
-/**
- * 给查询规划器补统计。库从没跑过 ANALYZE 时，规划器不知道呼号索引有多挑剔，
- * 搜一个少见的呼号也走时间索引倒着扫整张表：25 万行的合成库上 48 毫秒，库越
- * 大越慢。完整统计之后少见的前缀走呼号索引（0.2 毫秒），常见的前缀照样走时间
- * 索引（5 毫秒）。
- *
- * 只认完整统计。采样出来的统计（analysis_limit，或者 PRAGMA optimize 在表涨了
- * 十倍之后自己重跑的那种）会把规划器带回时间索引，所以不交给 PRAGMA optimize。
- * 行数和上次统计时比翻了倍或者少了一半才重跑，25 万行一次约 140 毫秒，保留期
- * 攒满之后基本不再跑。
- */
-export function refreshStats(db: DatabaseSync): void {
-  const { n } = db.prepare('SELECT COUNT(*) AS n FROM activity').get() as { n: number };
-  // 空表 ANALYZE 不写统计行，跑了也白跑，下一轮照样当没统计过。
-  if (n === 0) return;
-  const hasStat = db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'sqlite_stat1'").get() !== undefined;
-  const row = hasStat
-    ? (db.prepare("SELECT stat FROM sqlite_stat1 WHERE tbl = 'activity' LIMIT 1").get() as { stat: string } | undefined)
-    : undefined;
-  const counted = row === undefined ? 0 : Number(row.stat.split(' ')[0]);
-  if (counted > 0 && n < counted * 2 && n * 2 > counted) return;
-  db.exec('PRAGMA analysis_limit = 0');
-  db.exec('ANALYZE');
-}
-
 /** node:sqlite 没有 better-sqlite3 那个 transaction 包装，自己补一个。 */
 export function withTx<T>(db: DatabaseSync, fn: () => T): T {
   db.exec('BEGIN');
@@ -485,6 +460,26 @@ export function selectPendingSeeds(db: DatabaseSync, dmrId: number, pendingCutof
   return rows.map((r) => rowToActivity(r, dmrId));
 }
 
+/**
+ * 呼号种子的查询，钉死走呼号索引。
+ *
+ * 不钉的话，规划器把呼号区间当成不挑剔，倒着扫时间索引、逐行比呼号。搜一个
+ * 少见的呼号就要扫完整张表：25 万行 48 毫秒，库越大越慢。ANALYZE 救不了：
+ * 有的 SQLite 版本统计完照样这么选，采样出来的统计又会把它带回去。子查询只在
+ * 呼号索引上取行号、按时间排、截断，外层再取整行。25 万行上少见的前缀 0.03
+ * 毫秒，占两成的 BG 4 毫秒，九成都匹配的一个字母 17 毫秒。
+ */
+export const CALLSIGN_SEEDS_SQL = `
+  SELECT * FROM activity WHERE rowid IN (
+    SELECT rowid FROM activity INDEXED BY activity_callsign
+    WHERE callsign >= ? AND callsign < ?
+      AND start_at >= ? AND start_at < ?
+    ORDER BY start_at DESC
+    LIMIT ?
+  )
+  ORDER BY start_at DESC
+`;
+
 /** 搜索种子之一：呼号落在前缀范围内的发射行，本台和对方都在内。 */
 export function selectCallsignSeeds(
   db: DatabaseSync,
@@ -496,13 +491,7 @@ export function selectCallsignSeeds(
   dmrId: number,
 ): Activity[] {
   const rows = db
-    .prepare(`
-      SELECT * FROM activity
-      WHERE callsign >= ? AND callsign < ?
-        AND start_at >= ? AND start_at < ?
-      ORDER BY start_at DESC
-      LIMIT ?
-    `)
+    .prepare(CALLSIGN_SEEDS_SQL)
     .all(prefix, prefixNext, retentionCutoff, beforeStartAt, limit) as Record<string, unknown>[];
   return rows.map((r) => rowToActivity(r, dmrId));
 }

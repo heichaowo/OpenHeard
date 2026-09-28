@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Activity, Qso } from './core.ts';
 import {
+  CALLSIGN_SEEDS_SQL,
   deleteQso,
   insertActivities,
   insertQso,
   openDb,
   pruneActivities,
-  refreshStats,
   resolveActivities,
   selectQsos,
   selectUnresolvedActivities,
@@ -189,71 +189,37 @@ describe('通联字段往返', () => {
   });
 });
 
-describe('refreshStats', () => {
-  // 从没统计过的库，规划器把呼号区间当成不挑剔，搜少见呼号也倒着扫时间索引。
-  // 统计过之后少见的前缀要走呼号索引，常见的前缀照样走时间索引。
-  const plan = (db: ReturnType<typeof openDb>, lo: string, hi: string) =>
-    (
-      db
-        .prepare(
-          `EXPLAIN QUERY PLAN SELECT * FROM activity WHERE callsign >= ? AND callsign < ?
-             AND start_at >= 0 AND start_at < 9999999999 ORDER BY start_at DESC LIMIT 200`,
-        )
-        .all(lo, hi) as { detail: string }[]
-    )
-      .map((r) => r.detail)
-      .join(' | ');
-
-  it('统计之后，少见的呼号前缀走呼号索引', () => {
+describe('CALLSIGN_SEEDS_SQL', () => {
+  // 没跑过 ANALYZE 的库上，规划器会倒着扫时间索引、逐行比呼号，少见的呼号要
+  // 扫完整张表。有的 SQLite 版本统计完也照样这么选，所以计划钉在查询里。
+  it('没有统计也走呼号索引', () => {
     const db = openDb(':memory:');
-    const rows = Array.from({ length: 20_000 }, (_, i) =>
-      row(act(`a${i}`, { startAt: 1_789_000_000 + i * 30, callsign: `BG${i % 2000}X`, talkgroup: 46001 })),
+    const rows = Array.from({ length: 5_000 }, (_, i) =>
+      row(act(`a${i}`, { startAt: 1_789_000_000 + i * 30, callsign: `BG${i % 500}X`, talkgroup: 46001 })),
     );
     insertActivities(db, rows, 1);
-    assert.match(plan(db, 'ZZ9', 'ZZ:'), /activity_start_at/);
-
-    refreshStats(db);
-    assert.match(plan(db, 'ZZ9', 'ZZ:'), /activity_callsign/);
-    assert.match(plan(db, 'BG', 'BH'), /activity_start_at/);
+    const plan = (db.prepare(`EXPLAIN QUERY PLAN ${CALLSIGN_SEEDS_SQL}`).all('ZZ9', 'ZZ:', 0, 9_999_999_999, 200) as {
+      detail: string;
+    }[])
+      .map((r) => r.detail)
+      .join(' | ');
+    assert.match(plan, /activity_callsign/);
+    assert.doesNotMatch(plan, /activity_start_at/);
   });
 
-  const firstCount = (db: ReturnType<typeof openDb>) =>
-    Number((db.prepare("SELECT stat FROM sqlite_stat1 WHERE tbl = 'activity' LIMIT 1").get() as { stat: string }).stat.split(' ')[0]);
-  const many = (from: number, count: number) =>
-    Array.from({ length: count }, (_, k) => {
-      const i = from + k;
-      return row(act(`a${i}`, { startAt: 1_789_000_000 + i * 30, callsign: `BG${i % 2000}X`, talkgroup: 46001 }));
-    });
-
-  // PRAGMA optimize 在表涨了十倍之后会按采样重跑，采样出来的统计又把呼号搜索
-  // 带回时间索引。表涨过一倍就要完整重跑，统计里的行数是准的。
-  it('行数翻倍之后完整重跑，统计里的行数是准的', () => {
+  it('最新的在前，截到 limit 条，只要前缀范围内的', () => {
     const db = openDb(':memory:');
-    insertActivities(db, many(0, 2_000), 1);
-    refreshStats(db);
-    assert.equal(firstCount(db), 2_000);
-
-    insertActivities(db, many(2_000, 18_000), 1);
-    refreshStats(db);
-    assert.equal(firstCount(db), 20_000);
-    assert.match(plan(db, 'ZZ9', 'ZZ:'), /activity_callsign/);
-  });
-
-  // 每小时都完整重跑的话，25 万行每次要卡住别的请求 140 毫秒。
-  it('行数没怎么变就不重跑', () => {
-    const db = openDb(':memory:');
-    insertActivities(db, many(0, 2_000), 1);
-    refreshStats(db);
-    insertActivities(db, many(2_000, 1_000), 1);
-    refreshStats(db);
-    assert.equal(firstCount(db), 2_000);
-  });
-
-  it('空表不统计，有了数据再统计', () => {
-    const db = openDb(':memory:');
-    refreshStats(db);
-    insertActivities(db, many(0, 10), 1);
-    refreshStats(db);
-    assert.equal(firstCount(db), 10);
+    insertActivities(
+      db,
+      [
+        row(act('old', { startAt: 100, callsign: 'BG0CG' })),
+        row(act('new', { startAt: 300, callsign: 'BG0AA' })),
+        row(act('mid', { startAt: 200, callsign: 'BG0ZZ' })),
+        row(act('other', { startAt: 400, callsign: 'BH1AA' })),
+      ],
+      1,
+    );
+    const ids = (db.prepare(CALLSIGN_SEEDS_SQL).all('BG', 'BH', 0, 1_000, 2) as { id: string }[]).map((r) => r.id);
+    assert.deepEqual(ids, ['new', 'mid']);
   });
 });
