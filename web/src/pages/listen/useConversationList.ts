@@ -70,6 +70,13 @@ export function useConversationList(viewParams: ConversationsParams | null, poll
   // viewParams 每次渲染都是新对象；换成字符串才能当 effect 的依赖用，
   // 内容没变就不重新拉。
   const key = viewParams ? JSON.stringify(viewParams) : null
+  // 回调里读这个引用，不把对象本身放进依赖。放进去的话，页面每重新渲染
+  // 一次，轮询的定时器就重建一次，而收听页每 15 秒内总有几次重新渲染，
+  // 轮询一次都跑不到。
+  const paramsRef = useRef(viewParams)
+  useEffect(() => {
+    paramsRef.current = viewParams
+  })
 
   const runFull = useCallback((mine: number, p: ConversationsParams) => {
     return api.conversations(p).then(
@@ -112,14 +119,16 @@ export function useConversationList(viewParams: ConversationsParams | null, poll
   }, [key, runFull])
 
   const retry = useCallback(() => {
+    const viewParams = paramsRef.current
     if (viewParams === null) return
     const mine = ++seq.current
     setState((s) => ({ ...s, loading: true, error: undefined }))
     runFull(mine, viewParams)
-  }, [viewParams, runFull])
+  }, [runFull])
 
   const mergeLatest = useCallback(
     async (dropIds: readonly string[] = []) => {
+      const viewParams = paramsRef.current
       if (viewParams === null) return
       const mine = seq.current
       try {
@@ -131,11 +140,11 @@ export function useConversationList(viewParams: ConversationsParams | null, poll
         // 这次失败不打断已经显示的列表，下一轮/下一次操作自己会再试。
       }
     },
-    [viewParams],
+    [],
   )
 
   useEffect(() => {
-    if (pollMs === null || viewParams === null) return
+    if (pollMs === null || key === null) return
     const tick = () => {
       if (!document.hidden) void mergeLatest()
     }
@@ -145,9 +154,10 @@ export function useConversationList(viewParams: ConversationsParams | null, poll
       clearInterval(t)
       document.removeEventListener('visibilitychange', tick)
     }
-  }, [pollMs, viewParams, mergeLatest])
+  }, [pollMs, key, mergeLatest])
 
   const loadMore = useCallback(() => {
+    const viewParams = paramsRef.current
     if (viewParams === null) return
     const s = stateRef.current
     if (s.next === undefined || s.loadingMore) return
@@ -164,7 +174,7 @@ export function useConversationList(viewParams: ConversationsParams | null, poll
         setState((v) => ({ ...v, loadingMore: false, error: errorText(e) }))
       },
     )
-  }, [viewParams])
+  }, [])
 
   const showNew = useCallback(() => {
     setState((s) => {

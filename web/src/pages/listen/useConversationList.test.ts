@@ -135,3 +135,33 @@ describe('viewParams 为 null', () => {
     expect(result.current.loading).toBe(false)
   })
 })
+
+// 收听页每次渲染都新建一个 viewParams 对象。store 每 15 秒刷一次、未入库计数
+// 每 15 秒刷一次、放录音时每秒几次，页面一直在重新渲染。定时器跟着对象引用
+// 重建的话，15 秒永远走不完，后台轮询一次都不跑。
+describe('后台轮询', () => {
+  it('父组件不停重新渲染，内容没变，15 秒的轮询照样按时跑', async () => {
+    vi.useFakeTimers()
+    try {
+      conversations.mockResolvedValue({ items: [] })
+      const { rerender } = renderHook(({ p }: { p: ConversationsParams }) => useConversationList(p, 15_000), {
+        initialProps: { p: { from: 0, to: 100 } },
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      const first = conversations.mock.calls.length
+
+      for (let t = 0; t < 60_000; t += 5_000) {
+        rerender({ p: { from: 0, to: 100 } })
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5_000)
+        })
+      }
+
+      expect(conversations.mock.calls.length - first).toBe(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
