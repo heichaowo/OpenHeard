@@ -220,7 +220,8 @@ select {
   gap: 2px;
   min-height: 52px;
   padding-block: 6px;
-  color: var(--ant-color-text-tertiary);
+  /* 楼下室外看手机，最浅那一档灰在白底上只有 3.2:1，看不清字。 */
+  color: var(--ant-color-text-secondary);
   font-size: 10px;
   overflow: hidden;
   text-overflow: ellipsis;
