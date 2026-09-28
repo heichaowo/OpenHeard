@@ -5,6 +5,15 @@ import { IDLE, PlayerContext, recordingUrl } from './player'
 import type { PlayerContextValue, PlayerState, PlayQueueItem } from './player'
 
 /**
+ * 放不了的时候 play() 的 Promise 会被拒绝，真正的失败由 error 事件处理。
+ * 这里只是不让它变成未处理的拒绝。换段时上一次 play() 被打断也会拒绝
+ * （AbortError），那不是失败，更不能拿它去重置状态。
+ */
+const playQuietly = (audio: HTMLAudioElement) => {
+  Promise.resolve(audio.play()).catch(() => undefined)
+}
+
+/**
  * 全应用一个播放器，一个 audio 元素。
  *
  * 同一页一次只放一段：换队列之前先停掉正在放的那个，因为共用同一个
@@ -42,7 +51,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           : { ...s, duration: audio.duration },
       )
 
-    // 一段放完接着放队列里下一段，一段对话能连着放完。
+    // 一段放完接着放队列里下一段，一段对话能连着放完。放不了的那段也一样跳过
+    // （断网、会话过期、刚被保留期裁掉），不能让胶囊一直停在「在放」上。
     const onEnded = () => {
       const queue = queueRef.current
       setState((s) => {
@@ -51,7 +61,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         if (!item) return IDLE
         audio.src = recordingUrl(item.id)
         audio.currentTime = 0
-        void audio.play()
+        playQuietly(audio)
         return { ...s, currentId: item.id, position: 0, duration: item.durationS, index: nextIndex, playing: true }
       })
     }
@@ -59,10 +69,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     audio.addEventListener('timeupdate', onTime)
     audio.addEventListener('loadedmetadata', onLoaded)
     audio.addEventListener('ended', onEnded)
+    audio.addEventListener('error', onEnded)
     return () => {
       audio.removeEventListener('timeupdate', onTime)
       audio.removeEventListener('loadedmetadata', onLoaded)
       audio.removeEventListener('ended', onEnded)
+      audio.removeEventListener('error', onEnded)
     }
   }, [])
 
@@ -74,7 +86,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     audio.pause()
     audio.src = recordingUrl(item.id)
     audio.currentTime = 0
-    void audio.play()
+    playQuietly(audio)
     setState({
       currentId: item.id,
       playing: true,
@@ -94,7 +106,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         audio.pause()
         return { ...s, playing: false }
       }
-      void audio.play()
+      playQuietly(audio)
       return { ...s, playing: true }
     })
   }, [])

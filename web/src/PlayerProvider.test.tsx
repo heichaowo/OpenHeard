@@ -146,6 +146,20 @@ describe('PlayerProvider', () => {
     expect(stateOf()).toMatchObject({ currentId: null, playing: false })
   })
 
+  // 手机断网、会话过期、录音刚被保留期裁掉，浏览器都只报一个 error。
+  // 不接的话胶囊一直显示在放，连放也卡在这一段。
+  it('一段放不了就跳到下一段，最后一段放不了就停', async () => {
+    mount()
+    await userEvent.click(screen.getByText('放 a+b'))
+
+    act(() => FakeAudio.instances[0]!.dispatch('error'))
+    expect(stateOf()).toMatchObject({ currentId: 'b', index: 1, playing: true })
+    expect(FakeAudio.instances[0]!.src).toContain('/api/recordings/b')
+
+    act(() => FakeAudio.instances[0]!.dispatch('error'))
+    expect(stateOf()).toMatchObject({ currentId: null, playing: false })
+  })
+
   it('loadedmetadata 到了之后时长换成文件的实长', async () => {
     mount()
     await userEvent.click(screen.getByText('放 a+b'))
