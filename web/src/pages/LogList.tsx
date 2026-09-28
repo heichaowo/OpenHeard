@@ -319,7 +319,8 @@ export default function LogList() {
     {
       title: "录音",
       key: "recording",
-      width: 140,
+      // 胶囊最窄 118，加两边各 16 的内边距。再窄就被单元格的省略号截掉一截。
+      width: 156,
       render: (_, q) => <PlayAll activities={activitiesOf(q)} />,
     },
     {

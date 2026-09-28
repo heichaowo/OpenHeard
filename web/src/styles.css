@@ -419,8 +419,11 @@ select {
 }
 
 @media (max-width: 560px) {
+  /* 只收左右和顶上。写成 padding 简写会把 767px 那条给底部标签栏留的高度
+     也改回 12px，每页最后四十来像素就压在标签栏底下。 */
   .shell-content {
-    padding: 12px;
+    padding-inline: 12px;
+    padding-block-start: 12px;
   }
   .page-head h1 {
     font-size: 21px !important;
@@ -576,6 +579,15 @@ select {
   .sticky-save {
     inset-block-end: calc(53px + env(safe-area-inset-bottom));
     padding-block-end: 12px;
+  }
+}
+
+/* 保存条要贴满内容区的宽，负边距跟着内容区的内边距走。写在上面那条基础规则之后，
+   否则同样的优先级下被它压回 -16px，整页横向多出 4px。 */
+@media (max-width: 560px) {
+  .sticky-save {
+    margin-inline: -12px;
+    padding-inline: 12px;
   }
 }
 

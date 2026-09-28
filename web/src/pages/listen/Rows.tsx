@@ -275,7 +275,8 @@ export function DesktopRows({
           ? `挑中 ${r.chosenIds.length} / ${r.conv.activities.length} 次`
           : `${r.conv.activities.length} 次 · ${durationText(r.conv.endAt - r.conv.startAt)}`,
     },
-    { title: '播放', key: 'play', width: 140, render: (_, r) => <PlayAll activities={r.conv.activities} /> },
+    // 胶囊最窄 118，加两边各 16 的内边距。再窄就被单元格的省略号截掉一截。
+    { title: '播放', key: 'play', width: 156, render: (_, r) => <PlayAll activities={r.conv.activities} /> },
     {
       title: '操作',
       key: 'action',

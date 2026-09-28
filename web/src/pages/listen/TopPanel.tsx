@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Typography } from 'antd'
+import { channelLabel } from '@core'
 import type { Conversation } from '../../api'
 import { PlayAll } from '../../components/PlayAll'
 import { agoText } from './model'
@@ -38,7 +39,7 @@ export function TopPanel({
           <span className="listen-panel-call callsign">
             {newest ? (newest.qso?.call ?? newest.draft?.call ?? '呼号未知') : '还没听到过'}
           </span>
-          {newest && <span className="listen-panel-channel">{newest.channel}</span>}
+          {newest && <span className="listen-panel-channel">{channelLabel(newest.channel)}</span>}
           {newest && (
             <Typography.Text type="secondary" className="listen-panel-ago">
               {agoText(nowS, newest.startAt)}
