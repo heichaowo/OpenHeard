@@ -217,12 +217,43 @@ describe('refreshStats', () => {
     assert.match(plan(db, 'BG', 'BH'), /activity_start_at/);
   });
 
-  it('统计过一次之后不再完整重跑', () => {
+  const firstCount = (db: ReturnType<typeof openDb>) =>
+    Number((db.prepare("SELECT stat FROM sqlite_stat1 WHERE tbl = 'activity' LIMIT 1").get() as { stat: string }).stat.split(' ')[0]);
+  const many = (from: number, count: number) =>
+    Array.from({ length: count }, (_, k) => {
+      const i = from + k;
+      return row(act(`a${i}`, { startAt: 1_789_000_000 + i * 30, callsign: `BG${i % 2000}X`, talkgroup: 46001 }));
+    });
+
+  // PRAGMA optimize 在表涨了十倍之后会按采样重跑，采样出来的统计又把呼号搜索
+  // 带回时间索引。表涨过一倍就要完整重跑，统计里的行数是准的。
+  it('行数翻倍之后完整重跑，统计里的行数是准的', () => {
     const db = openDb(':memory:');
-    insertActivities(db, [row(act('a', { callsign: 'BG0CG' }))], 1);
+    insertActivities(db, many(0, 2_000), 1);
     refreshStats(db);
-    const before = db.prepare("SELECT stat FROM sqlite_stat1 WHERE tbl = 'activity' LIMIT 1").get();
+    assert.equal(firstCount(db), 2_000);
+
+    insertActivities(db, many(2_000, 18_000), 1);
     refreshStats(db);
-    assert.deepEqual(db.prepare("SELECT stat FROM sqlite_stat1 WHERE tbl = 'activity' LIMIT 1").get(), before);
+    assert.equal(firstCount(db), 20_000);
+    assert.match(plan(db, 'ZZ9', 'ZZ:'), /activity_callsign/);
+  });
+
+  // 每小时都完整重跑的话，25 万行每次要卡住别的请求 140 毫秒。
+  it('行数没怎么变就不重跑', () => {
+    const db = openDb(':memory:');
+    insertActivities(db, many(0, 2_000), 1);
+    refreshStats(db);
+    insertActivities(db, many(2_000, 1_000), 1);
+    refreshStats(db);
+    assert.equal(firstCount(db), 2_000);
+  });
+
+  it('空表不统计，有了数据再统计', () => {
+    const db = openDb(':memory:');
+    refreshStats(db);
+    insertActivities(db, many(0, 10), 1);
+    refreshStats(db);
+    assert.equal(firstCount(db), 10);
   });
 });

@@ -38,16 +38,26 @@ export function openDb(path: string): DatabaseSync {
 /**
  * 给查询规划器补统计。库从没跑过 ANALYZE 时，规划器不知道呼号索引有多挑剔，
  * 搜一个少见的呼号也走时间索引倒着扫整张表：25 万行的合成库上 48 毫秒，库越
- * 大越慢。完整跑一次之后少见的前缀走呼号索引（0.2 毫秒），常见的前缀照样走
- * 时间索引（5 毫秒）。analysis_limit 采样出来的统计改变不了这个选择，所以第一
- * 次要完整跑，25 万行约 140 毫秒。之后交给 PRAGMA optimize，表的规模变化够大
- * 它才重跑，平时不到 1 毫秒。
+ * 大越慢。完整统计之后少见的前缀走呼号索引（0.2 毫秒），常见的前缀照样走时间
+ * 索引（5 毫秒）。
+ *
+ * 只认完整统计。采样出来的统计（analysis_limit，或者 PRAGMA optimize 在表涨了
+ * 十倍之后自己重跑的那种）会把规划器带回时间索引，所以不交给 PRAGMA optimize。
+ * 行数和上次统计时比翻了倍或者少了一半才重跑，25 万行一次约 140 毫秒，保留期
+ * 攒满之后基本不再跑。
  */
 export function refreshStats(db: DatabaseSync): void {
-  const analyzed =
-    db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'sqlite_stat1'").get() !== undefined &&
-    db.prepare("SELECT 1 FROM sqlite_stat1 WHERE tbl = 'activity'").get() !== undefined;
-  db.exec(analyzed ? 'PRAGMA optimize' : 'ANALYZE');
+  const { n } = db.prepare('SELECT COUNT(*) AS n FROM activity').get() as { n: number };
+  // 空表 ANALYZE 不写统计行，跑了也白跑，下一轮照样当没统计过。
+  if (n === 0) return;
+  const hasStat = db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'sqlite_stat1'").get() !== undefined;
+  const row = hasStat
+    ? (db.prepare("SELECT stat FROM sqlite_stat1 WHERE tbl = 'activity' LIMIT 1").get() as { stat: string } | undefined)
+    : undefined;
+  const counted = row === undefined ? 0 : Number(row.stat.split(' ')[0]);
+  if (counted > 0 && n < counted * 2 && n * 2 > counted) return;
+  db.exec('PRAGMA analysis_limit = 0');
+  db.exec('ANALYZE');
 }
 
 /** node:sqlite 没有 better-sqlite3 那个 transaction 包装，自己补一个。 */
