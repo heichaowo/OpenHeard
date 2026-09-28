@@ -2,7 +2,6 @@ import {
   BulbOutlined,
   DatabaseOutlined,
   EditOutlined,
-  InboxOutlined,
   MonitorOutlined,
   PoweroffOutlined,
   SettingOutlined,
@@ -58,16 +57,14 @@ interface NavItem {
 }
 
 /**
- * 导航项。路由暂时还是今天这六个：待确认队列和收听记录合并成一页是
- * 下一阶段页面实现者的事，这一层只管外壳换新样子。
+ * 导航项。待确认队列和收听记录合并成收听一页，五档共用一张图。
  */
 function useNavItems(): NavItem[] {
   const { pending } = useStore()
   return [
-    { key: '/pending', icon: <InboxOutlined />, label: '待确认队列', badge: pending.length },
+    { key: '/heard', icon: <SoundOutlined />, label: '收听', badge: pending.length },
     { key: '/log', icon: <DatabaseOutlined />, label: '日志', badge: 0 },
-    { key: '/heard', icon: <SoundOutlined />, label: '收听记录', badge: 0 },
-    { key: '/new', icon: <EditOutlined />, label: '快速补录', badge: 0 },
+    { key: '/new', icon: <EditOutlined />, label: '补录', badge: 0 },
     { key: '/ops', icon: <MonitorOutlined />, label: '运维', badge: 0 },
     { key: '/settings', icon: <SettingOutlined />, label: '设置', badge: 0 },
   ]

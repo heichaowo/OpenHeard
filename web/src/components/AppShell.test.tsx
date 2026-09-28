@@ -17,7 +17,7 @@ const store = (pendingCount: number): Store =>
     pending: Array.from({ length: pendingCount }, (_, i) => ({ id: String(i) })),
   }) as unknown as Store
 
-const mount = (pendingCount = 0, path = '/pending') =>
+const mount = (pendingCount = 0, path = '/heard') =>
   render(
     <MemoryRouter initialEntries={[path]}>
       <Preferences>
@@ -25,7 +25,7 @@ const mount = (pendingCount = 0, path = '/pending') =>
           <StoreContext value={store(pendingCount)}>
             <Routes>
               <Route element={<AppShell />}>
-                <Route path="pending" element={<div>待确认队列的内容</div>} />
+                <Route path="heard" element={<div>收听页的内容</div>} />
                 <Route path="log" element={<div>日志的内容</div>} />
               </Route>
             </Routes>
@@ -42,21 +42,22 @@ describe('AppShell', () => {
     mount(3)
     expect(screen.getByText('OpenHeard')).toBeInTheDocument()
     expect(screen.getByText('BG0CG')).toBeInTheDocument()
-    expect(screen.getByText('待确认队列的内容')).toBeInTheDocument()
+    expect(screen.getByText('收听页的内容')).toBeInTheDocument()
   })
 
   it('桌面上：顶栏里的胶囊导航，没有底部标签栏，也没有汉堡菜单', () => {
     mount(3)
     const nav = screen.getByRole('navigation', { name: '页面导航' })
-    expect(within(nav).getByText('待确认队列')).toBeInTheDocument()
+    expect(within(nav).getByText('收听')).toBeInTheDocument()
     expect(document.querySelector('.bottom-tabs')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '菜单' })).not.toBeInTheDocument()
     expect(document.querySelector('.app-sider')).not.toBeInTheDocument()
   })
 
-  it('待确认队列的徽标显示 pending 的条数', () => {
+  it('五个导航项，收听的徽标显示 pending 的条数', () => {
     mount(3)
     const nav = screen.getByRole('navigation', { name: '页面导航' })
+    expect(within(nav).getAllByRole('link')).toHaveLength(5)
     expect(within(nav).getByText('3')).toBeInTheDocument()
   })
 
@@ -70,7 +71,7 @@ describe('AppShell', () => {
     mount(0, '/log')
     const nav = screen.getByRole('navigation', { name: '页面导航' })
     expect(within(nav).getByText('日志').closest('a')).toHaveAttribute('aria-current', 'page')
-    expect(within(nav).getByText('待确认队列').closest('a')).not.toHaveAttribute('aria-current')
+    expect(within(nav).getByText('收听').closest('a')).not.toHaveAttribute('aria-current')
   })
 
   it('手机上：底部标签栏代替顶栏导航', () => {

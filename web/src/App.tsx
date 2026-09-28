@@ -2,11 +2,10 @@ import { App as AntApp, ConfigProvider, theme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
-import HeardList from './pages/HeardList'
+import Listen from './pages/Listen'
 import LogList from './pages/LogList'
 import OpsPage from './pages/OpsPage'
 import SettingsPage from './pages/SettingsPage'
-import PendingQueue from './pages/PendingQueue'
 import QuickEntry from './pages/QuickEntry'
 import { Preferences } from './Preferences'
 import { SessionGate } from './SessionGate'
@@ -105,15 +104,16 @@ function Themed() {
           <StoreProvider>
           <Routes>
             <Route element={<AppShell />}>
-              <Route index element={<Navigate to="/pending" replace />} />
-              <Route path="pending" element={<PendingQueue />} />
+              <Route index element={<Navigate to="/heard" replace />} />
+              <Route path="heard" element={<Listen />} />
+              {/* 待确认队列并进收听页，旧链接落到它的待确认档。 */}
+              <Route path="pending" element={<Navigate to="/heard?tab=pending" replace />} />
               <Route path="log" element={<LogList />} />
-              <Route path="heard" element={<HeardList />} />
               <Route path="new" element={<QuickEntry />} />
               <Route path="ops" element={<OpsPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
-            <Route path="*" element={<Navigate to="/pending" replace />} />
+            <Route path="*" element={<Navigate to="/heard" replace />} />
           </Routes>
           </StoreProvider>
         </SessionGate>

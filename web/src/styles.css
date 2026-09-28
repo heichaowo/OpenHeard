@@ -205,7 +205,7 @@ select {
   inset-block-end: 0;
   z-index: 30;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   background: color-mix(in srgb, var(--ant-color-bg-container) 92%, transparent);
   backdrop-filter: blur(18px);
   border-block-start: 1px solid var(--ant-color-border-secondary);
