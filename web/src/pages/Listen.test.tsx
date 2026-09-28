@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { missingFields } from '@core'
-import type { Activity, QsoDraft } from '@core'
+import type { Activity, Qso, QsoDraft } from '@core'
 import { Preferences } from '../Preferences'
 import { PlayerProvider } from '../PlayerProvider'
 import { setViewportWidth } from '../testSetup'
@@ -200,6 +200,19 @@ describe('结算的是人看过的那几次', () => {
 
     await waitFor(() => expect(promote).toHaveBeenCalledOnce())
     expect(promote.mock.calls[0]![0]).toEqual(['m1', 'x1'])
+  })
+
+  // 和快速补录同一份联想：模拟侧的呼号只能靠人补，以前通联过的人要能点出来。
+  it('确认抽屉里输呼号，从日志里联想', async () => {
+    const logged = { id: 'q1', call: 'BD7KLO', startAt: T - 86400, qth: '深圳' } as Qso
+    render(tree(store([row(two)], { qsos: [logged] })))
+    await userEvent.click(button('编辑'))
+    const call = await screen.findByDisplayValue('BA1AA')
+
+    await userEvent.clear(call)
+    await userEvent.type(call, 'BD7')
+
+    expect(await screen.findByText('深圳')).toBeInTheDocument()
   })
 
   it('选中没人回的之后对方回了，批量忽略只带选中时那一次', async () => {

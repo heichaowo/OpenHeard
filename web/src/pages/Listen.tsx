@@ -397,6 +397,7 @@ export default function Listen() {
         wide={wide}
         form={form}
         recalledFrom={recalledAt === undefined ? undefined : time.at(recalledAt)}
+        qsos={qsos}
         onValuesChange={onValuesChange}
         submitting={submitting}
         onClose={close}

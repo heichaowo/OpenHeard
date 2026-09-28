@@ -3,7 +3,7 @@ import type { FormInstance } from 'antd'
 import { QsoFields } from '../../components/QsoFields'
 import type { QsoFormValues } from '../../components/QsoFields'
 import type { Conversation } from '../../api'
-import type { QsoDraft } from '@core'
+import type { Qso, QsoDraft } from '@core'
 import { useTime } from '../../useTime'
 import { ORIGIN_LABEL } from './model'
 
@@ -17,6 +17,7 @@ export function ConfirmDrawer({
   wide,
   form,
   recalledFrom,
+  qsos,
   onValuesChange,
   submitting,
   onClose,
@@ -26,6 +27,8 @@ export function ConfirmDrawer({
   wide: boolean
   form: FormInstance<QsoFormValues>
   recalledFrom?: string
+  /** 呼号联想用，和快速补录同一份日志。 */
+  qsos: Qso[]
   onValuesChange: (changed: Partial<QsoFormValues>) => void
   submitting: boolean
   onClose: () => void
@@ -64,7 +67,7 @@ export function ConfirmDrawer({
             onValuesChange={onValuesChange}
             style={{ marginTop: 24 }}
           >
-            <QsoFields recalledFrom={recalledFrom} />
+            <QsoFields recalledFrom={recalledFrom} qsos={qsos} />
             {/* 让输入框里按回车也能提交，抽屉标题栏那个按钮在表单外面 */}
             <Button htmlType="submit" style={{ display: 'none' }} />
           </Form>
