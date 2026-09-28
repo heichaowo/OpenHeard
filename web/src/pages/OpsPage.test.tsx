@@ -2,9 +2,13 @@ import { App } from 'antd'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Qso } from '@core'
 import type { Ops, Radio } from '../api'
 import { Preferences } from '../Preferences'
 import { setViewportWidth } from '../testSetup'
+import { StoreContext } from '../store'
+import type { Store } from '../store'
+import { UTC, dayStartIn } from '../time'
 import OpsPage from './OpsPage'
 
 const ops = vi.hoisted(() => vi.fn())
@@ -46,11 +50,27 @@ const snapshot = (radios: Radio[]): Ops => ({
   brandmeisterEnabled: true,
 })
 
-const mount = () =>
+const qso = (id: string, startAt: number): Qso => ({
+  id,
+  call: 'BD7KLO',
+  startAt,
+  freqMhz: 439.525,
+  band: '70cm',
+  mode: 'FM',
+  rstSent: '59',
+  rstRcvd: '59',
+  createdAt: startAt,
+})
+
+const store = (qsos: Qso[]): Store => ({ qsos }) as unknown as Store
+
+const mount = (qsos: Qso[] = []) =>
   render(
     <Preferences>
       <App>
-        <OpsPage />
+        <StoreContext value={store(qsos)}>
+          <OpsPage />
+        </StoreContext>
       </App>
     </Preferences>,
   )
@@ -122,5 +142,53 @@ describe('OpsPage 的刷新按钮', () => {
 
     finish(snapshot([]))
     await waitFor(() => expect(button).not.toHaveClass('ant-btn-loading'))
+  })
+})
+
+describe('OpsPage 的今天和最近 7 天', () => {
+  // 按 startAt 数，不是 createdAt：导入的老通联不该让「今天」显得很热闹。
+  it('今天和最近 7 天分开算，缺省时区是 UTC', async () => {
+    const todayStart = dayStartIn(UTC)
+    const last7Start = dayStartIn(UTC, 6)
+    ops.mockResolvedValue(snapshot([]))
+    mount([
+      qso('a', todayStart + 10), // 今天，也算进最近 7 天
+      qso('b', last7Start + 10), // 6 天前，只算最近 7 天
+      qso('c', last7Start - 10), // 刚好在 7 天窗口之前，两边都不算
+    ])
+
+    const today = await screen.findByText(`今天 ${UTC}`)
+    expect(today.closest('.ant-statistic')).toHaveTextContent('1')
+    const last7 = screen.getByText(`最近 7 天 ${UTC}`)
+    expect(last7.closest('.ant-statistic')).toHaveTextContent('2')
+  })
+})
+
+describe('OpsPage 的备份', () => {
+  it('下载链接指向 /api/backup，带一句说明', async () => {
+    ops.mockResolvedValue(snapshot([]))
+    mount()
+
+    const link = await screen.findByRole('link', { name: '下载数据库备份' })
+    expect(link).toHaveAttribute('href', '/api/backup')
+    expect(screen.getByText(/不含录音文件/)).toBeInTheDocument()
+  })
+})
+
+describe('OpsPage 的开关关着时', () => {
+  it('模拟守听关着时说明白，不报接收机可能掉了', async () => {
+    ops.mockResolvedValue({ ...snapshot([]), analogEnabled: false })
+    mount()
+
+    expect(await screen.findByText(/模拟守听关着/)).toBeInTheDocument()
+    expect(screen.queryByText(/接收机可能掉了/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/没有模拟守听，或者守护进程还没报上来/)).not.toBeInTheDocument()
+  })
+
+  it('BrandMeister 关着时说明白，不当成健康问题', async () => {
+    ops.mockResolvedValue({ ...snapshot([]), brandmeisterEnabled: false })
+    mount()
+
+    expect(await screen.findByText(/BrandMeister 查询关着/)).toBeInTheDocument()
   })
 })

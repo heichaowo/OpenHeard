@@ -80,6 +80,15 @@ export const fmtShort = (unix: number, zone: Zone) => {
 /** 此刻，用这个时区表示。给选择器当初值。 */
 export const nowIn = (zone: Zone) => dayjs().tz(zone)
 
+/**
+ * 这个时区里，`daysAgo` 天前那一天的 0 点，换算成 Unix 秒。
+ *
+ * 运维页「今天」「最近 7 天」按这个时区划分：daysAgo 为 0 是今天 0 点，
+ * 为 6 是 6 天前那天的 0 点，两者之间正是「最近 7 天」的起点到终点。
+ */
+export const dayStartIn = (zone: Zone, daysAgo = 0) =>
+  dayjs().tz(zone).startOf('day').subtract(daysAgo, 'day').unix()
+
 /** 一个时刻，用这个时区表示。给选择器当初值。 */
 export const atIn = (unix: number, zone: Zone) => dayjs.unix(unix).tz(zone)
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -16,6 +16,7 @@ import { api, errorText } from "../api";
 import type { Ops, PollRow } from "../api";
 import { AsyncContent } from "../components/AsyncContent";
 import { PageHeader } from "../components/PageHeader";
+import { useStore } from "../store";
 import { useTime } from "../useTime";
 
 /** 运维数据自己拉，不进全局 store：只有这一页要，刷新频率也不一样。 */
@@ -65,6 +66,17 @@ export default function OpsPage() {
   const inFlight = useRef(false);
   const time = useTime();
   const wide = Grid.useBreakpoint().md ?? true;
+  // 今天、最近 7 天记了几条通联：按界面选的时区划，所以在前端算，
+  // 通联本身走全局 store，不额外拉一次。
+  const { qsos } = useStore();
+  const [todayCount, last7Count] = useMemo(() => {
+    const todayStart = time.dayStart(0);
+    const last7Start = time.dayStart(6);
+    return [
+      qsos.filter((q) => q.startAt >= todayStart).length,
+      qsos.filter((q) => q.startAt >= last7Start).length,
+    ];
+  }, [qsos, time]);
 
   const load = useCallback(async () => {
     if (inFlight.current) return;
@@ -191,6 +203,23 @@ export default function OpsPage() {
             )}
 
             {/* 列数交给 CSS，写成行内样式的话媒体查询永远赢不了它。 */}
+            <div className="stat-row stat-row-2">
+              <Card size="small">
+                <Statistic
+                  title={`今天 ${time.label}`}
+                  value={todayCount}
+                  suffix="条"
+                />
+              </Card>
+              <Card size="small">
+                <Statistic
+                  title={`最近 7 天 ${time.label}`}
+                  value={last7Count}
+                  suffix="条"
+                />
+              </Card>
+            </div>
+
             <div className="stat-row stat-row-4">
               <Card size="small">
                 <Statistic
@@ -217,9 +246,15 @@ export default function OpsPage() {
               </Card>
             </div>
 
-            {/* 「天线听不见」和「没人在发」，不摆出这几个数就分不开。 */}
+            {/* 关着的那一路不算健康问题，这里直接说明，不摆电台或轮询的告警。 */}
             <Card size="small" title="电台" style={{ marginBottom: 16 }}>
-              {ops.radios.length === 0 ? (
+              {!ops.analogEnabled ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="模拟守听关着。设置页打开开关、存了设置，才会重新开始收。"
+                />
+              ) : ops.radios.length === 0 ? (
                 <Alert
                   type="info"
                   showIcon
@@ -342,7 +377,23 @@ export default function OpsPage() {
               </Descriptions>
             </Card>
 
+            <Card size="small" title="备份" style={{ marginBottom: 16 }}>
+              <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+                打包这台机器整份日志数据库，通联和发射记录都在，不含录音文件。
+              </Typography.Paragraph>
+              <a href="/api/backup">下载数据库备份</a>
+            </Card>
+
             <Card size="small" title="采集来源" style={{ marginBottom: 16 }}>
+              {/* 关着不算健康问题，不在上面的告警里出现，这里另外说一句。 */}
+              {!ops.brandmeisterEnabled && (
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="BrandMeister 查询关着，没有轮询在跑。"
+                />
+              )}
               <Descriptions
                 size="small"
                 column={1}

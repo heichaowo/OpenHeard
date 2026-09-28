@@ -3,6 +3,7 @@ import type { Dayjs } from 'dayjs'
 import { usePreferences } from './theme'
 import {
   atIn,
+  dayStartIn,
   fmt,
   fmtMin,
   fmtShort,
@@ -29,6 +30,8 @@ export function useTime() {
       /** 手机上用的短式，今天只给时分。 */
       atShort: (unix: number) => fmtShort(unix, zone),
       now: () => nowIn(zone),
+      /** daysAgo 天前那天的 0 点，Unix 秒。运维页的「今天」「最近 7 天」用它划界。 */
+      dayStart: (daysAgo?: number) => dayStartIn(zone, daysAgo),
       value: (unix: number) => atIn(unix, zone),
       fromDisplayed: (d: Dayjs) => unixFromDisplayed(d, zone),
       merge: (date: Dayjs, time: Dayjs) => mergeDateTime(date, time, zone),

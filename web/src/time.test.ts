@@ -1,11 +1,12 @@
 import dayjs from 'dayjs'
 import timezone from 'dayjs/plugin/timezone'
 import utcPlugin from 'dayjs/plugin/utc'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   UTC,
   allZones,
   atIn,
+  dayStartIn,
   fmt,
   fmtMin,
   mergeDateTime,
@@ -84,5 +85,26 @@ describe('mergeDateTime', () => {
     const t = dayjs('2000-01-01 17:49:33')
     expect(unixFromDisplayed(mergeDateTime(d, t, CD), CD)).toBe(AT)
     expect(unixFromDisplayed(mergeDateTime(d, t, UTC), UTC)).toBe(AT + 8 * 3600)
+  })
+})
+
+describe('dayStartIn', () => {
+  afterEach(() => vi.useRealTimers())
+
+  // 此刻是成都的 2026-09-15 17:49:33，UTC 的 2026-09-15 09:49:33，
+  // 两个时区的「今天 0 点」因此落在不同的 Unix 秒上。
+  it('今天 0 点按时区算，时区不同界就不同', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(dayjs.unix(AT).toDate())
+
+    expect(dayStartIn(CD)).toBe(1_789_401_600)
+    expect(dayStartIn(UTC)).toBe(1_789_430_400)
+  })
+
+  it('daysAgo 往前数的是整天，不是 24 小时的倍数减出来的余量', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(dayjs.unix(AT).toDate())
+
+    expect(dayStartIn(CD, 6)).toBe(1_789_401_600 - 6 * 86400)
   })
 })
