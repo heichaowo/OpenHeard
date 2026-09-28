@@ -23,7 +23,8 @@ function stateOf(r: Radio): { label: string; cls: string } {
  */
 export function LiveStrip() {
   const { analogEnabled } = useStore()
-  const [radios, setRadios] = useState<Radio[]>([])
+  // undefined 是第一次还没拉回来，[] 是拉回来了但一条都没有，两者说的话不一样。
+  const [radios, setRadios] = useState<Radio[] | undefined>()
 
   useEffect(() => {
     if (!analogEnabled) return
@@ -53,6 +54,17 @@ export function LiveStrip() {
     return (
       <Typography.Text type="secondary" className="live-strip-off">
         模拟守听关着
+      </Typography.Text>
+    )
+  }
+
+  // 守护进程没在跑、刚起来还在校准，或者 api 刚重启，都会是一条都没有。
+  // 空着一个框看上去像页面坏了，说一句。
+  if (radios === undefined) return <div className="live-strip" />
+  if (radios.length === 0) {
+    return (
+      <Typography.Text type="secondary" className="live-strip-off">
+        还没有电台状态，守护进程可能没在跑
       </Typography.Text>
     )
   }

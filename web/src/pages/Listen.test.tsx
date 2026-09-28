@@ -464,6 +464,28 @@ describe('搜索', () => {
   })
 })
 
+describe('直播条', () => {
+  it('每个信道一格，开着的写正在收', async () => {
+    radios.mockResolvedValue({
+      analogEnabled: true,
+      radios: [
+        { freqMhz: 438.5, channel: '438.500 中继', open: true, fresh: true },
+        { freqMhz: 438.975, channel: '438.975', open: false, fresh: true },
+      ],
+    })
+    render(tree(store([], { analogEnabled: true })))
+    expect(await screen.findByText('正在收')).toBeInTheDocument()
+    expect(screen.getByText('安静')).toBeInTheDocument()
+    expect(screen.getByText('438.500 中继')).toBeInTheDocument()
+  })
+
+  // 守护进程没在跑时一条状态都没有，空着一个框看上去像页面坏了。
+  it('开着模拟守听却一条状态都没有，说守护进程可能没在跑', async () => {
+    render(tree(store([], { analogEnabled: true })))
+    expect(await screen.findByText(/还没有电台状态/)).toBeInTheDocument()
+  })
+})
+
 describe('模拟守听关着', () => {
   it('直播条写模拟守听关着，不去拉 /api/radios', async () => {
     render(tree(store([], { analogEnabled: false })))
