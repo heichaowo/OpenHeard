@@ -54,9 +54,10 @@ describe('SettingsPage', () => {
     expect(saveSettings.mock.calls[0][0].station.myQth).toBe('克拉玛依区')
   })
 
-  it('模拟守听填了一格，就至少要有一个信道', async () => {
+  it('模拟守听打开后填了一格，就至少要有一个信道', async () => {
     mount(base)
-    await userEvent.type(await screen.findByLabelText('本台 MDC unit ID'), '6460')
+    await userEvent.click(await screen.findByRole('switch', { name: '模拟守听开关' }))
+    await userEvent.type(screen.getByLabelText('本台 MDC unit ID'), '6460')
 
     await userEvent.click(screen.getByRole('button', { name: /^保\s*存$/ }))
 
@@ -185,6 +186,79 @@ describe('SettingsPage', () => {
     for (const label of ['名字', '查什么', '号码', '每次取', '间隔']) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('SettingsPage 的两个开关', () => {
+  const one = { channels: [{ freqMhz: 438.5, channel: '438.500 中继' }], openMarginDb: 12, closeMarginDb: 7 }
+  const query = {
+    key: 'dst:46001',
+    rule: { id: 'DestinationID', operator: 'equal', value: 46001 },
+    amount: 200,
+    intervalS: 900,
+  }
+
+  // rc-field-form 的 onFinish 只给校验过、已挂载的字段；关着的卡把值藏起来但
+  // 没卸载，body 得靠 getFieldsValue(true) 才拿得全，这里直接盯着 PUT 的内容。
+  it('两张卡都关了存，PUT 里原来的信道和查询照原样带回去', async () => {
+    mount({ ...base, analog: one, queries: [query] })
+    await screen.findByDisplayValue('438.500 中继')
+
+    await userEvent.click(screen.getByRole('switch', { name: '模拟守听开关' }))
+    await userEvent.click(screen.getByRole('switch', { name: 'BrandMeister 开关' }))
+    expect(screen.getAllByText('关着。打开后才能改，原来的设置都留着。')).toHaveLength(2)
+
+    await userEvent.type(await screen.findByLabelText('QTH'), '成都')
+    await userEvent.click(screen.getByRole('button', { name: /^保\s*存$/ }))
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    const sent = saveSettings.mock.calls[0][0]
+    expect(sent.analog).toMatchObject({ enabled: false, channels: one.channels })
+    expect(sent.brandmeisterEnabled).toBe(false)
+    expect(sent.queries).toEqual([query])
+    expect(sent.station.myQth).toBe('成都')
+  })
+
+  // 数字侧独有的机器，模拟卡本来就是空的。开关缺省是关，不拦下别处的保存。
+  it('数字侧独有的机器，模拟开关缺省关着，也存得下本台信息', async () => {
+    mount(base)
+    await screen.findByLabelText('QTH')
+
+    expect(screen.getByRole('switch', { name: '模拟守听开关' })).not.toBeChecked()
+    expect(screen.getByText(/还没配模拟守听/)).toBeInTheDocument()
+
+    await userEvent.type(screen.getByLabelText('QTH'), '克拉玛依区')
+    await userEvent.click(screen.getByRole('button', { name: /^保\s*存$/ }))
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    const sent = saveSettings.mock.calls[0][0]
+    expect(sent.analog?.enabled).not.toBe(true)
+    expect(sent.station.myQth).toBe('克拉玛依区')
+  })
+
+  it('没配过模拟守听时，打开开关才展开信道表', async () => {
+    mount(base)
+    const unitId = await screen.findByLabelText('本台 MDC unit ID')
+    expect(unitId).not.toBeVisible()
+
+    await userEvent.click(screen.getByRole('switch', { name: '模拟守听开关' }))
+    expect(unitId).toBeVisible()
+    expect(screen.queryByText(/还没配模拟守听/)).not.toBeInTheDocument()
+  })
+
+  // 填了一格本来会触发「至少要有一个信道」（见上面那条不带开关的测试）；
+  // 关掉开关既清了这一格，也不再拦保存。开关一变，卡的校验要跟着重算一次。
+  it('填了一格但关着开关，不拦保存，字段也回到空', async () => {
+    mount(base)
+    await userEvent.click(await screen.findByRole('switch', { name: '模拟守听开关' }))
+    await userEvent.type(screen.getByLabelText('本台 MDC unit ID'), '6460')
+    await userEvent.click(screen.getByRole('switch', { name: '模拟守听开关' }))
+    expect(screen.queryByText('至少要有一个信道')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /^保\s*存$/ }))
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(saveSettings.mock.calls[0][0].analog).toEqual({ enabled: false, channels: [] })
   })
 })
 
