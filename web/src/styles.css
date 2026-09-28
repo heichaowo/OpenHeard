@@ -81,9 +81,10 @@ select {
   );
 }
 
-.app-shell > .ant-layout-header,
-.app-shell > .ant-layout-content,
-.bottom-tabs {
+/* 内容压在底色那层光晕上面。顶栏和底栏不写在这里：它们各自的 sticky、fixed
+   和层级写在自己那条里，这里的选择器更具体，会把顶栏的 sticky 盖成 relative，
+   一往下滚导航就跟着滚走了。 */
+.app-shell > .ant-layout-content {
   position: relative;
   z-index: 1;
 }
