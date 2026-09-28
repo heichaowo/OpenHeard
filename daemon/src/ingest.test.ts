@@ -50,6 +50,22 @@ describe('Ingest.close', () => {
     assert.equal(paths[0], '/api/ingest/activity');
   });
 
+  // 两个信道名只差几个汉字，过滤成 ASCII 之后一样。退出时两个信道同一秒收尾，
+  // 两批不能写到同一个文件上。
+  it('同一秒、信道名只差汉字的两批各落一个文件', () => {
+    mock.method(globalThis, 'fetch', async () => new Response('{}'));
+    const dir = mkdtempSync(join(tmpdir(), 'openheard-spool-'));
+    const ingest = new Ingest('http://127.0.0.1:9', 'x'.repeat(32), dir);
+    ingest.close();
+    void ingest.push([row], { ...log, queryKey: 'analog:本地中继' });
+    void ingest.push([{ ...row, activity: { ...row.activity, id: 'fm-2' } }], { ...log, queryKey: 'analog:市区中继' });
+
+    const ids = readdirSync(dir)
+      .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')).rows[0].activity.id)
+      .sort();
+    assert.deepEqual(ids, ['fm-1', 'fm-2']);
+  });
+
   it('关了之后不再报电台状态', async () => {
     const fetch = mock.method(globalThis, 'fetch', async () => new Response(null, { status: 204 }));
     const ingest = new Ingest('http://127.0.0.1:9', 'x'.repeat(32), mkdtempSync(join(tmpdir(), 'openheard-spool-')));

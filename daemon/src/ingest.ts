@@ -1,4 +1,5 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { Activity } from './core.ts';
 
@@ -96,8 +97,12 @@ export class Ingest {
   }
 
   #spool(batch: Batch): void {
-    const name = `${batch.log.at}-${batch.log.queryKey.replace(/[^a-z0-9]/gi, '_')}.json`;
-    writeFileSync(join(this.#spoolDir, name), JSON.stringify(batch));
+    // 时刻打头，补发按文件名排序就是按时间先后。末尾加一段随机串：信道名只差
+    // 几个汉字时，过滤成 ASCII 之后一模一样，退出时同一秒收尾的两个信道就写到
+    // 同一个文件上，后一个把前一个盖掉。wx 让万一撞上的时候报错，不悄悄覆盖。
+    const key = batch.log.queryKey.replace(/[^a-z0-9]/gi, '_');
+    const name = `${batch.log.at}-${key}-${randomUUID()}.json`;
+    writeFileSync(join(this.#spoolDir, name), JSON.stringify(batch), { flag: 'wx' });
   }
 
   /**
