@@ -3,13 +3,14 @@ import { Button, Card, Checkbox, Collapse, List, Popconfirm, Space, Table, Tag, 
 import type { TableColumnsType } from 'antd'
 import { Link } from 'react-router-dom'
 import type { HeardItem, Conversation } from '../../api'
+import { channelLabel } from '@core'
 import type { QsoDraft, QsoField } from '@core'
 import { AudioPill } from '../../components/AudioPill'
 import { PlayAll } from '../../components/PlayAll'
 import { useStore } from '../../store'
 import { useTime } from '../../useTime'
 import { FIELD_LABELS as LABELS } from '../../fields'
-import { ORIGIN_LABEL, STATUS_COLOR, STATUS_LABEL, isUnresolved, senderText } from './model'
+import { STATUS_COLOR, STATUS_LABEL, isUnresolved, senderText } from './model'
 
 /** 一段里一次显示多少次发射，热闹的话务组一段能有几百次。 */
 const ACTIVITY_PAGE = 20
@@ -174,7 +175,7 @@ function ActivityTableDesktop({
 }
 
 /** 状态和信道那一行的辅助信息（来源标签，没有信道名时用它兜底）。 */
-const channelText = (conv: Conversation) => conv.activities[0]?.channel ?? ORIGIN_LABEL[conv.origin]
+const channelText = (conv: Conversation) => channelLabel(conv.channel)
 
 /** 呼号格子：已入库显示 call 和 RST，链到日志；没结算显示草稿呼号或者「待补/没人回」。 */
 function CallCell({ vm }: { vm: RowVM }) {

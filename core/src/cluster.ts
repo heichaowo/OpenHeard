@@ -16,6 +16,14 @@ export function channelKey(a: Activity): string {
   return a.origin;
 }
 
+/** channelKey 写给人看的样子：话务组 `TG 46001`，信道名原样，频率带单位。 */
+export function channelLabel(key: string): string {
+  if (key.startsWith('tg:')) return `TG ${key.slice(3)}`;
+  if (key.startsWith('ch:')) return key.slice(3);
+  if (key.startsWith('fq:')) return `${key.slice(3)} MHz`;
+  return key;
+}
+
 /**
  * 按间隔阈值把发射事件切成一次次对话。
  *

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clusterActivities } from './cluster.ts';
+import { channelKey, channelLabel, clusterActivities } from './cluster.ts';
 import type { Activity } from './types.ts';
 
 const at = (id: string, startAt: number, durationS = 5, over: Partial<Activity> = {}): Activity => ({
@@ -122,3 +122,12 @@ describe('按信道分开', () => {
     expect(shape(rows, 10)).toEqual([['early'], ['late']]);
   });
 })
+
+describe('channelLabel', () => {
+  // 数字侧的发射没有信道名，界面上以前退回成来源名「BrandMeister」，看不出是哪个组。
+  it('话务组写成 TG 加组号，信道名原样，频率带单位', () => {
+    expect(channelLabel(channelKey(at('a', 0, 5, { origin: 'brandmeister', talkgroup: 46001 })))).toBe('TG 46001');
+    expect(channelLabel(channelKey(at('b', 0, 5, { channel: '438.500 中继', freqMhz: 438.5 })))).toBe('438.500 中继');
+    expect(channelLabel(channelKey(at('c', 0, 5, { freqMhz: 438.5 })))).toBe('438.5 MHz');
+  });
+});

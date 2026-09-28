@@ -6,6 +6,7 @@
 export {
   adifFile,
   channelKey,
+  channelLabel,
   checkQueries,
   bandOf,
   clusterActivities,

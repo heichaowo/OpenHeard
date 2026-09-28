@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from './config.ts';
 import {
   channelKey,
+  channelLabel,
   clusterOfGroup,
   dmrIdsNeedingLookup,
   EXTEND_STEP_S,
@@ -102,13 +103,6 @@ function paginate(items: Conversation[], limit: number): ConversationPage {
   const page = items.slice(0, limit);
   const last = page.at(-1);
   return page.length === limit && last ? { items: page, next: `${last.startAt}:${last.id}` } : { items: page };
-}
-
-function channelLabel(key: string): string {
-  if (key.startsWith('tg:')) return `TG ${key.slice(3)}`;
-  if (key.startsWith('ch:')) return key.slice(3);
-  if (key.startsWith('fq:')) return `${key.slice(3)} MHz`;
-  return key;
 }
 
 function distinctChannels(items: Conversation[]): { key: string; label: string }[] {
