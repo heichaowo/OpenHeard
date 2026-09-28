@@ -118,6 +118,29 @@ describe('GET /api/pending', () => {
     assert.equal(body[0]!.draft.band, '70cm');
   });
 
+  // 对话的开场白落在待确认窗口起点之前一点。以前接口只聚窗口内的行，开场白
+  // 被截掉，段 id 也和收听页其他几档对不上，按截掉之后的那几次入库，开场白
+  // 就永远落在日志外面。
+  it('跨过窗口起点的对话整段都在，段 id 和天视图一样', async () => {
+    const cfg = { ...config, pendingWindowDays: 3 };
+    const since = Math.floor(Date.now() / 1000) - cfg.pendingWindowDays * 86400;
+    const app = setup(
+      [act('opener', { startAt: since - 60, dmrId: 777 }), act('reply', { startAt: since + 30, dmrId: MY_ID })],
+      cfg,
+    );
+    const body = (await (await get(app, '/api/pending')).json()) as {
+      cluster: { id: string; activities: { id: string }[] };
+    }[];
+    assert.deepEqual(
+      body.map((p) => [p.cluster.id, p.cluster.activities.map((a) => a.id)]),
+      [['opener', ['opener', 'reply']]],
+    );
+    const day = (await (await get(app, `/api/conversations?from=${since - 3600}&to=${since + 3600}`)).json()) as {
+      items: { id: string }[];
+    };
+    assert.equal(day.items[0]!.id, 'opener');
+  });
+
   it('间隔超过阈值就是两段', async () => {
     const t = Math.floor(Date.now() / 1000) - 6000;
     const app = setup([
