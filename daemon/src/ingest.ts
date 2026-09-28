@@ -30,6 +30,7 @@ export class Ingest {
   #apiUrl: string;
   #token: string;
   #spoolDir: string;
+  #closing = false;
 
   constructor(apiUrl: string, token: string, spoolDir: string) {
     this.#apiUrl = apiUrl.replace(/\/$/, '');
@@ -53,6 +54,18 @@ export class Ingest {
   }
 
   /**
+   * 进程要退了。之后的推送不走网络，当场同步落盘，下次起来再补发。
+   *
+   * 退出时停接收机，正在收的那次发射会收尾推出来。process.exit 不等任何异步
+   * I/O，fetch 连连接都建不起来，录音写好了，行却永远进不了库。也不能在退出前
+   * await 推送：补发攒下的每一批都要两次请求、各有 20 秒超时，launchd 在
+   * SIGTERM 之后 20 秒左右就补一个 SIGKILL。
+   */
+  close(): void {
+    this.#closing = true;
+  }
+
+  /**
    * 先推行，再记这一次的账。
    *
    * 真正新增几行只有写入端知道（判重在那边做），所以从写入端的回应里取，
@@ -64,6 +77,7 @@ export class Ingest {
    * 推不上去就算了，下一秒还有一次。为它排队只会把真正要保住的采集行挤掉。
    */
   async radio(status: unknown): Promise<void> {
+    if (this.#closing) return;
     try {
       await this.#post('/api/ingest/radio', status);
     } catch {
@@ -93,6 +107,11 @@ export class Ingest {
    * 入口本来就幂等，补发没有副作用。
    */
   async push(rows: IngestRow[], log: PollLog): Promise<{ sent: boolean; replayed: number }> {
+    // 在第一个 await 之前落盘，调用方不 await 也来得及写完。
+    if (this.#closing) {
+      this.#spool({ rows, log });
+      return { sent: false, replayed: 0 };
+    }
     let replayed = 0;
     for (const file of readdirSync(this.#spoolDir).sort()) {
       const path = join(this.#spoolDir, file);

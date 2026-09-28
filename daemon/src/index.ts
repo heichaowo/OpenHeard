@@ -154,6 +154,8 @@ if (values['mdc-probe']) {
   // launchd 停这个任务时发 SIGTERM。挂了监听，Node 就不再自己退出，
   // 所以这里要明说退出，否则 launchd 要等 20 秒再补一个 SIGKILL。
   process.once('SIGTERM', () => {
+    // 先让推送改成当场落盘，再停接收机：停的时候正在收的那次发射会收尾推出来。
+    ingest.close();
     radio?.stop();
     process.exit(0);
   });
