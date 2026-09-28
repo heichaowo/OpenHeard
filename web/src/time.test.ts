@@ -107,4 +107,14 @@ describe('dayStartIn', () => {
 
     expect(dayStartIn(CD, 6)).toBe(1_789_401_600 - 6 * 86400)
   })
+
+  // 纽约 2026-03-08 凌晨从 EST 换到 EDT。先取今天 0 点再往前减 6 天，
+  // 减出来的那天还带着今天的 -04:00，比那天真正的 0 点早了一小时。
+  it('往前数的那天跨过夏令时切换，照样落在那天当地的 0 点', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-13T16:00:00Z'))
+
+    // 2026-03-07 00:00 EST，即 05:00 UTC。
+    expect(dayStartIn('America/New_York', 6)).toBe(Date.UTC(2026, 2, 7, 5) / 1000)
+  })
 })

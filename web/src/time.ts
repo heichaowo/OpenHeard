@@ -87,7 +87,10 @@ export const nowIn = (zone: Zone) => dayjs().tz(zone)
  * 为 6 是 6 天前那天的 0 点，两者之间正是「最近 7 天」的起点到终点。
  */
 export const dayStartIn = (zone: Zone, daysAgo = 0) =>
-  dayjs().tz(zone).startOf('day').subtract(daysAgo, 'day').unix()
+  // 先减天数再取 0 点。反过来的话，减出来的那天带着今天的 UTC 偏移，
+  // 中间隔了一次夏令时切换就差一小时。timezone 插件的 startOf 按墙上
+  // 时间重新定偏移，subtract 不会。
+  dayjs().tz(zone).subtract(daysAgo, 'day').startOf('day').unix()
 
 /** 一个时刻，用这个时区表示。给选择器当初值。 */
 export const atIn = (unix: number, zone: Zone) => dayjs.unix(unix).tz(zone)
