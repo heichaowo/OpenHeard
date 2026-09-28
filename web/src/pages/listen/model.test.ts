@@ -99,6 +99,13 @@ describe('dayLabel / dayValue / dayRange', () => {
     expect(dayLabel(dayjs.tz('2026-09-27', CD))).toBe('9月27日 周日')
   })
 
+  // 纽约 2026-03-08 那天从 EST 换到 EDT，只有 23 小时。
+  it('夏令时切换那天，起止都落在当地的 0 点', () => {
+    const [from, to] = dayRange('2026-03-08', 'America/New_York')
+    expect(from).toBe(Date.UTC(2026, 2, 8, 5) / 1000)
+    expect(to).toBe(Date.UTC(2026, 2, 9, 4) / 1000)
+  })
+
   it('[from, to) 跨度正好一天，按时区的午夜切', () => {
     const [from, to] = dayRange('2026-09-27', CD)
     expect(to - from).toBe(86400)

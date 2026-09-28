@@ -108,6 +108,23 @@ describe('dayStartIn', () => {
     expect(dayStartIn(CD, 6)).toBe(1_789_401_600 - 6 * 86400)
   })
 
+  // 浏览器所在的时区在显示时区西边时，tz 对象的 startOf 会按浏览器的时区
+  // 重新读墙上时间，切换当天的 0 点差一两个小时。
+  it('浏览器在显示时区西边，切换当天的今天 0 点照样对', () => {
+    try {
+      vi.stubEnv('TZ', 'America/Los_Angeles')
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-03-08T05:30:00Z')) // 纽约 00:30 EST
+      expect(dayStartIn('America/New_York')).toBe(Date.UTC(2026, 2, 8, 5) / 1000)
+
+      vi.stubEnv('TZ', 'America/New_York')
+      vi.setSystemTime(new Date('2026-03-29T00:30:00Z')) // 伦敦 00:30 GMT
+      expect(dayStartIn('Europe/London')).toBe(Date.UTC(2026, 2, 29, 0) / 1000)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   // 纽约 2026-03-08 凌晨从 EST 换到 EDT。先取今天 0 点再往前减 6 天，
   // 减出来的那天还带着今天的 -04:00，比那天真正的 0 点早了一小时。
   it('往前数的那天跨过夏令时切换，照样落在那天当地的 0 点', () => {

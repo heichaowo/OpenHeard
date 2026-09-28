@@ -80,6 +80,22 @@ export const fmtShort = (unix: number, zone: Zone) => {
 /** 此刻，用这个时区表示。给选择器当初值。 */
 export const nowIn = (zone: Zone) => dayjs().tz(zone)
 
+/** 这个时区里的今天，YYYY-MM-DD。 */
+export const todayIn = (zone: Zone) => dayjs().tz(zone).format('YYYY-MM-DD')
+
+/** 日历上挪几天。按 UTC 算，只动日期，不碰任何时区的夏令时。 */
+export const shiftDate = (date: string, days: number) =>
+  dayjs.utc(date).add(days, 'day').format('YYYY-MM-DD')
+
+/**
+ * 这个时区里某一天（YYYY-MM-DD）的 0 点，Unix 秒。
+ *
+ * 用 dayjs.tz 直接按这个时区解析日期串。tz 对象上的 startOf('day') 和
+ * add/subtract 会经过浏览器所在的时区，或者带着别的日子的 UTC 偏移，
+ * 碰上夏令时切换就差一两个小时。
+ */
+export const midnightIn = (date: string, zone: Zone) => dayjs.tz(date, zone).unix()
+
 /**
  * 这个时区里，`daysAgo` 天前那一天的 0 点，换算成 Unix 秒。
  *
@@ -87,10 +103,7 @@ export const nowIn = (zone: Zone) => dayjs().tz(zone)
  * 为 6 是 6 天前那天的 0 点，两者之间正是「最近 7 天」的起点到终点。
  */
 export const dayStartIn = (zone: Zone, daysAgo = 0) =>
-  // 先减天数再取 0 点。反过来的话，减出来的那天带着今天的 UTC 偏移，
-  // 中间隔了一次夏令时切换就差一小时。timezone 插件的 startOf 按墙上
-  // 时间重新定偏移，subtract 不会。
-  dayjs().tz(zone).subtract(daysAgo, 'day').startOf('day').unix()
+  midnightIn(shiftDate(todayIn(zone), -daysAgo), zone)
 
 /** 一个时刻，用这个时区表示。给选择器当初值。 */
 export const atIn = (unix: number, zone: Zone) => dayjs.unix(unix).tz(zone)

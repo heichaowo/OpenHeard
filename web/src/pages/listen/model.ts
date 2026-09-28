@@ -1,5 +1,6 @@
 import dayjs from 'dayjs'
 import type { Activity, ConversationStatus, Origin } from '@core'
+import { midnightIn, shiftDate, todayIn } from '../../time'
 import type { Zone } from '../../time'
 
 /** URL 里 tab 的五个值：待确认这一档加对话分的那五档。 */
@@ -82,8 +83,10 @@ export function dayValue(day: string, zone: Zone): dayjs.Dayjs {
  * 这样它在时区的午夜自动翻篇，接着刷新；写死的日期不会。
  */
 export function dayRange(day: string, zone: Zone): [number, number] {
-  const start = dayValue(day, zone).startOf('day')
-  return [start.unix(), start.add(1, 'day').unix()]
+  // 起止都按日期串在这个时区里解析。夏令时切换那天只有 23 或 25 小时，
+  // 拿起点加一天会差一小时。
+  const date = day === 'today' ? todayIn(zone) : day
+  return [midnightIn(date, zone), midnightIn(shiftDate(date, 1), zone)]
 }
 
 /** 多久以前。一分钟以内写秒，再往上写分钟、小时、天。 */
