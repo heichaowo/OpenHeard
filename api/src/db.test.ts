@@ -7,6 +7,7 @@ import {
   insertQso,
   openDb,
   pruneActivities,
+  refreshStats,
   resolveActivities,
   selectQsos,
   selectUnresolvedActivities,
@@ -185,5 +186,43 @@ describe('通联字段往返', () => {
     insertQso(db, qso('old', { startAt: 100 }));
     insertQso(db, qso('new', { startAt: 900 }));
     assert.deepEqual(selectQsos(db).map((q) => q.id), ['new', 'old']);
+  });
+});
+
+describe('refreshStats', () => {
+  // 从没统计过的库，规划器把呼号区间当成不挑剔，搜少见呼号也倒着扫时间索引。
+  // 统计过之后少见的前缀要走呼号索引，常见的前缀照样走时间索引。
+  const plan = (db: ReturnType<typeof openDb>, lo: string, hi: string) =>
+    (
+      db
+        .prepare(
+          `EXPLAIN QUERY PLAN SELECT * FROM activity WHERE callsign >= ? AND callsign < ?
+             AND start_at >= 0 AND start_at < 9999999999 ORDER BY start_at DESC LIMIT 200`,
+        )
+        .all(lo, hi) as { detail: string }[]
+    )
+      .map((r) => r.detail)
+      .join(' | ');
+
+  it('统计之后，少见的呼号前缀走呼号索引', () => {
+    const db = openDb(':memory:');
+    const rows = Array.from({ length: 20_000 }, (_, i) =>
+      row(act(`a${i}`, { startAt: 1_789_000_000 + i * 30, callsign: `BG${i % 2000}X`, talkgroup: 46001 })),
+    );
+    insertActivities(db, rows, 1);
+    assert.match(plan(db, 'ZZ9', 'ZZ:'), /activity_start_at/);
+
+    refreshStats(db);
+    assert.match(plan(db, 'ZZ9', 'ZZ:'), /activity_callsign/);
+    assert.match(plan(db, 'BG', 'BH'), /activity_start_at/);
+  });
+
+  it('统计过一次之后不再完整重跑', () => {
+    const db = openDb(':memory:');
+    insertActivities(db, [row(act('a', { callsign: 'BG0CG' }))], 1);
+    refreshStats(db);
+    const before = db.prepare("SELECT stat FROM sqlite_stat1 WHERE tbl = 'activity' LIMIT 1").get();
+    refreshStats(db);
+    assert.deepEqual(db.prepare("SELECT stat FROM sqlite_stat1 WHERE tbl = 'activity' LIMIT 1").get(), before);
   });
 });

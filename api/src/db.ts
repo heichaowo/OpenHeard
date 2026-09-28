@@ -35,6 +35,21 @@ export function openDb(path: string): DatabaseSync {
   return db;
 }
 
+/**
+ * 给查询规划器补统计。库从没跑过 ANALYZE 时，规划器不知道呼号索引有多挑剔，
+ * 搜一个少见的呼号也走时间索引倒着扫整张表：25 万行的合成库上 48 毫秒，库越
+ * 大越慢。完整跑一次之后少见的前缀走呼号索引（0.2 毫秒），常见的前缀照样走
+ * 时间索引（5 毫秒）。analysis_limit 采样出来的统计改变不了这个选择，所以第一
+ * 次要完整跑，25 万行约 140 毫秒。之后交给 PRAGMA optimize，表的规模变化够大
+ * 它才重跑，平时不到 1 毫秒。
+ */
+export function refreshStats(db: DatabaseSync): void {
+  const analyzed =
+    db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'sqlite_stat1'").get() !== undefined &&
+    db.prepare("SELECT 1 FROM sqlite_stat1 WHERE tbl = 'activity'").get() !== undefined;
+  db.exec(analyzed ? 'PRAGMA optimize' : 'ANALYZE');
+}
+
 /** node:sqlite 没有 better-sqlite3 那个 transaction 包装，自己补一个。 */
 export function withTx<T>(db: DatabaseSync, fn: () => T): T {
   db.exec('BEGIN');
