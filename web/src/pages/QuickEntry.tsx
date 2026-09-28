@@ -8,11 +8,13 @@ import {
   Form,
   Input,
   InputNumber,
+  Popconfirm,
   Select,
   Space,
   Typography,
 } from 'antd'
 import { errorText } from '../api'
+import { CallInput } from '../components/CallInput'
 import { PageHeader } from '../components/PageHeader'
 import type { Dayjs } from 'dayjs'
 import { Grid, TimePicker } from 'antd'
@@ -78,9 +80,11 @@ function ZonedDateTime({ value, onChange }: { value?: Dayjs; onChange?: (v: Dayj
 
 export default function QuickEntry() {
   const { message } = App.useApp()
-  const { station, channels, qsos, addQso } = useStore()
+  const { station, channels, qsos, addQso, removeQso } = useStore()
   const [form] = Form.useForm<FormValues>()
   const [busy, setBusy] = useState(false)
+  // 刚记下的那一条，撑到下一次入库或离开这页（组件卸载状态就没了）。
+  const [lastAdded, setLastAdded] = useState<{ id: string; call: string } | null>(null)
   const time = useTime()
   const wide = Grid.useBreakpoint().md ?? true
   const { recalledAt, onValuesChange, reset: resetRecall } = useRecall(form, qsos)
@@ -144,7 +148,7 @@ export default function QuickEntry() {
     try {
       // myGridsquare 表单里没有这一格，但它必须跟着走：从队列提升的那条
       // draftFromCluster 会带上，手工补录不带就会在 ADIF 里空着一个 MY_GRIDSQUARE。
-      await addQso({
+      const qso = await addQso({
         myGridsquare: station.myGridsquare,
         ...values,
         call,
@@ -155,6 +159,7 @@ export default function QuickEntry() {
       form.resetFields(['call', 'gridsquare', 'qth', 'note'])
       form.setFieldsValue({ at: time.now() })
       resetRecall()
+      setLastAdded({ id: qso.id, call })
     } catch (e) {
       message.error(errorText(e))
     } finally {
@@ -162,11 +167,28 @@ export default function QuickEntry() {
     }
   }
 
+  const undo = () =>
+    removeQso(lastAdded!.id)
+      .then(() => setLastAdded(null))
+      .catch((e: unknown) => message.error(errorText(e)))
+
+  // 只管这一页刚记的最后一条，撤销走删除，删除照样留痕。
+  const undoBar = lastAdded && (
+    <div className="undo-bar">
+      <Typography.Text>已记下 {lastAdded.call}</Typography.Text>
+      <Popconfirm title={`撤销记下的 ${lastAdded.call}？`} onConfirm={undo}>
+        <Button type="link" danger size="small">
+          撤销
+        </Button>
+      </Popconfirm>
+    </div>
+  )
+
   return (
     <>
       <PageHeader
         title="快速补录"
-        note="给没有任何观测的通联用。经过采集的走待确认队列，不在这里录。"
+        note="给没有任何观测的通联用。经过采集的在收听页入库。"
       />
       <Card style={{ maxWidth: 560 }}>
       <Form
@@ -176,6 +198,8 @@ export default function QuickEntry() {
         onFinish={submit}
         onValuesChange={onValuesChange}
       >
+        {/* ≥768px 贴在对方呼号上方；窄屏版本在表单末尾的 .form-submit 里。 */}
+        {wide && undoBar}
         <Form.Item
           name="call"
           label="对方呼号"
@@ -190,7 +214,7 @@ export default function QuickEntry() {
             },
           ]}
         >
-          <Input autoFocus placeholder="BD7KLO" />
+          <CallInput qsos={qsos} autoFocus placeholder="BD7KLO" />
         </Form.Item>
 
         <Form.Item
@@ -279,8 +303,11 @@ export default function QuickEntry() {
           <Input.TextArea rows={2} />
         </Form.Item>
 
-        {/* 手机上贴着底边、占满一行。表单十几格，填完不用滑到最底下找按钮。 */}
+        {/* 手机上贴着底边、占满一行。表单十几格，填完不用滑到最底下找按钮。
+            撤销条摆在按钮上面：.form-submit 贴着底边，加了内容就往上长，
+            入库按钮的位置不跟着变。 */}
         <div className="form-submit">
+          {!wide && undoBar}
           <Button type="primary" htmlType="submit" loading={busy} block={!wide} size={wide ? 'middle' : 'large'}>
             入库
           </Button>

@@ -1,6 +1,7 @@
 import { Divider, Form, Input, InputNumber, Space, Typography } from 'antd'
 import { isValidCallsign, normalizeCallsign } from '@core'
 import type { Qso } from '@core'
+import { CallInput } from './CallInput'
 
 /**
  * 人可以编辑的字段。待确认队列和日志里的编辑用同一份，两处填的是同一件事。
@@ -27,10 +28,13 @@ export type QsoFormValues = Pick<
 export function QsoFields({
   autoFocus = true,
   recalledFrom,
+  qsos,
 }: {
   autoFocus?: boolean
   /** 对方 QTH 和网格是从哪次通联补来的，已经按当前时区格式化好。 */
   recalledFrom?: string
+  /** 给了才带呼号联想，不给就是普通输入框——这样 recall.test.tsx 不用改。 */
+  qsos?: Qso[]
 }) {
   return (
     <>
@@ -48,7 +52,11 @@ export function QsoFields({
           },
         ]}
       >
-        <Input autoFocus={autoFocus} placeholder="BD7KLO" />
+        {qsos ? (
+          <CallInput qsos={qsos} autoFocus={autoFocus} placeholder="BD7KLO" />
+        ) : (
+          <Input autoFocus={autoFocus} placeholder="BD7KLO" />
+        )}
       </Form.Item>
       <Space wrap>
         <Form.Item name="rstSent" label="发出报告">

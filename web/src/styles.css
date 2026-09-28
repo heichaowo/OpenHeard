@@ -529,6 +529,18 @@ select {
   margin-block-end: 12px;
 }
 
+/* 快速补录记完一条之后的撤销条：只管这一页刚记的最后一条。 */
+.undo-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  margin-block-end: 8px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
 /* 快速补录的入库按钮。手机上贴着底边标签栏的上沿，表单十几格，填完
    不用滑到最底下，也不会被标签栏挡住。 */
 @media (max-width: 767px) {
