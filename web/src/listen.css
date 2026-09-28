@@ -1,0 +1,268 @@
+/*
+ * 收听页专用样式。放这个新文件而不是 styles.css，避免跟同时在改
+ * styles.css 的另一半实现撞在一起。断点统一用 767px，跟 AppShell 判断
+ * 桌面/手机的 Grid.useBreakpoint().md 是同一条线。
+ */
+
+/* ---- 五档切换 ---- */
+
+.listen-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-block-end: 16px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid var(--ant-color-border);
+  border-radius: 999px;
+  background: var(--ant-color-bg-container);
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+
+.chip.active {
+  color: var(--ant-color-primary);
+  border-color: var(--ant-color-primary);
+  background: color-mix(in srgb, var(--ant-color-primary) 10%, transparent);
+}
+
+/* 数字涨到两位数、三位数也不能把布局挤成两行，宽度按三位数留死。 */
+.chip-count {
+  display: inline-block;
+  min-width: 2.4em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 767px) {
+  .listen-chips {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  /* 横排放不下「待确认」+ 徽标这种五等分格子，标签和数字改成上下叠放。 */
+  .chip {
+    flex-direction: column;
+    gap: 2px;
+    justify-content: center;
+    padding: 6px 2px;
+    white-space: nowrap;
+  }
+
+  .chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    font-size: 12px;
+  }
+
+  .chip-count {
+    min-width: 0;
+    font-size: 12px;
+  }
+}
+
+/* ---- 搜索框 ---- */
+
+.listen-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-block-end: 16px;
+}
+
+.listen-search .ant-input-affix-wrapper {
+  max-width: 320px;
+}
+
+.listen-search-count {
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .listen-search .ant-input-affix-wrapper {
+    max-width: none;
+  }
+}
+
+/* ---- 顶部面板：最新一条 + 直播条 ---- */
+
+.listen-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  margin-block-end: 16px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: var(--ant-border-radius-lg);
+  background: var(--ant-color-bg-container);
+  /* 固定高度：15 秒一刷，按钮随数据出现或消失的话，手指落下去那一刻底下
+     已经换了一行。 */
+  min-height: 76px;
+}
+
+.listen-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.listen-panel-call {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listen-panel-channel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ant-color-text-secondary);
+}
+
+.listen-panel-ago {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.listen-panel-play {
+  flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+  .listen-panel {
+    min-height: 64px;
+    padding: 12px;
+  }
+}
+
+/* ---- 直播条：每个模拟信道此刻开没开 ---- */
+
+.live-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.live-strip-off {
+  white-space: nowrap;
+}
+
+.live-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.live-channel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ant-color-text-secondary);
+}
+
+/* 状态字按「没有回报」四个字的宽度留死，来回切换不跳字，隔壁的信道名也不挪位置。 */
+.live-state {
+  display: inline-block;
+  min-width: 4.2em;
+  color: var(--ant-color-text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.live-state.green {
+  color: var(--ant-color-success);
+}
+
+.live-state.amber {
+  color: var(--ant-color-warning);
+}
+
+.live-state.pulsing {
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .45; }
+}
+
+/* ---- 按天看：日期导航 + 来源 + 信道 ---- */
+
+.day-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-block-end: 16px;
+}
+
+.day-nav-date {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 固定的最小宽度：日期换了、周几换了，‹ › 按钮不该跟着挪位置。 */
+.day-nav-label {
+  display: inline-block;
+  min-width: 12em;
+  text-align: center;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.day-nav-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.day-nav-channel {
+  min-width: 160px;
+}
+
+@media (max-width: 767px) {
+  .day-nav {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .day-nav-date {
+    justify-content: center;
+  }
+
+  .day-nav-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .day-nav-channel {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+/* ---- 「有 n 段新的」/「更早的」 ---- */
+
+.listen-new-bar {
+  display: flex;
+  justify-content: center;
+  padding: 10px 16px;
+  border-block-end: 1px solid var(--ant-color-border-secondary);
+}
