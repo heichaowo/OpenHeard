@@ -168,7 +168,7 @@ curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
 
 `PUT` 改一条已经入库的。`id`、`createdAt` 和 `clusterId` 保持原样，其余整份替换。`clusterId` 从库里读，请求体里的那个不作数：它是这条记录和当初那几次发射的唯一联系，删了重录就断了，而改一个打错的报告不该把来源一起丢掉。
 
-改和删都会先把改之前那一行存进 `qso_history`，和改动同一个事务。`action` 是 `edit` 或 `delete`，`before` 是那一行当时的完整 JSON。自动来的通联删掉之后那几次发射会回到待确认队列，手工补录的删掉就只剩这一条痕迹。
+改和删都会先把改之前那一行存进 `qso_history`，和改动同一个事务。`action` 是 `edit` 或 `delete`，`before` 是那一行当时的完整 JSON。自动来的通联删掉之后，那几次发射回到收听页，重新等人结算。手工补录的删掉就只剩这一条痕迹。
 
 呼号入库前统一去空格转大写。时间一律 Unix 秒 UTC，界面显示的时区可选，接口不受影响。
 
@@ -472,8 +472,8 @@ contact came from, and correcting a mistyped report should not cost that link.
 An edit or a delete first writes the previous row into `qso_history`, in the
 same transaction. `action` is `edit` or `delete` and `before` is that row's
 full JSON at the time. Deleting an automatically captured contact returns its
-transmissions to the pending queue; deleting a manual entry leaves this as the
-only trace.
+transmissions to the listening page to be settled again; deleting a manual
+entry leaves this as the only trace.
 
 Callsigns are stripped of spaces and upper-cased before storage. Times are
 Unix seconds UTC throughout; the display timezone is the operator's choice and

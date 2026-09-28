@@ -10,7 +10,7 @@
 
 ## 现状
 
-五个目录都在跑。`web/` 是管理端，五个页面：待确认队列、带 ADIF 进出的日志、快速补录、运维和设置。`public/` 是公开展示页，独立应用，除 react 外零依赖，一个请求拿齐整页。`api/` 用 Hono 加内置的 `node:sqlite`，只监听回环地址。`daemon/` 同时轮询 BrandMeister 和守听一个模拟信道。`core/` 放它们共用的纯逻辑，不依赖框架、数据库和 HTTP。
+五个目录都在跑。`web/` 是管理端，五个页面：收听（听到的对话在这里确认入库）、带 ADIF 进出的日志、快速补录、运维和设置。`public/` 是公开展示页，独立应用，除 react 外零依赖，一个请求拿齐整页。`api/` 用 Hono 加内置的 `node:sqlite`，只监听回环地址。`daemon/` 同时轮询 BrandMeister 和守听模拟信道。`core/` 放它们共用的纯逻辑，不依赖框架、数据库和 HTTP。
 
 两条采集线都在真信号上验过。BrandMeister 那条一次取回 200 行入库并聚成对话。模拟那条在 438.700 上把每次按下 PTT 切成事件，并靠 MDC-1200 认出本台。
 
@@ -78,12 +78,13 @@ and a repeater's heard list means the same thing.
 
 ## Status
 
-All five directories run. `web/` is the admin side: the pending-confirmation
-queue, a log with ADIF export, a quick-entry form and an operations page.
+All five directories run. `web/` is the admin side, five pages: listening,
+where heard conversations are confirmed into the log, the log with ADIF import
+and export, quick entry, operations, and settings.
 `public/` is the public station page, a separate app with no dependencies
 beyond react, fetching the whole page in one request. `api/` is Hono over the
 built-in `node:sqlite`, bound to loopback only. `daemon/` polls BrandMeister
-and watches one analog channel at the same time. `core/` holds the
+and watches analog channels at the same time. `core/` holds the
 framework-free logic they share.
 
 Both capture paths have been verified on live signals. The BrandMeister one
