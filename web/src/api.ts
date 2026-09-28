@@ -274,12 +274,6 @@ export const api = {
 
   qsoHistory: (id: string) => call<QsoChange[]>(`/qsos/${encodeURIComponent(id)}/history`),
 
-  /** cursor 是上一页给的 next。不给就是最新的一页。 */
-  heard: (origin: Origin, cursor?: string) =>
-    call<{ items: HeardItem[]; next?: string }>(
-      `/activities?origin=${origin}` +
-        (cursor === undefined ? '' : `&cursor=${encodeURIComponent(cursor)}`),
-    ),
   station: () =>
     call<{
       station: StationDefaults
