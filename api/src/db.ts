@@ -445,6 +445,21 @@ export function selectUnloggedSeeds(
   return rows.map((r) => rowToActivity(r, dmrId));
 }
 
+/** 待确认的种子：还在待确认窗口内、没结算的本台发射。和 /api/pending 以前用的是同一个谓词。 */
+export function selectPendingSeeds(db: DatabaseSync, dmrId: number, pendingCutoff: number): Activity[] {
+  const rows = db
+    .prepare(`
+      SELECT a.* FROM activity a
+      LEFT JOIN resolved_activity r ON r.activity_id = a.id
+      WHERE r.activity_id IS NULL
+        AND (a.mine = 1 OR a.dmr_id = ?)
+        AND a.start_at > ?
+      ORDER BY a.start_at
+    `)
+    .all(dmrId, pendingCutoff) as Record<string, unknown>[];
+  return rows.map((r) => rowToActivity(r, dmrId));
+}
+
 /** 搜索种子之一：呼号落在前缀范围内的发射行，本台和对方都在内。 */
 export function selectCallsignSeeds(
   db: DatabaseSync,

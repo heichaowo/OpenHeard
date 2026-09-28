@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Config } from './config.ts';
 import type { Activity } from './core.ts';
-import { dayConversations, searchConversations, unloggedConversations } from './conversations.ts';
+import { dayConversations, pendingConversations, searchConversations, unloggedConversations } from './conversations.ts';
 import { insertActivities, insertQso, openDb, resolveActivities } from './db.ts';
 
 const MY_ID = 4616460;
@@ -140,6 +140,38 @@ describe('dayConversations', () => {
   });
 });
 
+describe('pendingConversations', () => {
+  const since = NOW - config.pendingWindowDays * 86400;
+
+  // 以前待确认队列只读窗口内的行，窗口边上的开场白被截掉。按截掉之后的 id
+  // 入库，开场白就成了一段永远不会进日志的旁听。
+  it('一段对话跨过待确认窗口的起点，整段都在，id 和天视图一样', () => {
+    const db = fresh();
+    ins(db, [act('opener', since - 60), act('reply', since + 30, { dmrId: MY_ID })]);
+
+    const pending = pendingConversations(db, config);
+    assert.deepEqual(
+      pending.map((c) => [c.id, c.activities.map((a) => a.id)]),
+      [['opener', ['opener', 'reply']]],
+    );
+    const day = dayConversations(db, config, since - 3600, since + 3600, {});
+    assert.equal(day.items[0]!.id, 'opener');
+  });
+
+  it('只有窗口外才有本台的对话不算待确认，没有本台的也不算', () => {
+    const db = fresh();
+    ins(db, [act('old-mine', since - 3600, { dmrId: MY_ID })]);
+    ins(db, [act('heard', NOW - 600)]);
+    assert.deepEqual(pendingConversations(db, config), []);
+  });
+
+  it('按开始时刻从早到晚排，和原来的队列一样', () => {
+    const db = fresh();
+    ins(db, [act('b', NOW - 600, { dmrId: MY_ID }), act('a', NOW - 7200, { dmrId: MY_ID, talkgroup: 460 })]);
+    assert.deepEqual(pendingConversations(db, config).map((c) => c.id), ['a', 'b']);
+  });
+});
+
 describe('unloggedConversations', () => {
   const pendingCutoff = () => Math.floor(Date.now() / 1000) - config.pendingWindowDays * 86400;
 
@@ -171,6 +203,14 @@ describe('unloggedConversations', () => {
 });
 
 describe('searchConversations', () => {
+  // 保留期比待确认窗口短时，裁剪按窗口算，行还在库里，天视图看得到，搜索也要找得到。
+  it('保留期比待确认窗口短时，按窗口算下限', () => {
+    const db = fresh();
+    const short = { ...config, pendingWindowDays: 10, activityRetentionDays: 5 };
+    ins(db, [act('old', NOW - 7 * 86400, { callsign: 'BG0CG' })]);
+    assert.deepEqual(searchConversations(db, short, 'BG0CG', {}).items.map((c) => c.id), ['old']);
+  });
+
   it('前缀匹配，至少两个字符', () => {
     assert.throws(() => searchConversations(fresh(), config, 'B', {}));
   });

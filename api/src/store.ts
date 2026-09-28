@@ -2,12 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from './config.ts';
-import { buildKnownMap, dayConversations, ORIGINS, searchConversations, unloggedConversations } from './conversations.ts';
+import { dayConversations, ORIGINS, pendingConversations, searchConversations, unloggedConversations } from './conversations.ts';
 import type { ConversationPage } from './conversations.ts';
 import { checkHealth } from './health.ts';
 import type { Health } from './health.ts';
-import { channelKey, clusterActivities, draftFromCluster, parseAdif, missingFields, normalizeCallsign } from './core.ts';
-import type { Activity, Channel, Cluster, PendingItem, Qso, QsoDraft, StationDefaults } from './core.ts';
+import { channelKey, parseAdif, missingFields, normalizeCallsign } from './core.ts';
+import type { Activity, Channel, PendingItem, Qso, QsoDraft, StationDefaults } from './core.ts';
 import {
   activityCounts,
   deleteQso,
@@ -24,7 +24,6 @@ import {
   selectQsoActivitiesMap,
   selectQsoHistory,
   selectQsos,
-  selectUnresolvedActivities,
   updateQso,
   withTx,
 } from './db.ts';
@@ -107,13 +106,6 @@ export function createStore(db: DatabaseSync, config: Config) {
   let brandmeisterEnabledSince = config.brandmeisterEnabled ? startedAt : undefined;
   const graceStart = () => brandmeisterEnabledSince ?? startedAt;
 
-  /** 重新聚一次，拿到当前的待确认队列。 */
-  const clusters = (): Cluster[] => {
-    const since = nowS() - config.pendingWindowDays * 86400;
-    const acts = selectUnresolvedActivities(db, since, config.dmrId);
-    return clusterActivities(acts, config.clusterGapS).filter((c) => c.activities.some((a) => a.mine));
-  };
-
   const build = (draft: QsoDraft, clusterId?: string): Qso => {
     const call = draft.call === undefined ? undefined : normalizeCallsign(draft.call);
     const full = { ...draft, call, clusterId };
@@ -167,12 +159,12 @@ export function createStore(db: DatabaseSync, config: Config) {
       return settingsOf(config, config.analog);
     },
 
-    pending: (): PendingItem[] => {
-      const segs = clusters();
-      // 只查 draftFromCluster 真的会用到的那几个 dmr id，不是整个保留期扫一遍。
-      const known = buildKnownMap(db, segs);
-      return segs.map((cluster) => ({ cluster, draft: draftFromCluster(cluster, config.station, known) }));
-    },
+    pending: (): PendingItem[] =>
+      // 和收听页其他几档同一套建法，跨过窗口起点的对话整段都在，段 id 也对得上。
+      pendingConversations(db, config).map((c) => ({
+        cluster: { id: c.id, startAt: c.startAt, endAt: c.endAt, activities: c.activities },
+        draft: c.draft!,
+      })),
 
     qsos: () => selectQsos(db),
 

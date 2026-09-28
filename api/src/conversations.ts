@@ -22,6 +22,7 @@ import {
   selectChannelRange,
   selectQsoBriefs,
   selectQsoCallSeeds,
+  selectPendingSeeds,
   selectQsoMembers,
   selectUnloggedSeeds,
 } from './db.ts';
@@ -301,8 +302,42 @@ export function dayConversations(
 }
 
 /**
- * 未入库：种子是出了待确认窗口但还没结算的本台对话，按信道分组、窗口合并，
- * 只读要读的那几段，不是整个保留期。
+ * 种子所在的那几段对话：按信道分组、窗口合并，只读要读的那几段，碰到窗口边
+ * 就顺着信道往外接。种子只来自未结算行，已忽略和已入库两档不聚。
+ */
+function aroundUnresolvedSeeds(db: DatabaseSync, config: Config, seeds: Activity[]): Built[] {
+  const byChannel = new Map<string, number[]>();
+  for (const s of seeds) {
+    const key = channelKey(s);
+    const list = byChannel.get(key);
+    if (list) list.push(s.startAt);
+    else byChannel.set(key, [s.startAt]);
+  }
+  const built: Built[] = [];
+  for (const [key, times] of byChannel) {
+    for (const w of mergeWindows(times, EXTEND_STEP_S)) {
+      built.push(...buildChannelWindow(db, config, key, w.start, w.end, config.dmrId, { ignored: false, logged: false }));
+    }
+  }
+  // 两个窗口之间可能藏着一条两边都摸不到的发射，把同一条对话各建了一份。
+  return mergeOverlapping(built, config);
+}
+
+/**
+ * 待确认：和其他视图同一套建法。以前只读窗口内的行再聚类，窗口边上的开场白
+ * 被截掉，段 id 也和天视图对不上，按截掉之后的那几次入库，开场白就永远落在
+ * 日志外面。按开始时刻从早到晚排，和原来的队列一样。
+ */
+export function pendingConversations(db: DatabaseSync, config: Config): Conversation[] {
+  const pendingCutoff = nowS() - config.pendingWindowDays * 86400;
+  const seeds = selectPendingSeeds(db, config.dmrId, pendingCutoff);
+  const built = aroundUnresolvedSeeds(db, config, seeds).filter((b) => b.status === 'pending');
+  return toConversations(db, config, built).sort((a, b) => a.startAt - b.startAt || (a.id < b.id ? -1 : 1));
+}
+
+/**
+ * 未入库：种子是出了待确认窗口但还没结算的本台对话，只读要读的那几段，不是
+ * 整个保留期。
  */
 export function unloggedConversations(
   db: DatabaseSync,
@@ -316,24 +351,7 @@ export function unloggedConversations(
   const retentionCutoff = now - keepDays * 86400;
 
   const seeds = selectUnloggedSeeds(db, config.dmrId, pendingCutoff, retentionCutoff);
-  const byChannel = new Map<string, number[]>();
-  for (const s of seeds) {
-    const key = channelKey(s);
-    const list = byChannel.get(key);
-    if (list) list.push(s.startAt);
-    else byChannel.set(key, [s.startAt]);
-  }
-
-  let built: Built[] = [];
-  for (const [key, times] of byChannel) {
-    for (const w of mergeWindows(times, EXTEND_STEP_S)) {
-      // 种子只来自未结算行，已忽略、已入库这两档永远不会出现在结果里：
-      // 不聚类、不为每个 qso 多查一次。
-      built.push(...buildChannelWindow(db, config, key, w.start, w.end, config.dmrId, { ignored: false, logged: false }));
-    }
-  }
-  // 两个窗口之间可能藏着一条两边都摸不到的发射，把同一条对话各建了一份。
-  built = mergeOverlapping(built, config).filter((b) => b.status === 'unlogged');
+  const built = aroundUnresolvedSeeds(db, config, seeds).filter((b) => b.status === 'unlogged');
 
   let items = toConversations(db, config, built);
   items = applyFilters(items, filters);
@@ -362,7 +380,8 @@ export function searchConversations(
   const limit = filters.limit!;
   const [lo, hi] = prefixRange(prefix);
   const now = nowS();
-  const retentionCutoff = now - config.activityRetentionDays * 86400;
+  // 和裁剪、未入库同一个下限。保留期比待确认窗口短时按窗口算，行还在库里。
+  const retentionCutoff = now - Math.max(config.activityRetentionDays, config.pendingWindowDays) * 86400;
 
   const cursorStart = filters.cursor === undefined ? undefined : Number(/^(\d+):/.exec(filters.cursor)![1]);
   let upperBound = cursorStart === undefined ? now + 1 : cursorStart + EXTEND_STEP_S;
