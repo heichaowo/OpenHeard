@@ -290,10 +290,12 @@ export const api = {
     call<ConversationsResponse>(`/conversations${qs(params)}`),
 
   /** 结算认发射 id，不认对话 id：界面一律带上看到的那几次。 */
+  // 草稿字段和 activityIds 平铺在同一层，见 docs/admin-api-v1.md。包成
+  // {activityIds, draft} 的话，服务端读不到任何字段，回 422 说必填项全缺。
   promoteActivities: (activityIds: string[], draft: QsoDraft) =>
     call<Qso>('/conversations/promote', {
       method: 'POST',
-      body: JSON.stringify({ activityIds, draft }),
+      body: JSON.stringify({ ...draft, activityIds }),
     }),
 
   /** 一次忽略好几段，服务端一起做。一段结算不了就报在 missing 里，不挡别的段。 */
