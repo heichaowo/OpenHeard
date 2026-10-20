@@ -54,7 +54,7 @@ export function gridBounds(grid: string): GridBounds {
   const g = grid.toUpperCase();
   let x = 0;
   let y = 0;
-  let unit = LEVELS[0].unit;
+  let unit: number = LEVELS[0].unit;
   for (let i = 0; i < g.length / 2; i++) {
     const lv = LEVELS[i]!;
     const a = g.charCodeAt(i * 2);
