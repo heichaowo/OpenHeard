@@ -33,6 +33,22 @@ function madeBackup(rows = 3) {
   return { dir, out, expect };
 }
 
+describe('tableCounts', () => {
+  // 备份前后各数一遍，没列进去的表就不会被核对。
+  it('数了第 4 版新增的三张表', () => {
+    const counts = tableCounts(openDb(':memory:'));
+    assert.deepEqual(Object.keys(counts).sort(), [
+      'activity',
+      'activity_ai',
+      'activity_verdict',
+      'deleted_activity',
+      'poll_log',
+      'qso',
+      'resolved_activity',
+    ]);
+  });
+});
+
 describe('verifyBackup', () => {
   it('刚写出来的备份验得过', () => {
     const { out, expect } = madeBackup();

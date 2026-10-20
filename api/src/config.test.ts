@@ -81,3 +81,49 @@ describe('loadConfig', () => {
     assert.deepEqual(r.config.analog?.channels, [{ freqMhz: 438.5, channel: '438.500 中继' }]);
   });
 });
+
+// ai 和 map 是可选功能。写坏了不能让 api 回 503（管理端和采集入口都会跟着停），
+// 也不能让守护进程退出（采集停掉）。所以读文件时宽松，只有设置页保存才严格。
+describe('loadConfig 的 ai 和 map', () => {
+  it('没写就是缺省值：识别关着，不用地图', () => {
+    const r = loadConfig(write().path);
+    assert.ok(r.ok);
+    assert.equal(r.config.ai?.enabled, false);
+    assert.equal(r.config.ai?.asr.language, 'zh');
+    assert.equal(r.config.ai?.text.port, 8091);
+    assert.equal(r.config.aiProblem, undefined);
+    assert.equal(r.config.map?.provider, 'none');
+  });
+
+  it('写了的键生效，没写的补缺省', () => {
+    const r = loadConfig(write({ ai: { enabled: true, asr: { language: 'en' } }, map: { provider: 'osm' } }).path);
+    assert.ok(r.ok);
+    assert.equal(r.config.ai?.enabled, true);
+    assert.equal(r.config.ai?.asr.language, 'en');
+    assert.equal(r.config.ai?.vad.threshold, 0.5);
+    assert.equal(r.config.map?.provider, 'osm');
+  });
+
+  it('ai 写坏了：照常读出来，ai 是 undefined，原因在 aiProblem，不进 problems', () => {
+    const r = loadConfig(write({ ai: { enabled: true, text: { provider: 'openai-chat' } } }).path);
+    assert.ok(r.ok);
+    assert.equal(r.config.ai, undefined);
+    assert.match(r.config.aiProblem ?? '', /ai\.text\.baseUrl 必填/);
+  });
+
+  it('map 写坏了：当不用地图，原因在 mapProblem', () => {
+    const r = loadConfig(write({ map: { provider: 'amap', amapKey: 'k' } }).path);
+    assert.ok(r.ok);
+    assert.equal(r.config.map?.provider, 'none');
+    assert.match(r.config.mapProblem ?? '', /map\.amapSecurityCode 必填/);
+  });
+
+  it('ai 不是对象也不拦住启动', () => {
+    const r = loadConfig(write({ ai: 'on', map: 5 }).path);
+    assert.ok(r.ok);
+    assert.equal(r.config.ai, undefined);
+    assert.equal(r.config.aiProblem, 'ai 要是对象');
+    assert.equal(r.config.mapProblem, 'map 要是对象');
+  });
+});
+

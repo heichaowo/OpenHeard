@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Config } from './config.ts';
 import type { Activity } from './core.ts';
-import { dayConversations, pendingConversations, searchConversations, unloggedConversations } from './conversations.ts';
+import { setVerdicts, writeAiResults } from './ai.ts';
+import {
+  dayConversations,
+  meaninglessConversations,
+  pendingConversations,
+  searchConversations,
+  unloggedConversations,
+} from './conversations.ts';
 import { insertActivities, insertQso, openDb, resolveActivities } from './db.ts';
 
 const MY_ID = 4616460;
@@ -266,5 +273,249 @@ describe('searchConversations', () => {
     ins(db, [act('near', t + 1000, { dmrId: MY_ID, callsign: 'BD7KLO', talkgroup: 46001 })]);
     const page = searchConversations(db, config, 'BG0CG', {});
     assert.deepEqual(page.items.map((c) => c.id).sort(), ['hit']);
+  });
+});
+
+// ---- AI 识别结果和无意义 ----------------------------------------------------
+
+/** 模拟 FM 的一次发射。同一条信道，mine 是存下来的。 */
+const fm = (id: string, startAt: number, over: Partial<Activity> = {}): Activity => ({
+  id,
+  origin: 'sdr-fm',
+  startAt,
+  durationS: 3,
+  mine: false,
+  freqMhz: 438.975,
+  channel: '438.975 直频',
+  ...over,
+});
+
+const noSpeech = (...ids: string[]) => ids.map((activityId) => ({ activityId, hasSpeech: false }));
+const qsoOf = (id: string) => ({
+  id,
+  call: 'BD7KLO',
+  startAt: NOW,
+  freqMhz: 438.975,
+  band: '70cm',
+  mode: 'FM' as const,
+  rstSent: '59',
+  rstRcvd: '59',
+  createdAt: NOW,
+});
+
+describe('识别结果进对话', () => {
+  it('成员带上 ai，草稿用 AI 的呼号、QTH、报告和备注，aiFilled 说明哪几项', () => {
+    const db = fresh();
+    const t = NOW - 600;
+    ins(db, [fm('a', t, { mine: true }), fm('b', t + 20)]);
+    writeAiResults(
+      db,
+      [
+        { activityId: 'a', hasSpeech: true, category: 'qso', fields: { call: 'BG0CG', calledCall: 'BD7ABC', rst: '59' } },
+        { activityId: 'b', hasSpeech: true, category: 'qso', fields: { call: 'BD7ABC', qth: '海淀', rst: '57', device: 'UV-5R', power: '5W' } },
+      ],
+      NOW,
+    );
+    const c = dayConversations(db, { ...config, station: { myCallsign: 'BG0CG' } }, t - 100, t + 100, {}).items[0]!;
+    assert.equal(c.activities[1]!.ai?.fields?.qth, '海淀');
+    assert.equal(c.meaningless, false);
+    assert.equal(c.draft?.call, 'BD7ABC');
+    assert.equal(c.draft?.qth, '海淀');
+    assert.equal(c.draft?.rstRcvd, '57');
+    assert.equal(c.draft?.note, '对方设备 UV-5R，功率 5W');
+    assert.deepEqual(c.aiFilled, ['call', 'qth', 'rstRcvd', 'rstSent', 'note']);
+  });
+
+  it('人工判定算进成员的 meaningless', () => {
+    const db = fresh();
+    const t = NOW - 600;
+    ins(db, [fm('a', t, { mine: true })]);
+    writeAiResults(db, noSpeech('a'), NOW);
+    setVerdicts(db, ['a'], false, NOW);
+    const c = dayConversations(db, config, t - 100, t + 100, { meaningless: 'include' }).items[0]!;
+    assert.equal(c.activities[0]!.ai?.meaningless, false);
+    assert.equal(c.activities[0]!.ai?.verdict, 'keep');
+    assert.equal(c.meaningless, false);
+  });
+});
+
+describe('meaningless 过滤', () => {
+  const t = NOW - 3600;
+  /** 三条互不相连的 FM 对话：纯空按、真对话、一半一半。 */
+  function seeded() {
+    const db = fresh();
+    ins(db, [
+      fm('kerchunk', t, { mine: true }),
+      fm('real', t + 1000, { mine: true }),
+      fm('half1', t + 2000, { mine: true }),
+      fm('half2', t + 2030),
+    ]);
+    writeAiResults(db, [...noSpeech('kerchunk', 'half1'), { activityId: 'real', hasSpeech: true, category: 'qso' }, { activityId: 'half2', hasSpeech: true, category: 'qso' }], NOW);
+    return db;
+  }
+  const ids = (page: { items: { id: string }[] }) => page.items.map((c) => c.id).sort();
+
+  it('按天看缺省藏起无意义的', () => {
+    const db = seeded();
+    assert.deepEqual(ids(dayConversations(db, config, t - 100, t + 3000, {})), ['half1', 'real']);
+  });
+
+  it('only 只留无意义的，include 都留', () => {
+    const db = seeded();
+    assert.deepEqual(ids(dayConversations(db, config, t - 100, t + 3000, { meaningless: 'only' })), ['kerchunk']);
+    assert.deepEqual(ids(dayConversations(db, config, t - 100, t + 3000, { meaningless: 'include' })), ['half1', 'kerchunk', 'real']);
+  });
+
+  it('参数不对就报 422', () => {
+    assert.throws(() => dayConversations(seeded(), config, t - 100, t + 3000, { meaningless: 'maybe' }), /meaningless 只能是/);
+  });
+
+  // 已入库的是人看过的，AI 判错了也不能让它从已入库那一档里消失。
+  it('已入库的永远不被藏，也不进 only', () => {
+    const db = fresh();
+    ins(db, [fm('a', t, { mine: true })]);
+    writeAiResults(db, noSpeech('a'), NOW);
+    insertQso(db, qsoOf('q1'));
+    resolveActivities(db, ['a'], 'q1', NOW);
+    const day = dayConversations(db, config, t - 100, t + 100, {});
+    assert.deepEqual(day.items.map((c) => [c.id, c.status, c.meaningless]), [['a', 'logged', false]]);
+    assert.deepEqual(dayConversations(db, config, t - 100, t + 100, { meaningless: 'only' }).items, []);
+  });
+
+  it('已忽略的照样判无意义', () => {
+    const db = fresh();
+    ins(db, [fm('a', t, { mine: true })]);
+    writeAiResults(db, noSpeech('a'), NOW);
+    resolveActivities(db, ['a'], null, NOW);
+    assert.deepEqual(dayConversations(db, config, t - 100, t + 100, {}).items, []);
+    assert.deepEqual(dayConversations(db, config, t - 100, t + 100, { meaningless: 'only' }).items.map((c) => c.status), ['ignored']);
+  });
+
+  it('数字侧没有识别结果，不会被藏', () => {
+    const db = fresh();
+    ins(db, [act('d', t, { dmrId: MY_ID })]);
+    assert.deepEqual(ids(dayConversations(db, config, t - 100, t + 100, {})), ['d']);
+  });
+
+  // 过滤在分页和 total 之前。如果只给返回的那一页读 AI，页会短，total 会多。
+  it('未入库：过滤在分页和 total 之前', () => {
+    const db = fresh();
+    const old = NOW - 5 * 86400;
+    const rows: Activity[] = [];
+    const results = [];
+    for (let i = 0; i < 6; i++) {
+      rows.push(fm(`c${i}`, old + i * 1000, { mine: true }));
+      // c0 c1 c2 是空按，c3 c4 c5 是真对话；最新的是真对话
+      results.push(i < 3 ? { activityId: `c${i}`, hasSpeech: false } : { activityId: `c${i}`, hasSpeech: true, category: 'qso' as const });
+    }
+    ins(db, rows);
+    writeAiResults(db, results, NOW);
+
+    const p1 = unloggedConversations(db, config, { limit: '2' });
+    assert.deepEqual(p1.items.map((c) => c.id), ['c5', 'c4']);
+    assert.equal(p1.total, 3);
+    const p2 = unloggedConversations(db, config, { limit: '2', cursor: p1.next });
+    assert.deepEqual(p2.items.map((c) => c.id), ['c3']);
+    assert.equal(p2.next, undefined);
+
+    const all = unloggedConversations(db, config, { meaningless: 'include' });
+    assert.equal(all.total, 6);
+  });
+
+  it('待确认不含无意义的对话', () => {
+    const db = seeded();
+    assert.deepEqual(pendingConversations(db, config).map((c) => c.id).sort(), ['half1', 'real']);
+  });
+
+  it('搜呼号缺省把无意义的也列出来，要藏得显式 exclude', () => {
+    const db = fresh();
+    ins(db, [fm('x', t, { mine: true, callsign: 'BG0CG' })]);
+    writeAiResults(db, noSpeech('x'), NOW);
+    assert.deepEqual(searchConversations(db, config, 'BG0CG', {}).items.map((c) => c.id), ['x']);
+    assert.deepEqual(searchConversations(db, config, 'BG0CG', { meaningless: 'exclude' }).items, []);
+  });
+});
+
+describe('meaninglessConversations', () => {
+  const t = NOW - 3600;
+  const ids = (page: { items: { id: string }[] }) => page.items.map((c) => c.id);
+
+  it('每次发射都无意义的对话，新的在前，带 total', () => {
+    const db = fresh();
+    ins(db, [fm('a', t, { mine: true }), fm('b', t + 1000), fm('c', t + 2000, { mine: true })]);
+    writeAiResults(db, noSpeech('a', 'b', 'c'), NOW);
+    const page = meaninglessConversations(db, config, {});
+    assert.deepEqual(ids(page), ['c', 'b', 'a']);
+    assert.equal(page.total, 3);
+    const one = meaninglessConversations(db, config, { limit: '1' });
+    assert.equal(one.items.length, 1);
+    assert.equal(one.total, 3);
+    assert.ok(one.next);
+  });
+
+  it('已忽略的无意义对话也列出来（忽略过的空按要能在这里看到、删掉）', () => {
+    const db = fresh();
+    ins(db, [fm('ign', t, { mine: true }), fm('open', t + 1000, { mine: true })]);
+    writeAiResults(db, noSpeech('ign', 'open'), NOW);
+    resolveActivities(db, ['ign'], null, NOW);
+    const page = meaninglessConversations(db, config, {});
+    assert.deepEqual(page.items.map((c) => [c.id, c.status]).sort(), [['ign', 'ignored'], ['open', 'pending']]);
+  });
+
+  it('已入库的不列，哪怕全是无意义', () => {
+    const db = fresh();
+    ins(db, [fm('a', t, { mine: true })]);
+    writeAiResults(db, noSpeech('a'), NOW);
+    insertQso(db, qsoOf('q1'));
+    resolveActivities(db, ['a'], 'q1', NOW);
+    assert.deepEqual(meaninglessConversations(db, config, {}).items, []);
+  });
+
+  it('一半无意义的对话不列', () => {
+    const db = fresh();
+    ins(db, [fm('a', t, { mine: true }), fm('b', t + 30)]);
+    writeAiResults(db, [...noSpeech('a'), { activityId: 'b', hasSpeech: true, category: 'qso' }], NOW);
+    assert.deepEqual(meaninglessConversations(db, config, {}).items, []);
+  });
+
+  it('没有本台成员的旁听也列出来', () => {
+    const db = fresh();
+    ins(db, [fm('over', t)]);
+    writeAiResults(db, noSpeech('over'), NOW);
+    assert.deepEqual(meaninglessConversations(db, config, {}).items.map((c) => c.status), ['overheard']);
+  });
+
+  it('不是无意义（人工改判）的不列，人工判定无意义的列', () => {
+    const db = fresh();
+    ins(db, [fm('a', t, { mine: true }), fm('b', t + 1000, { mine: true })]);
+    writeAiResults(db, noSpeech('a'), NOW);
+    setVerdicts(db, ['a'], false, NOW);
+    setVerdicts(db, ['b'], true, NOW);
+    assert.deepEqual(ids(meaninglessConversations(db, config, {})), ['b']);
+  });
+
+  it('同一段对话里相连的无意义发射合成一条', () => {
+    const db = fresh();
+    ins(db, [fm('a', t, { mine: true }), fm('b', t + 30), fm('c', t + 60, { mine: true })]);
+    writeAiResults(db, noSpeech('a', 'b', 'c'), NOW);
+    const page = meaninglessConversations(db, config, {});
+    assert.equal(page.items.length, 1);
+    assert.deepEqual(page.items[0]!.activities.map((a) => a.id), ['a', 'b', 'c']);
+  });
+
+  it('保留期之前的不列', () => {
+    const db = fresh();
+    const old = NOW - (config.activityRetentionDays + 1) * 86400;
+    ins(db, [fm('old', old, { mine: true })]);
+    writeAiResults(db, noSpeech('old'), NOW);
+    assert.deepEqual(meaninglessConversations(db, config, {}).items, []);
+  });
+
+  it('origin 和 channel 仍然能过滤，请求里的 meaningless 不起作用', () => {
+    const db = fresh();
+    ins(db, [fm('a', t, { mine: true })]);
+    writeAiResults(db, noSpeech('a'), NOW);
+    assert.equal(meaninglessConversations(db, config, { origin: 'brandmeister' }).items.length, 0);
+    assert.equal(meaninglessConversations(db, config, { meaningless: 'exclude' }).items.length, 1);
   });
 });

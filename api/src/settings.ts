@@ -249,13 +249,6 @@ export function settingsOf(config: Config, analog?: AnalogSettings): Settings {
   };
 }
 
-/** 写进文件的样子：空的密钥去掉键，不留一个空串在那里。 */
-const serialise = <T extends object>(section: T, secrets: string[]): Record<string, unknown> => {
-  const out: Record<string, unknown> = JSON.parse(JSON.stringify(section));
-  for (const k of secrets) if (out[k] === '') delete out[k];
-  return out;
-};
-
 /**
  * 把设置写回配置文件，并且就地更新内存里那份。
  *
@@ -307,14 +300,15 @@ export function writeSettings(config: Config, next: Settings): void {
   if (touchesAi) {
     const merged = mergeAi(next.ai, config.ai);
     if (merged.problems.length > 0) throw new Error(`ai 设置不对，没有落盘：${merged.problems.join('，')}`);
-    const section = serialise(merged.config, []) as Record<string, Record<string, unknown>>;
-    for (const sec of ['asr', 'text'] as const) if (section[sec]!.apiKey === '') delete section[sec]!.apiKey;
-    raw.ai = section;
+    const { asr, text, ...rest } = merged.config;
+    // 密钥空着就不写这个键，文件里不留一个空串。
+    const dropEmpty = <T extends { apiKey: string }>({ apiKey, ...r }: T) => (apiKey === '' ? r : { ...r, apiKey });
+    raw.ai = { ...rest, asr: dropEmpty(asr), text: dropEmpty(text) };
   }
   if (touchesMap) {
     const merged = mergeMap(next.map, config.map);
     if (merged.problems.length > 0) throw new Error(`map 设置不对，没有落盘：${merged.problems.join('，')}`);
-    raw.map = serialise(merged.config, ['amapKey', 'amapSecurityCode']);
+    raw.map = Object.fromEntries(Object.entries(merged.config).filter(([, v]) => v !== ''));
   }
 
   const tmp = `${config.path}.tmp`;
