@@ -18,6 +18,8 @@ token 不对回 `401`。
 
 守护进程因此可以放心重发。取回的行推不上去时先落盘，下一轮开始前补发，成功才删文件。
 
+有一种例外：删掉的发射。人在收听页删掉一段对话时，api 给每个 id 记一条墓碑，之后再推来的同一个 id 不写回，也不算进 `written`。BrandMeister 每次轮询都重新取回最近的一批，守护进程也会把落盘的批次补发，没有墓碑的话，删掉的对话下一轮就回来了。墓碑和发射用同一个保留期。
+
 ## 接口
 
 | 方法和路径 | 请求 | 响应 |
@@ -25,6 +27,9 @@ token 不对回 `401`。
 | `POST /api/ingest/activity` | `IngestRow[]` | `{"received": number, "written": number}` |
 | `POST /api/ingest/poll-log` | `PollLog` | `204` |
 | `POST /api/ingest/radio` | `RadioStatus[]` | `204` |
+| `GET /api/ingest/ai/todo` | `?limit=N&steps=vad,asr,text` | `{"items": TodoItem[]}` |
+| `POST /api/ingest/ai` | `AiResult[]` | `{"written": number}` |
+| `POST /api/ingest/ai/status` | `{"ok": boolean, "message": string}` | `204` |
 
 ### IngestRow
 
@@ -62,7 +67,69 @@ token 不对回 `401`。
 
 `fetched` 和 `parsed` 必须分开。来源改字段名时 `parsed` 掉到 0 而 `fetched` 不变，那和稳态下全是重复行的计数长得一样。
 
-写入 `poll_log` 时顺带裁剪。`poll_log` 保留 30 天，`activity` 按配置的 `activityRetentionDays`。提升或忽略引用过的行不裁。
+写入 `poll_log` 时顺带裁剪。`poll_log` 保留 30 天，`activity` 按配置的 `activityRetentionDays`。提升或忽略引用过的行不裁。发射被裁掉时，它的识别结果、人工判定和过期的墓碑一起裁。
+
+## 识别队列
+
+守护进程向 api 要还没识别的录音，做完把结果推回来。队列只管模拟 FM 的发射，数字侧没有录音。
+
+### 待识别
+
+`GET /api/ingest/ai/todo?limit=N&steps=vad,asr,text` 返回 `{"items": TodoItem[]}`。
+
+- `limit` 是 1 到 50，缺省 10
+- `steps` 是守护进程开着的步骤，逗号隔开，只认 `vad`、`asr`、`text`。不给就等于一步都没开
+- `limit` 或 `steps` 不对，回 `422`
+
+`TodoItem` 是 `{id, startAt, durationS, mine, channel?, hasSpeech?, transcript?}`。新的在前。一次发射要同时满足这些，才会返回：
+
+- 它是模拟 FM 的发射，开始时刻在保留期内
+- `<recordingsDir>/<id>.wav` 存在
+- 下面四条至少满足一条
+
+1. 没有识别记录
+2. 记录里有错误，`attempts` 小于 3，距上次写入超过一小时
+3. 没有错误，有人声（`has_speech` 不是 0），`steps` 含 `asr`，还没有识别模型
+4. 没有错误，有人声，`steps` 含 `text`，转写不是空的，还没有提取模型
+
+只有第 4 条的行带 `hasSpeech` 和 `transcript`，守护进程据此只做提取，不再识别一遍。别的行都不带。
+
+录音文件只对候选行检查，一页一页读，凑够 `limit` 条就停。录音不在的行不返回。查询走 `activity_origin` 索引，从新往旧读，不扫整张 `activity`。
+
+出错的行最多做 3 次，每次隔一小时。用满了就不再返回。换了 key 或者下好了模型之后，不用等：设置页改了 `ai` 的值，或者 api 重启，就清掉所有出错的记录，队列重新做。
+
+### 推结果
+
+`POST /api/ingest/ai` 的请求体是 `AiResult[]`，返回 `{"written": number}`。
+
+| 字段 | 说明 |
+|---|---|
+| `activityId` | 发射 id，必填 |
+| `hasSpeech` | 有没有人声。布尔值，不是就当没给 |
+| `transcript` | 识别出的原文，最多 4000 个字符。空串要留着，它表示识别跑过了但什么都没听出来 |
+| `category` | `qso`、`test` 或 `noise`，别的值丢掉 |
+| `fields` | 提取出的字段 `{call, calledCall, qth, rst, device, antenna, power, height}` |
+| `asrModel`、`textModel` | 模型名。没跑那一步就不给 |
+| `error` | 这次出错的原因，最多 300 个字符 |
+
+写入规则：
+
+- 同一个 `activityId` 合并进已有的记录。后一步只填自己的列，不擦掉前面的。`fields` 整个替换
+- 已有记录带错误时，这次写入算重试，`attempts` 加 1。这次没带 `error`，错误就清掉
+- `at` 由 api 定。请求里带的 `at` 不作数，重试间隔靠它算
+- 不存在的发射 id 丢掉，被裁、被删（有墓碑）的也一样，不算在 `written` 里
+- 字符串去掉首尾空白再截断：`transcript` 4000，每个 `fields` 值 100
+- `fields.rst` 要匹配 `^[1-5][1-9][1-9]?$`，`fields.power` 要匹配 `^\d+(\.\d+)?W$`，不匹配就丢
+- `fields.call` 和 `fields.calledCall` 规整成大写，不像呼号就丢
+- 不认识的键丢掉。每个不合格的值只丢它自己，别的照存。`activityId` 不是字符串的整条丢掉
+- 请求体不是数组回 `422`
+- `meaningless` 由 api 算，规则见 [管理端 API](admin-api-v1.md) 的「无意义」
+
+### 工作线程状态
+
+`POST /api/ingest/ai/status` 的请求体是 `{"ok": boolean, "message": string}`，返回 `204`。它描述识别线程自己的状态，例如缺模型文件、云端 key 不对。这类错误不记在发射行上，不然一次配错就把整个积压的重试次数用光。
+
+和 `/api/ingest/radio` 一样，只留最新一条在内存里，不入库，不补发。`/api/ops` 的 `ai.worker` 读它，`at` 是 api 收到的时刻。形状不对回 `422`。
 
 ---
 
@@ -94,6 +161,13 @@ analog side. Re-pushing has no effect and comes back with `written` at zero.
 The daemon relies on this. Rows it cannot push go to disk and are replayed at
 the start of the next round, with the file deleted only on success.
 
+One exception: deleted transmissions. When a person deletes a conversation on
+the listening page, the api records a tombstone for each id, and the same id
+pushed again is neither written nor counted in `written`. BrandMeister returns
+the latest batch again on every poll and the daemon replays spooled batches;
+without a tombstone the deleted conversation would be back on the next round.
+A tombstone has the same retention as an activity.
+
 ## Endpoints
 
 | Method and path | Request | Response |
@@ -101,6 +175,9 @@ the start of the next round, with the file deleted only on success.
 | `POST /api/ingest/activity` | `IngestRow[]` | `{"received": number, "written": number}` |
 | `POST /api/ingest/poll-log` | `PollLog` | `204` |
 | `POST /api/ingest/radio` | `RadioStatus[]` | `204` |
+| `GET /api/ingest/ai/todo` | `?limit=N&steps=vad,asr,text` | `{"items": TodoItem[]}` |
+| `POST /api/ingest/ai` | `AiResult[]` | `{"written": number}` |
+| `POST /api/ingest/ai/status` | `{"ok": boolean, "message": string}` | `204` |
 
 ### IngestRow
 
@@ -157,4 +234,99 @@ steady state of rows already seen.
 
 Writing a poll log also prunes: `poll_log` keeps 30 days, `activity` keeps
 `activityRetentionDays`, and rows referenced by a promotion or an ignore are
-never pruned.
+never pruned. When an activity is pruned, its recognition result, human verdict
+and any expired tombstones go with it.
+
+## The recognition queue
+
+The daemon asks the api for recordings not yet recognised, and pushes results
+back. The queue covers analog FM transmissions only; digital ones have no
+recording.
+
+### To do
+
+`GET /api/ingest/ai/todo?limit=N&steps=vad,asr,text` returns
+`{"items": TodoItem[]}`.
+
+- `limit` is 1 to 50, default 10
+- `steps` lists the steps the daemon has on, comma separated, and only `vad`,
+  `asr` and `text` are accepted. Leaving it out means no step is on
+- A bad `limit` or `steps` is `422`
+
+A `TodoItem` is `{id, startAt, durationS, mine, channel?, hasSpeech?,
+transcript?}`, newest first. A transmission is returned only when all of these
+hold:
+
+- It is an analog FM transmission, started within the retention period
+- `<recordingsDir>/<id>.wav` exists
+- At least one of the four conditions below holds
+
+1. There is no recognition row
+2. The row holds an error, `attempts` is below 3, and the last write was over
+   an hour ago
+3. No error, speech present (`has_speech` is not 0), `steps` has `asr`, and
+   there is no recognition model yet
+4. No error, speech present, `steps` has `text`, the transcript is not empty,
+   and there is no extraction model yet
+
+Only condition-4 rows carry `hasSpeech` and `transcript`, so the daemon runs
+extraction alone and does not recognise again. Other rows carry neither.
+
+File existence is checked only for candidate rows, read a page at a time and
+stopping once `limit` is reached. A row whose recording is gone is not
+returned. The query uses the `activity_origin` index, reading newest first, and
+never scans the whole `activity` table.
+
+A row with an error is tried at most 3 times, an hour apart, then it stops
+being returned. After fixing a key or finishing a model download there is no
+need to wait: changing the `ai` values in the settings, or restarting the api,
+deletes every row that holds an error, and the queue does them again.
+
+### Pushing results
+
+`POST /api/ingest/ai` takes `AiResult[]` and returns `{"written": number}`.
+
+| Field | Meaning |
+|---|---|
+| `activityId` | The transmission id, required |
+| `hasSpeech` | Whether there is speech. A boolean; anything else counts as absent |
+| `transcript` | The recognised text, at most 4000 characters. Keep an empty string: it means recognition ran and heard nothing |
+| `category` | `qso`, `test` or `noise`; any other value is dropped |
+| `fields` | The extracted fields `{call, calledCall, qth, rst, device, antenna, power, height}` |
+| `asrModel`, `textModel` | Model names. Leave out a step that did not run |
+| `error` | Why this attempt failed, at most 300 characters |
+
+Write rules:
+
+- A result merges into the existing row for the same `activityId`. A later
+  step fills only its own columns and does not erase earlier ones. `fields` is
+  replaced as a whole
+- When the existing row holds an error, this write counts as a retry and
+  `attempts` goes up by one. If this write has no `error`, the error is cleared
+- The api sets `at` itself. A client `at` is ignored, and the retry gap
+  depends on it
+- An unknown activity id is dropped, and so is one that was pruned or deleted
+  (it has a tombstone). It is not counted in `written`
+- Strings are trimmed and capped: `transcript` at 4000, each `fields` value at
+  100
+- `fields.rst` must match `^[1-5][1-9][1-9]?$` and `fields.power` must match
+  `^\d+(\.\d+)?W$`, or it is dropped
+- `fields.call` and `fields.calledCall` are normalised to upper case and
+  dropped unless they look like a callsign
+- Unknown keys are dropped. An invalid value drops only itself and the rest is
+  stored. A result whose `activityId` is not a string is dropped whole
+- A body that is not an array is `422`
+- The api computes `meaningless`; the rule is under "Meaningless" in the
+  [admin API](admin-api-v1.md)
+
+### Worker status
+
+`POST /api/ingest/ai/status` takes `{"ok": boolean, "message": string}` and
+returns `204`. It describes the recognition worker itself, for example a
+missing model file or a wrong cloud key. Such errors are not recorded on the
+transmission rows, or one misconfiguration would use up the retries of the
+whole backlog.
+
+Like `/api/ingest/radio`, only the latest one is kept, in memory, not stored,
+not replayed. `ai.worker` in `/api/ops` reads it, and `at` is when the api
+received it. A bad shape is `422`.

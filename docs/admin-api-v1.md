@@ -29,18 +29,20 @@
 | `401` | 没有会话，或者口令不对 |
 | `429` | 登录试得太频繁。一个来源五分钟内最多十次，`Retry-After` 是还要等的秒数。只有一个口令，猜中一次就是全部，而监听地址可以配到局域网 |
 | `404` | 要删的通联不存在 |
-| `409` | 结算按发射 id：挑的 id 里有不存在的，或者有已经结算过的。刷新后重试，见「按发射 id 结算」 |
+| `409` | 结算按发射 id：挑的 id 里有不存在的，或者有已经结算过的。刷新后重试，见「按发射 id 结算」。判定里有不存在的 id 也回这个 |
 | `413` | 请求体超过 16 MB |
-| `422` | 草稿还缺必填字段，`missing` 里是字段名。`activityIds` 是空数组，或者不是字符串数组，都回这个。挑的发射不在同一条信道上，也回这个 |
+| `422` | 草稿还缺必填字段，`missing` 里是字段名。`activityIds` 是空数组，或者不是字符串数组，都回这个。挑的发射不在同一条信道上，也回这个。删除和判定的请求体格式不对，设置里 `ai` 或 `map` 不合格，也回这个 |
 | `503` | 配置有问题，`problems` 里是原因。此时每条路由都回这个 |
 
 ## 本台信息
 
 | 方法和路径 | 响应 |
 |---|---|
-| `GET /api/station` | `{"station": StationDefaults, "channels": Channel[], "analogEnabled": boolean, "brandmeisterEnabled": boolean}` |
+| `GET /api/station` | `{"station": StationDefaults, "channels": Channel[], "analogEnabled": boolean, "brandmeisterEnabled": boolean, "aiEnabled": boolean, "map": {"provider": "amap" \| "osm" \| "none", "amapKey"?: string}}` |
 
 `station` 和 `channels` 都来自配置，不入库。`channels` 是频谱表，快速补录的信道下拉用它。`analogEnabled` 和 `brandmeisterEnabled` 是两个开关此刻的值。界面靠这条接口就能拿到，不用等 `/api/radios` 或者 `/api/ops`。
+
+`aiEnabled` 是语音识别的开关。识别的配置写坏了，当作关。`map.provider` 是设置里选的地图，没选是 `none`。`amapKey` 只在选了高德时才有。它是公开的，页面要拿它去加载地图。安全密钥不在这里，也不在任何响应里。
 
 ## 待确认队列
 
@@ -50,7 +52,7 @@
 
 `PendingItem` 是 `{cluster, draft}`。`cluster` 是按信道和间隔阈值算出来的一段对话，不入库，每次请求重算。`draft` 是机器能预填的部分。
 
-队列只含有本台发射的段，窗口是配置里的 `pendingWindowDays`。这条接口只用来读。结算走下面「按发射 id 结算」那两条，不再有按 `cluster.id` 提升、忽略、删除的路由。
+队列只含有本台发射的段，窗口是配置里的 `pendingWindowDays`。无意义的对话不在队列里，见「无意义」。`PendingItem` 另带可选的 `aiFilled`：草稿里哪几个字段是 AI 填的。这条接口只用来读。结算走下面「按发射 id 结算」那两条，不再有按 `cluster.id` 提升、忽略、删除的路由。
 
 删掉一条通联会把它占住的发射放回队列。
 
@@ -61,14 +63,19 @@
 | `GET /api/conversations` | 见下 | `{items, next?, channels?, total?}`，或 `422` |
 | `POST /api/conversations/promote` | `QsoDraft` 加 `activityIds` | `Qso`，`201`，或 `409`、`422` |
 | `POST /api/conversations/ignore` | `{picks: {id, activityIds}[]}` | `{ignored, missing}` |
+| `POST /api/conversations/delete` | `{picks: {id, activityIds}[]}` | `{deleted, missing}` |
+| `POST /api/conversations/verdict` | `{activityIds: string[], meaningless: boolean}` | `204`，或 `409`、`422` |
 
-收听页把待确认、未入库、已入库、已忽略、旁听这五档对话，当成同一张图来看。三个视图选一个，多给或者少给都回 `422`：
+收听页把待确认、未入库、已入库、已忽略、旁听这五档对话，当成同一张图来看。四个视图选一个，多给或者少给都回 `422`：
 
 - 按天看：带 `from` 和 `to`，Unix 秒，`from` 小于 `to`。跨度最多 172800 秒。返回 `startAt` 落在 `[from, to)` 里的对话。`channels` 是这一天这个来源里出现过的信道
 - 未入库：`view=unlogged`。返回出了待确认窗口、还没结算的本台对话。`total` 是这一档的总数
+- 无意义：`view=meaningless`。返回无意义的对话，已忽略的也在，已入库的不在。新的在前。`total` 是这一档的总数
 - 按呼号搜：`q`，前缀匹配，归一化之后至少两个字符。跨整个保留期，不带 `total`
 
-三个视图都能再叠加 `origin`、`status`、`channel` 过滤。分页用同一套 `limit`（1 到 200，缺省 50）和 `cursor`。`cursor` 是上一页 `next` 原样传回来。翻到满一页会多给一个 `next`。
+四个视图都能再叠加 `origin`、`status`、`channel` 过滤。分页用同一套 `limit`（1 到 200，缺省 50）和 `cursor`。`cursor` 是上一页 `next` 原样传回来。翻到满一页会多给一个 `next`。
+
+`meaningless` 是 `exclude`、`only` 或 `include`，别的值回 `422`。按天看和 `view=unlogged` 缺省是 `exclude`，按呼号搜缺省是 `include`。`view=meaningless` 不看这个参数。已入库的对话永远不是无意义，所以 `exclude` 不会藏掉它们，`only` 也不会列出它们。过滤在分页和 `total` 之前做，所以页不会变短，`total` 也不含被藏掉的。
 
 `Conversation` 形状：
 
@@ -82,11 +89,33 @@
   "status": "pending",
   "activities": [ ],
   "qso": { "id": "…", "call": "BD7KLO", "rstSent": "59", "rstRcvd": "59" },
-  "draft": { }
+  "draft": { },
+  "meaningless": false,
+  "aiFilled": ["call", "qth"]
 }
 ```
 
-`status` 是 `pending`、`unlogged`、`logged`、`ignored`、`overheard` 之一。`qso` 只在 `logged` 时才有。`draft` 只在没结算的三档才有，形状和 `PendingItem.draft` 一样。
+`status` 是 `pending`、`unlogged`、`logged`、`ignored`、`overheard` 之一。`qso` 只在 `logged` 时才有。`draft` 只在没结算的三档才有，形状和 `PendingItem.draft` 一样。`meaningless` 见「无意义」。`aiFilled` 只在草稿里有 AI 填的字段时才有，值是字段名。
+
+模拟 FM 的成员发射可能带 `ai`，是这次发射的识别结果：
+
+```json
+{ "hasSpeech": true, "transcript": "…", "category": "qso",
+  "fields": { "call": "BD7ABC", "qth": "海淀", "rst": "57" },
+  "meaningless": false, "verdict": "keep" }
+```
+
+`hasSpeech`、`transcript`、`category`、`fields`、`error` 都可能缺。没有识别结果的发射（还没处理，或者是数字侧）没有 `ai`。`meaningless` 是生效的判定，人工判定已经算进去。`verdict` 只在有人工判定时才有，是 `meaningless` 或 `keep`。
+
+草稿里 AI 只补现有规则留空的字段。呼号取不到时用 AI 的：对方说的 `call` 和本台叫的 `calledCall` 合起来数，剔掉本台自己的呼号，取出现最多的，一样多取更晚的。QTH 和对方的报告取对方最新说的，本台的报告取本台最新说的，报告还是缺省的 59 才换。备注写对方的设备、天线、功率、高度，只写说了的那几样，草稿没有备注才写。
+
+### 无意义
+
+一次发射的生效判定：有人工判定就用它，没有就用 AI 的，都没有就不是无意义。AI 的判定只有一个函数：没出错，并且没有人声，或者类别是 `test`、`noise`。出错的行不算无意义，因为不知道。
+
+一段对话无意义，要同时满足三条：状态不是 `logged`，没有成员入过库，每个成员的生效判定都是无意义。没有识别结果的成员让它不算无意义。已入库的对话永远不是无意义，人已经看过了。
+
+AI 的结果和人工判定在过滤之前一次读好，范围是这些对话里全部模拟 FM 的成员。
 
 ### 按发射 id 结算
 
@@ -103,6 +132,20 @@
 `/ignore` 里任何一个 `pick` 没通过上面的检查，就把它的 `id` 记进 `missing`。这不影响别的 `pick`。同一个请求里，更早的一个合法 `pick` 用过某个 id 之后，后面再挑到它也算「已经结算过」。合法的那些一次事务写完。响应一律 `200`。
 
 请求体本身不对才回 `422`。`picks` 不是数组算不对。`id` 不是字符串算不对。`activityIds` 不是字符串数组也算不对。
+
+### 删除
+
+`/delete` 整段删掉没入库的对话，包括已忽略的。每个 `pick` 要通过这些检查：非空，不重复，id 都还在，没有一个已入库，都在同一条信道上。有一条不过，就把它的 `id` 记进 `missing`，不影响别的 `pick`。同一个请求里，更早的合法 `pick` 用过的 id，后面再挑到算已经不在了。请求体不对才回 `422`，别的情况一律 `200`。`deleted` 是删掉的 `pick` 个数。
+
+合法的 `pick` 在一个事务里删这几样：发射行、已忽略的记录、识别结果、人工判定。同时给每个 id 记一条墓碑。提交之后才删录音。
+
+墓碑让采集再推来的同一个 id 不写回，见 [采集 API](ingest-api-v1.md)。墓碑和发射用同一个保留期。
+
+删除不能撤销。已入库的对话不能在这里删，要先在日志里删掉那条通联，发射放回队列之后才能删。
+
+### 判定
+
+`/verdict` 给这几次发射记人工判定，压过 AI 的。`meaningless` 是 `true` 表示判成无意义，`false` 表示改判回来。同一个 id 再判一次是覆盖。有 id 不存在回 `409`，这时一条都不写。`activityIds` 不是字符串数组或者是空数组，`meaningless` 不是布尔值，都回 `422`。
 
 ## 收听记录
 
@@ -187,9 +230,22 @@ curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
 | `GET /api/settings` | 无 | `Settings` |
 | `PUT /api/settings` | `Settings` | `Settings`，或 `422` |
 
-`Settings` 是配置里人能在界面上改的那部分：`station`、`channels`、`queries`、`brandmeisterEnabled`，以及 `analog` 的 `channels`、`enabled`、`gainDb`、`myUnitId`、`openMarginDb`、`closeMarginDb`。`analog.channels` 是 `{freqMhz, channel}[]`，一支接收机收不下的一组回 `422` 并说明原因。
+`Settings` 是配置里人能在界面上改的那部分：`station`、`channels`、`queries`、`brandmeisterEnabled`，`analog` 的 `channels`、`enabled`、`gainDb`、`myUnitId`、`openMarginDb`、`closeMarginDb`，以及 `ai` 和 `map` 两段。这两段每个键的含义和缺省值见 [配置](configuration.md)。`analog.channels` 是 `{freqMhz, channel}[]`，一支接收机收不下的一组回 `422` 并说明原因。
 
 改不了的留在文件里：`dbPath`、`host`、三个密钥、`recordingsDir`。它们要么一改就要重启整套，要么改错了就把自己关在门外。
+
+`ai` 和 `map` 里有第三方服务的密钥，只写不读。`GET` 返回生效值，密钥换成布尔值：`ai.asr.apiKeySet`、`ai.text.apiKeySet`、`map.amapSecurityCodeSet`。高德的 `amapKey` 是公开的，照常返回。`PUT` 先按已存的值解出每个密钥，再校验：
+
+- 没给这个键，或者给了 `null`：保留已存的
+- 给了空串：清掉
+- 给了非空文字：设成新值
+- 提交里的任何 `*Set` 键一律忽略，不写进文件
+
+别的键没给或者给了 `null`，也保留已存的。所以界面把 `GET` 的结果整个交回来保存，不会清掉密钥，也不会因为密钥不在请求体里而被拒。校验是严格的：枚举、类型、范围，云端要有地址、模型名和 key，高德要有 key 和安全密钥，识别关着时提取也要关。一处不对，整个请求回 `422`，文件不变。
+
+`ai` 的值变了（不只是密钥），保存时顺手清掉所有出错的识别记录，让队列重新做。api 启动时也清一次。换了 key、下好了模型之后，不用再等一小时的重试间隔。
+
+文件里原来就有写坏的 `ai` 或 `map`，而这次请求没碰它们，保存不受影响。读配置时，写坏的 `ai` 当作没开，写坏的 `map` 当作不用地图，各留一句原因，显示在运维页上。它们不会让 api 回 `503`。
 
 `brandmeisterEnabled` 和 `analog.enabled` 是两个开关，缺省都是开。关掉不清空设置，原来的 `queries` 和 `analog.channels` 留在文件里，界面收起对应的卡片，改不了里面的字段。
 
@@ -228,7 +284,7 @@ curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
 | `GET /api/recordings` | `string[]`，有录音的那几次发射的 id |
 | `GET /api/recordings/:id` | `audio/wav`，没有回 `404` |
 
-守护进程把模拟侧每次静噪开启存成 `<activity id>.wav`，目录是配置里 `analog.recordingsDir`，没有 `analog` 那一段时按 `./recordings` 算。这个目录跟着配置读，不是进程起来时的一份快照。设置页加上模拟守听之后，新目录立刻能读能放，不用重启 api。模拟 FM 空中不带身份信息，对方呼号只能靠人回忆，所以确认的时候要能听回去。
+守护进程把模拟侧每次静噪开启存成 `<activity id>.wav`，目录是配置里 `analog.recordingsDir`，没有 `analog` 那一段时按 `./recordings` 算。删除对话时连录音一起删。这个目录跟着配置读，不是进程起来时的一份快照。设置页加上模拟守听之后，新目录立刻能读能放，不用重启 api。模拟 FM 空中不带身份信息，对方呼号只能靠人回忆，所以确认的时候要能听回去。
 
 要会话。这是本台信道上的音频，不进公开面。列表那条存在是为了让界面知道该给哪几行放播放器，不必挨个探一次 404。
 
@@ -236,7 +292,7 @@ curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
 
 | 方法和路径 | 响应 |
 |---|---|
-| `GET /api/ops` | 健康状态、机器负载和内存、最近 40 次采集、按来源分组的发射数、每个模拟信道此刻的电台状态 `radios`、`analogEnabled`、`brandmeisterEnabled`，以及决定行为的配置值 |
+| `GET /api/ops` | 健康状态、机器负载和内存、最近 40 次采集、按来源分组的发射数、每个模拟信道此刻的电台状态 `radios`、`analogEnabled`、`brandmeisterEnabled`、识别队列 `ai`，以及决定行为的配置值 |
 
 不论健康与否都回 `200`，因为这一页的用途是把问题显示出来。要当外部监控用 `GET /health`，它不要会话，只回 `{"ok", "problems"}`，不健康时回 `503`。
 
@@ -245,6 +301,41 @@ curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
 `machine` 里是负载、本进程内存、系统内存和已运行时长。负载已经除以核数，直接和 1.0 比。无人值守时跑飞的轮询和内存泄漏只看磁盘看不出来。这几项不进 `/health`，那里只回 `ok` 和 `problems`。
 
 `poll_log` 里 `fetched`、`parsed`、`written` 分开记。来源改字段名时 `parsed` 会掉到 0 而 `fetched` 不变，那和「这批全是重复行」的计数长得一样，只有分开记才分得出来。
+
+`ai` 是识别队列的状态：
+
+```json
+{ "enabled": true, "vad": "local", "asrProvider": "local", "textProvider": "local",
+  "todo": 12, "doneLast24h": 340, "meaningless": 41,
+  "worker": { "at": 1789465773, "ok": true, "message": "…" },
+  "lastError": { "at": 1789465000, "message": "…" },
+  "problem": "…" }
+```
+
+- `enabled`：语音识别开着，并且配置没写坏
+- `vad`：`local` 或 `off`。`asrProvider` 是 `local`、`openai-transcriptions`、`chat-audio` 或 `off`。`textProvider` 是 `local`、`openai-chat` 或 `off`。没开时照常报配置里选的。配置写坏时三个都是 `off`
+- `todo`：待识别的录音数，和守护进程要的是同一批，数的条件见 [采集 API](ingest-api-v1.md)。没开时是 0
+- `doneLast24h`：最近 24 小时做完且没出错的发射数
+- `meaningless`：和收听页「无意义」那一档的 `total` 是同一个函数算的，两边一个数
+- `worker`：守护进程里识别线程报上来的状态，只放内存。从没报过就没有这个键。`at` 是 api 收到的时刻
+- `lastError`：最近一次出错的识别记录。线程自己的错误在 `worker` 里，不在这里
+- `problem`：`ai` 配置写坏了的原因。没坏就没有这个键
+
+`map` 写坏了，顶层另有 `mapProblem`，是它的原因。没坏就没有这个键。
+
+## 高德地图代理
+
+| 方法和路径 | 响应 |
+|---|---|
+| `GET /_AMapService/*` | 高德的响应原样返回，或者 `400`、`401`、`404`、`502` |
+
+高德的 Web 端 JS API 要带安全密钥（`jscode`）。密钥留在 api 里，页面只有 `amapKey`。页面在加载地图之前把 `serviceHost` 设成 `<来源>/_AMapService`，高德的 Web 服务请求就走到这里，由 api 补上 `jscode` 再转出去。
+
+路由和 `/api` 一样要会话，没有会话回 `401`。它在根路径上，在前端的兜底路由之前注册。只认 `GET`。没选高德，或者没填安全密钥，回 `404`，不发任何请求。
+
+`/_AMapService` 后面那段路径必须匹配 `^/v[0-9]+(/[A-Za-z0-9_.-]+)+$`，并且没有只含点的段。不匹配回 `400`，不发请求。目标是固定的源加上这段路径，用字符串拼接，不做 URL 解析：`//evil.example/x` 这种路径要是被解析，请求就会发到别的主机，安全密钥跟着出去。以 `/v4/map/styles` 开头的发到 `https://webapi.amap.com`，别的发到 `https://restapi.amap.com`。
+
+客户端的查询串原样带上，但先删掉所有 `jscode`，再补上配置里的安全密钥。不转发客户端的任何头，只留 `Accept`，所以会话 cookie 不会出去。超时 10 秒。高德的状态码、`content-type` 和内容原样返回。出错或超时回 `502`，响应和日志里都没有安全密钥。
 
 ---
 
@@ -287,22 +378,28 @@ that are still absent.
 | `401` | No session, or the wrong password |
 | `429` | Too many login attempts. Ten per source per five minutes; `Retry-After` gives the seconds to wait. There is one password and guessing it once is everything, and the listen address can be on the LAN |
 | `404` | The contact to edit or delete does not exist |
-| `409` | Settlement is by activity id: one of the picked ids no longer exists, or one is already settled. Refresh and retry; see "Settling by activity id" |
+| `409` | Settlement is by activity id: one of the picked ids no longer exists, or one is already settled. Refresh and retry; see "Settling by activity id". A verdict naming an id that does not exist also gives this |
 | `413` | The request body is over 16 MB |
-| `422` | The draft is missing required fields, named in `missing`. Also an empty or non-string-array `activityIds`, or picked transmissions that are not all on the same channel |
+| `422` | The draft is missing required fields, named in `missing`. Also an empty or non-string-array `activityIds`, or picked transmissions that are not all on the same channel. Also a malformed delete or verdict body, and an invalid `ai` or `map` in the settings |
 | `503` | The config is broken. `problems` says why, and every route answers this |
 
 ## Station
 
 | Method and path | Response |
 |---|---|
-| `GET /api/station` | `{"station": StationDefaults, "channels": Channel[], "analogEnabled": boolean, "brandmeisterEnabled": boolean}` |
+| `GET /api/station` | `{"station": StationDefaults, "channels": Channel[], "analogEnabled": boolean, "brandmeisterEnabled": boolean, "aiEnabled": boolean, "map": {"provider": "amap" \| "osm" \| "none", "amapKey"?: string}}` |
 
 `station` and `channels` come from the config and are never stored.
 `channels` is the spectrum table behind the quick-entry channel picker.
 `analogEnabled` and `brandmeisterEnabled` are the two switches' effective
 values, available here so the web store knows them before `/api/radios` or
 `/api/ops` are ever polled.
+
+`aiEnabled` is the speech recognition switch. A broken recognition config
+counts as off. `map.provider` is the map chosen in the settings, `none` when
+none is. `amapKey` is only there when AMap is chosen. It is public, because
+the page needs it to load the map. The security code is not here, and is in no
+response at all.
 
 ## Pending queue
 
@@ -315,7 +412,9 @@ from the channel and the gap threshold. It is not stored and is recomputed per
 request. The draft is whatever the machine could fill in.
 
 The queue only holds clusters containing one of our own transmissions, within
-`pendingWindowDays`. This endpoint is read-only now. Settlement goes through
+`pendingWindowDays`. Meaningless conversations are not in it; see "Meaningless".
+A `PendingItem` also carries an optional `aiFilled`: which draft fields the AI
+filled. This endpoint is read-only now. Settlement goes through
 the two activity-id routes below; there is no longer a promote, ignore or
 delete route keyed by `cluster.id`.
 
@@ -328,9 +427,11 @@ Deleting a contact releases its transmissions back into the queue.
 | `GET /api/conversations` | see below | `{items, next?, channels?, total?}`, or `422` |
 | `POST /api/conversations/promote` | `QsoDraft` plus `activityIds` | `Qso`, `201`, or `409`, `422` |
 | `POST /api/conversations/ignore` | `{picks: {id, activityIds}[]}` | `{ignored, missing}` |
+| `POST /api/conversations/delete` | `{picks: {id, activityIds}[]}` | `{deleted, missing}` |
+| `POST /api/conversations/verdict` | `{activityIds: string[], meaningless: boolean}` | `204`, or `409`, `422` |
 
 The listening page treats pending, unlogged, logged, ignored and overheard as
-one picture. Pick exactly one of these three views; giving more or fewer than
+one picture. Pick exactly one of these four views; giving more or fewer than
 one is `422`:
 
 - Day view: `from` and `to`, Unix seconds, `from` less than `to`, span at most
@@ -338,12 +439,22 @@ one is `422`:
   `channels` lists the channels that day and origin actually used
 - Unlogged: `view=unlogged`. Returns our own conversations that are past the
   pending window and still unsettled. `total` is this view's full count
+- Meaningless: `view=meaningless`. Returns meaningless conversations. Ignored
+  ones are in, logged ones are not. Newest first. `total` is this view's full
+  count
 - Search: `q`, a prefix match, at least two characters after normalizing.
   Spans the whole retention period. No `total`
 
-All three views also take `origin`, `status` and `channel` filters, and page
+All four views also take `origin`, `status` and `channel` filters, and page
 with the same `limit` (1 to 200, default 50) and `cursor`. `cursor` is the
 previous page's `next`, sent back unchanged. A full page gets another `next`.
+
+`meaningless` is `exclude`, `only` or `include`; any other value is `422`. The
+day view and `view=unlogged` default to `exclude`, search defaults to
+`include`. `view=meaningless` ignores it. A logged conversation is never
+meaningless, so `exclude` never hides one and `only` never lists one. The
+filter runs before paging and `total`, so a page does not come back short and
+`total` does not count what was hidden.
 
 A `Conversation`:
 
@@ -357,13 +468,57 @@ A `Conversation`:
   "status": "pending",
   "activities": [ ],
   "qso": { "id": "…", "call": "BD7KLO", "rstSent": "59", "rstRcvd": "59" },
-  "draft": { }
+  "draft": { },
+  "meaningless": false,
+  "aiFilled": ["call", "qth"]
 }
 ```
 
 `status` is one of `pending`, `unlogged`, `logged`, `ignored`, `overheard`.
 `qso` is only present when `logged`. `draft` is only present on the three
-unsettled statuses, shaped like `PendingItem.draft`.
+unsettled statuses, shaped like `PendingItem.draft`. See "Meaningless" for
+`meaningless`. `aiFilled` is only present when the AI filled some draft
+fields, and holds their names.
+
+A member transmission of analog FM may carry `ai`, the recognition result for
+that transmission:
+
+```json
+{ "hasSpeech": true, "transcript": "…", "category": "qso",
+  "fields": { "call": "BD7ABC", "qth": "海淀", "rst": "57" },
+  "meaningless": false, "verdict": "keep" }
+```
+
+`hasSpeech`, `transcript`, `category`, `fields` and `error` may each be
+missing. A transmission with no result (not processed yet, or digital) has no
+`ai`. `meaningless` is the effective verdict, with any human verdict already
+counted. `verdict` is only present when a person has judged it: `meaningless`
+or `keep`.
+
+In the draft the AI only fills what the existing rules leave empty. The call
+is taken from the AI when there is no other source: the far station's `call`
+and the calls our station named in `calledCall` are counted together, our own
+callsign is dropped, the most frequent wins, and a tie goes to the later one.
+QTH and the received report come from the far side's latest transmission, the
+sent report from ours, and a report is only replaced while it is still the
+default 59. The note lists the far side's device, antenna, power and height,
+only the parts that were said, and only when the draft has no note.
+
+### Meaningless
+
+The effective verdict of one transmission: a human verdict if there is one,
+else the AI's, else not meaningless. The AI's verdict is one function: no
+error, and either no speech or a category of `test` or `noise`. A row with an
+error is not meaningless, because nobody knows.
+
+A conversation is meaningless when all three hold: its status is not
+`logged`, no member was ever logged, and every member's effective verdict is
+meaningless. A member with no recognition result keeps it from being
+meaningless. A logged conversation is never meaningless: a person already
+looked at it.
+
+AI results and human verdicts are read once, before filtering, for every
+analog FM member of those conversations.
 
 ### Settling by activity id
 
@@ -389,6 +544,35 @@ earlier valid pick counts as settled if it comes up again. The valid picks
 settle in one transaction. The response is always `200`. Only a malformed body
 gives `422`: `picks` not an array, an `id` not a string, or `activityIds` not
 an array of strings.
+
+### Deleting
+
+`/delete` removes conversations that are not logged, ignored ones included.
+Each `pick` must pass these checks: non-empty, no duplicates, every id still
+exists, none logged, all on one channel. A pick that fails goes into `missing`
+by its `id` without touching the others. Within one request, an id used by an
+earlier valid pick counts as gone if it comes up again. Only a malformed body
+is `422`; everything else is `200`. `deleted` is the number of picks deleted.
+
+The valid picks delete these in one transaction: the activity rows, the
+ignored-settlement rows, the recognition results and the human verdicts. A
+tombstone is recorded for every id. The recordings are removed after the commit.
+
+The tombstone stops the collector from writing the same id back when it pushes
+it again; see the [ingest API](ingest-api-v1.md). A tombstone has the same
+retention as an activity.
+
+Deleting cannot be undone. A logged conversation cannot be deleted here:
+delete the contact in the log first, and its transmissions come back to the
+queue.
+
+### Verdicts
+
+`/verdict` records a human verdict on these transmissions, which beats the
+AI's. `meaningless: true` judges them meaningless, `false` judges them back to
+meaningful. Judging an id again overwrites. An id that does not exist is `409`
+and nothing is written. `activityIds` that is not an array of strings or is
+empty, or a `meaningless` that is not a boolean, is `422`.
 
 ## Heard
 
@@ -507,14 +691,45 @@ rolled over into the next day.
 | `PUT /api/settings` | `Settings` | `Settings`, or `422` |
 
 `Settings` is the part of the config a person edits in the UI: `station`,
-`channels`, `queries`, `brandmeisterEnabled`, and `analog`'s `channels`,
-`enabled`, `gainDb`, `myUnitId`, `openMarginDb` and `closeMarginDb`.
+`channels`, `queries`, `brandmeisterEnabled`, `analog`'s `channels`,
+`enabled`, `gainDb`, `myUnitId`, `openMarginDb` and `closeMarginDb`, and the
+`ai` and `map` sections. What each key means and its default are in
+[configuration](configuration.md).
 `analog.channels` is `{freqMhz, channel}[]`; a set one receiver cannot cover
 gives `422` with the reason.
 
 The rest stays in the file: `dbPath`, `host`, the three secrets, and
 `recordingsDir`. Each either needs the whole thing restarted or locks you out
 if you get it wrong.
+
+`ai` and `map` hold keys to third-party services, and those are write-only.
+`GET` returns the effective values with each secret replaced by a boolean:
+`ai.asr.apiKeySet`, `ai.text.apiKeySet`, `map.amapSecurityCodeSet`. AMap's
+`amapKey` is public and comes back as it is. `PUT` resolves each secret
+against the stored value before validating:
+
+- key absent, or `null`: keep the stored value
+- an empty string: clear it
+- a non-empty string: set it
+- any `*Set` key in the body is ignored and never written
+
+Any other key that is absent or `null` also keeps the stored value. So the UI
+can send the whole `GET` result back to save, and that neither clears a secret
+nor gets refused for the secret's absence from the body. Validation is strict:
+enums, types and ranges; a cloud provider needs a URL, a model name and a key;
+AMap needs a key and a security code; and extraction must be off when
+recognition is off. One error and the whole request is `422` with the file
+untouched.
+
+When the `ai` values change (not just a key), saving also deletes every
+recognition row that holds an error, so the queue does it again. The api does
+the same once at startup. After fixing a key or finishing a model download,
+there is no need to wait out the one-hour retry gap.
+
+A broken `ai` or `map` already in the file does not block a save that does not
+touch them. When the config is read, a broken `ai` counts as off and a broken
+`map` as no map, each leaving one sentence of reason that the ops page shows.
+Neither makes the api answer `503`.
 
 `brandmeisterEnabled` and `analog.enabled` are two switches, both on by
 default. Turning one off does not clear its settings: `queries` and
@@ -586,6 +801,7 @@ the database, the longer that takes.
 
 The daemon writes each analog squelch opening to `<activity id>.wav` under
 `analog.recordingsDir`, or `./recordings` when there is no `analog` section.
+Deleting a conversation removes its recordings too.
 This directory is read from the config on every request, not captured once at
 startup, so adding analog from the settings page makes it usable at once, no
 api restart needed. Analog FM carries no identity, so the far station's
@@ -600,7 +816,7 @@ probing each one for a 404.
 
 | Method and path | Response |
 |---|---|
-| `GET /api/ops` | Health, machine load and memory, the last 40 polls, activity counts by origin, the current radio status of each analog channel as `radios`, `analogEnabled`, `brandmeisterEnabled`, and the config values that decide behaviour |
+| `GET /api/ops` | Health, machine load and memory, the last 40 polls, activity counts by origin, the current radio status of each analog channel as `radios`, `analogEnabled`, `brandmeisterEnabled`, the recognition queue `ai`, and the config values that decide behaviour |
 
 It answers `200` whether healthy or not, because the page exists to display
 problems. For an external monitor use `GET /health`: no session, only
@@ -621,3 +837,62 @@ disk fills. None of it is in `/health`, which answers only `ok` and
 `poll_log` records `fetched`, `parsed` and `written` separately. When a feed
 renames a field, `parsed` drops to zero while `fetched` does not, and that
 reads exactly like a batch of rows already seen unless the two are apart.
+
+`ai` is the state of the recognition queue:
+
+```json
+{ "enabled": true, "vad": "local", "asrProvider": "local", "textProvider": "local",
+  "todo": 12, "doneLast24h": 340, "meaningless": 41,
+  "worker": { "at": 1789465773, "ok": true, "message": "…" },
+  "lastError": { "at": 1789465000, "message": "…" },
+  "problem": "…" }
+```
+
+- `enabled`: speech recognition is on and its config is not broken
+- `vad`: `local` or `off`. `asrProvider` is `local`, `openai-transcriptions`,
+  `chat-audio` or `off`. `textProvider` is `local`, `openai-chat` or `off`.
+  While the feature is off they report what the config chose. All three are `off` when the config is broken
+- `todo`: recordings waiting for recognition, the same set the daemon asks
+  for; the conditions are in the [ingest API](ingest-api-v1.md). 0 when off
+- `doneLast24h`: transmissions finished without error in the last 24 hours
+- `meaningless`: computed by the same function as the `total` of the
+  "meaningless" view on the listening page, so the two show one number
+- `worker`: the state the daemon's recognition worker reported, memory only.
+  The key is missing until it has reported. `at` is when the api received it
+- `lastError`: the most recent recognition row that holds an error. The
+  worker's own errors are in `worker`, not here
+- `problem`: why the `ai` config is broken. Missing when it is not
+
+A broken `map` adds a top-level `mapProblem` with the reason. Missing when it
+is not.
+
+## AMap proxy
+
+| Method and path | Response |
+|---|---|
+| `GET /_AMapService/*` | AMap's response as it is, or `400`, `401`, `404`, `502` |
+
+AMap's web JS API wants a security code (`jscode`). The code stays in the api
+and the page only has `amapKey`. Before loading the map the page sets
+`serviceHost` to `<origin>/_AMapService`, so AMap's web-service requests come
+here, and the api adds `jscode` and forwards them.
+
+The route needs a session like `/api` does, `401` without one. It sits at the
+root, registered before the front-end fallback route. `GET` only. When AMap is
+not chosen or the security code is not set, it answers `404` and makes no
+request.
+
+The path after `/_AMapService` must match `^/v[0-9]+(/[A-Za-z0-9_.-]+)+$` and
+have no segment made only of dots. A mismatch is `400` and no request. The
+target is a fixed origin plus that path, joined as a string and never resolved
+as a URL: a path like `//evil.example/x` would otherwise resolve to another
+host and carry the security code with it. A path starting with
+`/v4/map/styles` goes to `https://webapi.amap.com`, everything else to
+`https://restapi.amap.com`.
+
+The client's query string is copied, but every `jscode` is removed first and
+the configured security code is appended. No client header is forwarded except
+`Accept`, so the session cookie never leaves. The timeout is 10 seconds.
+AMap's status, `content-type` and body come back as they are. A failure or
+timeout is `502`, and neither the response nor the log contains the security
+code.
