@@ -15,6 +15,7 @@ import {
   unresolvedStatus,
 } from './core.ts';
 import type { Activity, Cluster, Conversation, ConversationStatus } from './core.ts';
+import { selectAiByIds, selectMeaninglessSeeds } from './ai.ts';
 import {
   resolveKnownCall,
   selectActivitiesInRange,
@@ -32,12 +33,16 @@ import { StoreError } from './store-error.ts';
 export const ORIGINS: string[] = ['brandmeister', 'sdr-fm', 'sdr-dmr'];
 export const STATUSES: ConversationStatus[] = ['pending', 'unlogged', 'logged', 'ignored', 'overheard'];
 
+export const MEANINGLESS_MODES = ['exclude', 'only', 'include'] as const;
+export type MeaninglessMode = (typeof MEANINGLESS_MODES)[number];
+
 export interface ConversationFilters {
   origin?: string;
   status?: ConversationStatus;
   channel?: string;
   cursor?: string;
   limit?: number;
+  meaningless: MeaninglessMode;
 }
 
 export interface ConversationPage {
@@ -48,14 +53,23 @@ export interface ConversationPage {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
-/** 请求里这几样通用参数，三个视图都要验、都要用同一套规则。 */
-function checkFilters(q: {
-  origin?: string;
-  status?: string;
-  channel?: string;
-  limit?: string;
-  cursor?: string;
-}): ConversationFilters {
+/**
+ * 请求里这几样通用参数，几个视图都要验、都要用同一套规则。
+ *
+ * @param defaultMeaningless 没给 meaningless 时的缺省：按天看和未入库藏起无意义的，
+ *   搜呼号不藏，搜的人就是想找它。
+ */
+function checkFilters(
+  q: {
+    origin?: string;
+    status?: string;
+    channel?: string;
+    limit?: string;
+    cursor?: string;
+    meaningless?: string;
+  },
+  defaultMeaningless: MeaninglessMode = 'exclude',
+): ConversationFilters {
   if (q.origin !== undefined && !ORIGINS.includes(q.origin)) {
     throw new StoreError(422, `origin 只能是 ${ORIGINS.join('、')}`);
   }
@@ -69,7 +83,11 @@ function checkFilters(q: {
   if (q.cursor !== undefined && !/^\d+:.+$/.test(q.cursor)) {
     throw new StoreError(422, 'cursor 要是上一页给的 next');
   }
+  if (q.meaningless !== undefined && !MEANINGLESS_MODES.includes(q.meaningless as MeaninglessMode)) {
+    throw new StoreError(422, `meaningless 只能是 ${MEANINGLESS_MODES.join('、')}`);
+  }
   return {
+    meaningless: (q.meaningless as MeaninglessMode | undefined) ?? defaultMeaningless,
     origin: q.origin,
     status: q.status as ConversationStatus | undefined,
     channel: q.channel,
@@ -78,8 +96,14 @@ function checkFilters(q: {
   };
 }
 
+/** 已入库的永远不是无意义，所以 exclude 不会把它们藏掉。 */
+function applyMeaningless(items: Conversation[], mode: MeaninglessMode): Conversation[] {
+  if (mode === 'include') return items;
+  return items.filter((c) => c.meaningless === (mode === 'only'));
+}
+
 function applyFilters(items: Conversation[], f: ConversationFilters): Conversation[] {
-  let out = items;
+  let out = applyMeaningless(items, f.meaningless);
   if (f.origin !== undefined) out = out.filter((c) => c.origin === f.origin);
   if (f.status !== undefined) out = out.filter((c) => c.status === f.status);
   if (f.channel !== undefined) out = out.filter((c) => c.channel === f.channel);
@@ -238,6 +262,11 @@ function mergeOverlapping(built: Built[], config: Config): Built[] {
   });
 }
 
+/**
+ * 把建好的簇变成对话。识别结果和人工判定在这里一次读齐，所有 sdr-fm 成员，
+ * 在无意义过滤、分页和 total 之前：只给返回的那一页读的话，过滤之后页会短，
+ * total 也不对。
+ */
 function toConversations(db: DatabaseSync, config: Config, built: Built[]): Conversation[] {
   const loggedIds = [...new Set(built.filter((b) => b.qsoId !== undefined).map((b) => b.qsoId!))];
   const briefs = selectQsoBriefs(db, loggedIds);
@@ -245,18 +274,42 @@ function toConversations(db: DatabaseSync, config: Config, built: Built[]): Conv
     .filter((b) => b.status === 'pending' || b.status === 'unlogged' || b.status === 'overheard')
     .map((b) => b.cluster);
   const known = buildKnownMap(db, needDraft);
-  return built.map(({ cluster, status, qsoId }) =>
-    toConversation(cluster, status, {
+  const ai = selectAiByIds(
+    db,
+    built.flatMap((b) => b.cluster.activities.filter((a) => a.origin === 'sdr-fm').map((a) => a.id)),
+  );
+  return built.map(({ cluster, status, qsoId }) => {
+    const withAi: Cluster =
+      ai.size === 0
+        ? cluster
+        : {
+            ...cluster,
+            activities: cluster.activities.map((a) => {
+              const r = ai.get(a.id);
+              return r === undefined ? a : { ...a, ai: r };
+            }),
+          };
+    return toConversation(withAi, status, {
       defaults: config.station,
       known,
       qso: qsoId === undefined ? undefined : briefs.get(qsoId),
-    }),
-  );
+    });
+  });
 }
 
 const nowS = () => Math.floor(Date.now() / 1000);
 
 const MAX_DAY_SPAN_S = 172_800;
+
+/** 三个视图共用的那几个查询参数。 */
+export interface ListQuery {
+  origin?: string;
+  status?: string;
+  channel?: string;
+  cursor?: string;
+  limit?: string;
+  meaningless?: string;
+}
 
 /**
  * 按天看：这一天再前后各两小时的窗口里，不管状态先整批取出来，按信道分组，
@@ -267,7 +320,7 @@ export function dayConversations(
   config: Config,
   from: number,
   to: number,
-  q: { origin?: string; status?: string; channel?: string; cursor?: string; limit?: string },
+  q: ListQuery,
 ): ConversationPage & { channels: { key: string; label: string }[] } {
   if (!Number.isInteger(from) || !Number.isInteger(to) || from >= to) {
     throw new StoreError(422, 'from 和 to 要是整数 Unix 秒，且 from 小于 to');
@@ -290,7 +343,10 @@ export function dayConversations(
   const built: Built[] = [];
   for (const [key] of byChannel) built.push(...buildChannelWindow(db, config, key, windowStart, windowEnd, config.dmrId));
 
-  let items = toConversations(db, config, built).filter((c) => c.startAt >= from && c.startAt < to);
+  let items = applyMeaningless(
+    toConversations(db, config, built).filter((c) => c.startAt >= from && c.startAt < to),
+    filters.meaningless,
+  );
 
   const channels = distinctChannels(filters.origin === undefined ? items : items.filter((c) => c.origin === filters.origin));
 
@@ -305,7 +361,12 @@ export function dayConversations(
  * 种子所在的那几段对话：按信道分组、窗口合并，只读要读的那几段，碰到窗口边
  * 就顺着信道往外接。种子只来自未结算行，已忽略和已入库两档不聚。
  */
-function aroundUnresolvedSeeds(db: DatabaseSync, config: Config, seeds: Activity[]): Built[] {
+function aroundUnresolvedSeeds(
+  db: DatabaseSync,
+  config: Config,
+  seeds: Activity[],
+  need: { ignored: boolean; logged: boolean } = { ignored: false, logged: false },
+): Built[] {
   const byChannel = new Map<string, number[]>();
   for (const s of seeds) {
     const key = channelKey(s);
@@ -316,7 +377,7 @@ function aroundUnresolvedSeeds(db: DatabaseSync, config: Config, seeds: Activity
   const built: Built[] = [];
   for (const [key, times] of byChannel) {
     for (const w of mergeWindows(times, EXTEND_STEP_S)) {
-      built.push(...buildChannelWindow(db, config, key, w.start, w.end, config.dmrId, { ignored: false, logged: false }));
+      built.push(...buildChannelWindow(db, config, key, w.start, w.end, config.dmrId, need));
     }
   }
   // 两个窗口之间可能藏着一条两边都摸不到的发射，把同一条对话各建了一份。
@@ -332,7 +393,9 @@ export function pendingConversations(db: DatabaseSync, config: Config): Conversa
   const pendingCutoff = nowS() - config.pendingWindowDays * 86400;
   const seeds = selectPendingSeeds(db, config.dmrId, pendingCutoff);
   const built = aroundUnresolvedSeeds(db, config, seeds).filter((b) => b.status === 'pending');
-  return toConversations(db, config, built).sort((a, b) => a.startAt - b.startAt || (a.id < b.id ? -1 : 1));
+  return toConversations(db, config, built)
+    .filter((c) => !c.meaningless)
+    .sort((a, b) => a.startAt - b.startAt || (a.id < b.id ? -1 : 1));
 }
 
 /**
@@ -342,7 +405,7 @@ export function pendingConversations(db: DatabaseSync, config: Config): Conversa
 export function unloggedConversations(
   db: DatabaseSync,
   config: Config,
-  q: { origin?: string; status?: string; channel?: string; cursor?: string; limit?: string },
+  q: ListQuery,
 ): ConversationPage & { total: number } {
   const filters = checkFilters(q);
   const now = nowS();
@@ -362,6 +425,34 @@ export function unloggedConversations(
   return { ...paginate(items, filters.limit!), total };
 }
 
+/**
+ * 无意义：生效判定是无意义的发射当种子，每条信道合并窗口，已忽略的也建出来（忽略
+ * 过的空按正是要在这里看到、删掉的），已入库的不建。每次发射都无意义才留下。
+ * 种子从 activity_ai 往 activity 连，不扫 activity，见 selectMeaninglessSeeds。
+ */
+export function meaninglessConversations(
+  db: DatabaseSync,
+  config: Config,
+  q: ListQuery,
+): ConversationPage & { total: number } {
+  const filters = checkFilters(q, 'only');
+  const keepDays = Math.max(config.activityRetentionDays, config.pendingWindowDays);
+  const seeds = selectMeaninglessSeeds(db, nowS() - keepDays * 86400, config.dmrId);
+  const built = aroundUnresolvedSeeds(db, config, seeds, { ignored: true, logged: false }).filter(
+    (b) => b.status !== 'logged',
+  );
+
+  // 这个视图本身就是 meaningless=only，请求里的 meaningless 不起作用。
+  let items = applyFilters(
+    toConversations(db, config, built).filter((c) => c.meaningless),
+    { ...filters, meaningless: 'include' },
+  );
+  const total = items.length;
+  items.sort(byRecency);
+  items = afterCursor(items, filters.cursor);
+  return { ...paginate(items, filters.limit!), total };
+}
+
 const SEARCH_BATCH = 200;
 
 /**
@@ -372,11 +463,11 @@ export function searchConversations(
   db: DatabaseSync,
   config: Config,
   qRaw: string,
-  q: { origin?: string; status?: string; channel?: string; cursor?: string; limit?: string },
+  q: ListQuery,
 ): ConversationPage {
   const prefix = normalizeCallsign(qRaw);
   if (prefix.length < 2) throw new StoreError(422, 'q 至少要 2 个字符');
-  const filters = checkFilters(q);
+  const filters = checkFilters(q, 'include');
   const limit = filters.limit!;
   const [lo, hi] = prefixRange(prefix);
   const now = nowS();

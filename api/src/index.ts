@@ -17,6 +17,9 @@ if (result.ok) {
   // 开库时顺带跑迁移。写库的只有这一个进程，所以不用抢锁。
   const db = openDb(result.config.dbPath);
   console.log(`数据库第 ${userVersion(db)} 版：${result.config.dbPath}`);
+  // 可选的两段写坏了只留一句话，api 照常起来。运维页也会显示。
+  if (result.config.aiProblem !== undefined) console.error(`配置 ai：${result.config.aiProblem}，当作没开`);
+  if (result.config.mapProblem !== undefined) console.error(`配置 map：${result.config.mapProblem}，当作不用地图`);
   // 构建产物在仓库里的固定位置，不跟 cwd 走。
   const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));
   const store = createStore(db, result.config);
@@ -39,6 +42,8 @@ if (result.ok) {
 
   // 发射行的保留期裁剪不等轮询触发：模拟和数字两路都关着时，也不能什么都不裁。
   store.prune();
+  // 上次留下的识别错误多半是配置问题（没下模型、key 不对），清掉让队列重新做。
+  store.resetAiErrors();
   setInterval(() => store.prune(), 3600_000);
 } else {
   for (const p of result.problems) console.error(`配置: ${p}`);

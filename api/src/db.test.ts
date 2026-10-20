@@ -3,11 +3,14 @@ import { describe, it } from 'node:test';
 import type { Activity, Qso } from './core.ts';
 import {
   CALLSIGN_SEEDS_SQL,
+  deleteActivities,
   deleteQso,
   insertActivities,
   insertQso,
   openDb,
   pruneActivities,
+  pruneAiRows,
+  pruneTombstones,
   resolveActivities,
   selectQsos,
   selectUnresolvedActivities,
@@ -54,6 +57,56 @@ describe('写入判重', () => {
     insertActivities(db, [{ activity: act('a'), raw: '{"Master":4501}' }], 1);
     const r = db.prepare('SELECT raw FROM activity WHERE id = ?').get('a') as { raw: string };
     assert.equal(r.raw, '{"Master":4501}');
+  });
+});
+
+describe('墓碑', () => {
+  it('删掉的发射再推来不写回，也不算 written', () => {
+    const db = fresh();
+    insertActivities(db, [row(act('a')), row(act('b'))], 1);
+    deleteActivities(db, ['a'], 10);
+
+    assert.equal(insertActivities(db, [row(act('a')), row(act('b')), row(act('c'))], 2), 1);
+    const ids = (db.prepare('SELECT id FROM activity ORDER BY id').all() as { id: string }[]).map((r) => r.id);
+    assert.deepEqual(ids, ['b', 'c']);
+  });
+
+  it('删除带走忽略记录、识别结果和人工判定，记下墓碑', () => {
+    const db = fresh();
+    insertActivities(db, [row(act('a')), row(act('b'))], 1);
+    resolveActivities(db, ['a'], null, 5);
+    db.prepare('INSERT INTO activity_ai (activity_id, at, meaningless) VALUES (?,?,?)').run('a', 5, 1);
+    db.prepare('INSERT INTO activity_verdict (activity_id, meaningless, at) VALUES (?,?,?)').run('a', 0, 5);
+
+    deleteActivities(db, ['a'], 10);
+
+    const n = (t: string) => (db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n;
+    assert.deepEqual([n('activity'), n('resolved_activity'), n('activity_ai'), n('activity_verdict'), n('deleted_activity')], [1, 0, 0, 0, 1]);
+  });
+
+  it('裁剪时顺手删掉发射已经没了的识别结果和判定', () => {
+    const db = fresh();
+    insertActivities(db, [row(act('old', { startAt: 100 })), row(act('new', { startAt: 5000 }))], 1);
+    for (const id of ['old', 'new']) {
+      db.prepare('INSERT INTO activity_ai (activity_id, at, meaningless) VALUES (?,?,?)').run(id, 5, 1);
+      db.prepare('INSERT INTO activity_verdict (activity_id, meaningless, at) VALUES (?,?,?)').run(id, 0, 5);
+    }
+    pruneActivities(db, 1000);
+    pruneAiRows(db);
+    const ai = (db.prepare('SELECT activity_id FROM activity_ai').all() as { activity_id: string }[]).map((r) => r.activity_id);
+    const verdict = (db.prepare('SELECT activity_id FROM activity_verdict').all() as { activity_id: string }[]).map((r) => r.activity_id);
+    assert.deepEqual(ai, ['new']);
+    assert.deepEqual(verdict, ['new']);
+  });
+
+  it('过了保留期的墓碑一起裁，没过的留着', () => {
+    const db = fresh();
+    insertActivities(db, [row(act('a')), row(act('b'))], 1);
+    deleteActivities(db, ['a'], 100);
+    deleteActivities(db, ['b'], 9000);
+    assert.equal(pruneTombstones(db, 1000), 1);
+    const left = (db.prepare('SELECT id FROM deleted_activity').all() as { id: string }[]).map((r) => r.id);
+    assert.deepEqual(left, ['b']);
   });
 });
 

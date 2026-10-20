@@ -2,7 +2,15 @@ import { DatabaseSync } from 'node:sqlite';
 import { userVersion } from './migrations.ts';
 
 /** 备份前后各数一遍的那几张表。 */
-const TABLES = ['activity', 'resolved_activity', 'qso', 'poll_log'];
+const TABLES = [
+  'activity',
+  'resolved_activity',
+  'qso',
+  'poll_log',
+  'deleted_activity',
+  'activity_ai',
+  'activity_verdict',
+];
 
 /**
  * 备份文件名里那段时刻。CLI 脚本和管理端下载路由共用同一个格式，

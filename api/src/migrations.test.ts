@@ -9,7 +9,7 @@ const tables = (db: DatabaseSync) =>
     { name: string }[]).map((r) => r.name);
 
 describe('migrate', () => {
-  it('空库升到最新版并建出五张表', () => {
+  it('空库升到最新版并建出八张表', () => {
     const db = new DatabaseSync(':memory:');
     const ran = migrate(db);
 
@@ -17,11 +17,24 @@ describe('migrate', () => {
     assert.equal(userVersion(db), LATEST);
     assert.deepEqual(tables(db).filter((n) => !n.startsWith('sqlite_')), [
       'activity',
+      'activity_ai',
+      'activity_verdict',
+      'deleted_activity',
       'poll_log',
       'qso',
       'qso_history',
       'resolved_activity',
     ]);
+  });
+
+  // 识别队列每隔几秒按来源取最新的行。没有这个索引，每次都扫整张 activity。
+  it('第 4 版建了 (origin, start_at) 索引', () => {
+    const db = new DatabaseSync(':memory:');
+    migrate(db);
+    const plan = (db
+      .prepare("EXPLAIN QUERY PLAN SELECT id FROM activity WHERE origin = 'sdr-fm' ORDER BY start_at DESC LIMIT 5")
+      .all() as { detail: string }[]).map((r) => r.detail).join('|');
+    assert.match(plan, /activity_origin/);
   });
 
   it('再跑一次什么都不做', () => {

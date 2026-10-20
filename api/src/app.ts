@@ -23,7 +23,7 @@ const fail = (e: unknown) => {
   throw e;
 };
 
-/** /api/conversations/ignore 请求体里的一项：一个对话，挑中的那几次发射。 */
+/** /api/conversations/ignore 和 /delete 请求体里的一项：一个对话，挑中的那几次发射。 */
 interface IgnorePick {
   id: string;
   activityIds: string[];
@@ -43,6 +43,11 @@ const isPick = (x: unknown): x is IgnorePick => {
  * 不设的话，一个几百 MB 的请求体会整个读进内存再去解析。
  */
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
+
+const AMAP_REST = 'https://restapi.amap.com';
+const AMAP_WEB = 'https://webapi.amap.com';
+/** /_AMapService 后面那段：v 加数字开头，每段只有字母数字点横线下划线。 */
+const AMAP_PATH = /^\/v[0-9]+(\/[A-Za-z0-9_.-]+)+$/;
 
 /** 登录口的限速：一个来源五分钟内最多十次。 */
 const LOGIN_WINDOW_MS = 5 * 60_000;
@@ -64,6 +69,8 @@ export function createApp(
     recordingsDir?: string | (() => string | undefined);
     /** 数据库文件的路径。给了才挂 /api/backup，测试可以不给。 */
     dbPath?: string;
+    /** 高德代理往外发请求用的 fetch，测试换成假的。 */
+    fetch?: typeof fetch;
   } = {},
 ) {
   const recordingsDirOf =
@@ -89,6 +96,30 @@ export function createApp(
     })
     .post('/poll-log', async (c) => {
       store.logPoll((await c.req.json()) as PollLog);
+      return c.body(null, 204);
+    })
+
+    // 识别队列：守护进程来要待做的录音，做完把结果推回来。
+    .get('/ai/todo', (c) => {
+      try {
+        return c.json(store.aiTodo({ limit: c.req.query('limit'), steps: c.req.query('steps') }));
+      } catch (e) {
+        const { status, body } = fail(e);
+        return c.json(body, status);
+      }
+    })
+    .post('/ai', async (c) => {
+      const body = await c.req.json();
+      if (!Array.isArray(body)) return c.json({ error: '要是 AiResult 数组' }, 422);
+      return c.json(store.ingestAi(body));
+    })
+    // 识别工作线程自己的状态，只放内存。起不来的原因（缺模型、key 不对）不记在行上。
+    .post('/ai/status', async (c) => {
+      const body = (await c.req.json()) as { ok?: unknown; message?: unknown } | null;
+      if (typeof body?.ok !== 'boolean' || typeof body.message !== 'string') {
+        return c.json({ error: '要是 {ok: boolean, message: string}' }, 422);
+      }
+      store.setAiWorker(body.ok, body.message);
       return c.body(null, 204);
     });
 
@@ -183,6 +214,7 @@ export function createApp(
             channel: c.req.query('channel'),
             cursor: c.req.query('cursor'),
             limit: c.req.query('limit'),
+            meaningless: c.req.query('meaningless'),
           }),
         );
       } catch (e) {
@@ -211,6 +243,32 @@ export function createApp(
         return c.json({ error: 'picks 要是 {id, activityIds} 数组' }, 422);
       }
       return c.json(store.ignoreActivities(picks));
+    })
+
+    .post('/conversations/delete', async (c) => {
+      const { picks } = (await c.req.json()) as { picks?: unknown };
+      if (!Array.isArray(picks) || !picks.every(isPick)) {
+        return c.json({ error: 'picks 要是 {id, activityIds} 数组' }, 422);
+      }
+      return c.json(store.deleteConversations(picks));
+    })
+
+    .post('/conversations/verdict', async (c) => {
+      try {
+        const { activityIds, meaningless } = (await c.req.json()) as { activityIds?: unknown; meaningless?: unknown };
+        if (
+          !Array.isArray(activityIds) ||
+          !activityIds.every((id) => typeof id === 'string') ||
+          typeof meaningless !== 'boolean'
+        ) {
+          return c.json({ error: '要是 {activityIds: 字符串数组, meaningless: boolean}' }, 422);
+        }
+        store.setVerdict(activityIds, meaningless);
+        return c.body(null, 204);
+      } catch (e) {
+        const { status, body } = fail(e);
+        return c.json(body, status);
+      }
     })
 
     // ADIF 文本直接当请求体，不走 multipart。一个人从浏览器传一个文件，
@@ -304,6 +362,45 @@ export function createApp(
         qsos: () => store.qsos(),
       }),
     );
+
+  // 高德 Web 服务代理。安全密钥留在这里，页面只拿到 key，请求由这里补上 jscode 再转出去。
+  // 要在下面的 SPA 兜底之前注册，不然会被它当成前端路由回一个首页。
+  app.get('/_AMapService/*', async (c) => {
+    if (!verifySession(auth.sessionSecret, getCookie(c, COOKIE), nowS())) return c.json({ error: '没登录' }, 401);
+    const code = store.amapSecurityCode();
+    if (code === undefined) return c.json({ error: '没有配高德地图' }, 404);
+
+    // 目标是固定的源加上这段路径，字符串拼接，绝不用 URL 解析：//evil.example/x 会被
+    // 解析成另一台主机，那就把安全密钥送出去了。所以路径只认字母数字、点、横线和下划线，
+    // 不能有空段，也不能有纯点的段。
+    const rest = c.req.path.slice('/_AMapService'.length);
+    if (!AMAP_PATH.test(rest) || rest.split('/').some((seg) => /^\.+$/.test(seg))) {
+      return c.json({ error: '路径不对' }, 400);
+    }
+    const origin = rest.startsWith('/v4/map/styles') ? AMAP_WEB : AMAP_REST;
+    const query = new URL(c.req.url).searchParams;
+    query.delete('jscode');
+    query.append('jscode', code);
+
+    try {
+      // 不转客户端的任何头：会话 cookie 不能跟着出去。只留 Accept。
+      const upstream = await (options.fetch ?? fetch)(`${origin}${rest}?${query.toString()}`, {
+        method: 'GET',
+        headers: { accept: c.req.header('accept') ?? '*/*' },
+        redirect: 'error',
+        signal: AbortSignal.timeout(10_000),
+      });
+      const type = upstream.headers.get('content-type');
+      return new Response(upstream.body, {
+        status: upstream.status,
+        headers: type === null ? {} : { 'content-type': type },
+      });
+    } catch (e) {
+      // 只记错误名：消息里可能带着含 jscode 的地址。
+      console.error('高德代理失败:', (e as Error).name);
+      return c.json({ error: '高德没有回应' }, 502);
+    }
+  });
 
   // 管理端界面。不发它的话，机器上只有接口，手机连过来是一片 404。
   // 静态文件不要会话，会话挡的是它背后的接口。

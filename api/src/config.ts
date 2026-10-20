@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { checkQueries, readAnalogChannels } from './core.ts';
-import type { Channel, StationDefaults } from './core.ts';
+import { checkQueries, mapDefaults, readAnalogChannels, resolveAiConfig, resolveMapConfig } from './core.ts';
+import type { AiConfig, Channel, MapConfig, StationDefaults } from './core.ts';
 
 /** searchHouse 的一条查询。每条规则单独发一次，不用 OR 合并。 */
 export interface Query {
@@ -55,6 +55,15 @@ export interface Config {
     /** 模拟守听的开关，缺省开。关着时这份表还留着，界面收起但不清空。 */
     enabled: boolean;
   };
+  /**
+   * 语音识别。文件里没写这一段就是缺省值（enabled: false）。写坏了是 undefined，
+   * 原因在 aiProblem：可选功能写坏了不让 api 回 503，也不让守护进程退出。
+   */
+  ai?: AiConfig;
+  aiProblem?: string;
+  /** 地图。写坏了当不用地图，原因在 mapProblem。 */
+  map?: MapConfig;
+  mapProblem?: string;
   /** 配置文件自己的路径。写设置的时候要写回这里。 */
   path: string;
 }
@@ -115,10 +124,19 @@ export function loadConfig(path: string): ConfigResult {
   if (isObject(raw.analog)) problems.push(...readAnalogChannels(raw.analog, analogEnabled).problems);
 
   if (problems.length > 0) return { ok: false, problems };
+
+  // ai 和 map 是可选的，宽松读：出了问题只留一句话，不进 problems。
+  const aiR = resolveAiConfig(raw.ai);
+  const mapR = resolveMapConfig(raw.map);
+
   return {
     ok: true,
     config: {
       ...(raw as unknown as Config),
+      ai: aiR.problems.length > 0 ? undefined : aiR.config,
+      aiProblem: aiR.problems.length > 0 ? aiR.problems.join('，') : undefined,
+      map: mapR.problems.length > 0 ? mapDefaults() : mapR.config,
+      mapProblem: mapR.problems.length > 0 ? mapR.problems.join('，') : undefined,
       // 相对路径按配置文件所在目录算，不按 cwd。否则同一份配置，launchd 从
       // api/ 起的服务和你在仓库根手敲的备份命令会指向两个不同的文件。
       dbPath: resolve(dirname(path), raw.dbPath as string),

@@ -2,7 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from './config.ts';
-import { dayConversations, ORIGINS, pendingConversations, searchConversations, unloggedConversations } from './conversations.ts';
+import { AI_STEPS, aiStats, countTodo, resetAiErrors, selectTodo, setVerdicts, writeAiResults } from './ai.ts';
+import type { AiStep, TodoItem } from './ai.ts';
+import {
+  dayConversations,
+  meaninglessConversations,
+  ORIGINS,
+  pendingConversations,
+  searchConversations,
+  unloggedConversations,
+} from './conversations.ts';
 import type { ConversationPage } from './conversations.ts';
 import { checkHealth } from './health.ts';
 import type { Health } from './health.ts';
@@ -10,12 +19,15 @@ import { channelKey, parseAdif, missingFields, normalizeCallsign } from './core.
 import type { Activity, Channel, PendingItem, Qso, QsoDraft, StationDefaults } from './core.ts';
 import {
   activityCounts,
+  deleteActivities,
   deleteQso,
   insertActivities,
   insertPollLog,
   insertQso,
   pruneActivities,
+  pruneAiRows,
   prunePollLog,
+  pruneTombstones,
   resolveActivities,
   selectActivitiesByIds,
   selectHeard,
@@ -75,7 +87,7 @@ export interface PublicSource {
 const HEARD_PAGE = 100;
 const HEARD_MAX = 200;
 
-type ActivityLookup = Map<string, { activity: Activity; resolved: boolean }>;
+type ActivityLookup = Map<string, { activity: Activity; resolved: boolean; logged: boolean }>;
 
 /**
  * 结算按发射 id 走的那五条检查，/promote 和 /ignore 共用。按顺序：非空、
@@ -92,6 +104,21 @@ function checkIdSet(ids: string[], lookup: ActivityLookup): Activity[] {
     throw new StoreError(422, '这几次发射不在同一条信道上');
   }
   return activities;
+}
+
+/**
+ * 删除按发射 id 走的检查，和 checkIdSet 差在两处：已忽略的可以删（连它的忽略记录），
+ * 已入库的不行；同一次请求里更早的 pick 删过的 id 算已经不在了。
+ * 顺序：非空、不重复、都在、都没入库、同一条信道。
+ */
+function checkDeleteSet(ids: string[], lookup: ActivityLookup, gone: Set<string>): void {
+  if (ids.length === 0) throw new StoreError(422, '一次发射都没挑');
+  if (new Set(ids).size !== ids.length) throw new StoreError(422, '同一次发射不能挑两遍');
+  if (ids.some((id) => gone.has(id) || !lookup.has(id))) throw new StoreError(409, '这几次发射已经不在了，刷新后重试');
+  if (ids.some((id) => lookup.get(id)!.logged)) throw new StoreError(409, '已经入库的发射不能删，先到日志里删掉那条通联');
+  if (new Set(ids.map((id) => channelKey(lookup.get(id)!.activity))).size > 1) {
+    throw new StoreError(422, '这几次发射不在同一条信道上');
+  }
 }
 
 /** (start_at, id) 最小的那个，和 clusterActivities 排序一致。 */
@@ -122,14 +149,55 @@ export function createStore(db: DatabaseSync, config: Config) {
   const prune = (): void => {
     prunePollLog(db, nowS() - 30 * 86400);
     const keepDays = Math.max(config.activityRetentionDays, config.pendingWindowDays);
-    const gone = pruneActivities(db, nowS() - keepDays * 86400);
+    const cutoff = nowS() - keepDays * 86400;
+    const gone = pruneActivities(db, cutoff);
     if (gone.length > 0) removeRecordings(config.recordingsDir, gone);
+    // 发射没了，它的识别结果和人工判定也没用了。墓碑过了保留期，采集也不会再推那一行。
+    pruneAiRows(db);
+    pruneTombstones(db, cutoff);
   };
+
+  /** 识别队列要看的步骤，来自配置：和守护进程那边开着的是同一批。 */
+  const aiSteps = (): Set<AiStep> => {
+    const ai = config.ai;
+    const steps = new Set<AiStep>();
+    if (ai === undefined || !ai.enabled) return steps;
+    if (ai.vad.provider === 'local') steps.add('vad');
+    if (ai.asr.provider !== 'off') steps.add('asr');
+    if (ai.text.provider !== 'off') steps.add('text');
+    return steps;
+  };
+  const retentionCutoff = () => nowS() - Math.max(config.activityRetentionDays, config.pendingWindowDays) * 86400;
+
+  /** 守护进程报上来的识别状态。只在内存里，和 /api/ingest/radio 一样。 */
+  let aiWorker: { at: number; ok: boolean; message: string } | undefined;
 
   const switches = (): { analogEnabled: boolean; brandmeisterEnabled: boolean } => ({
     analogEnabled: analogEffectivelyOn(config.analog),
     brandmeisterEnabled: config.brandmeisterEnabled,
   });
+
+  const opsAi = () => {
+    const ai = config.ai;
+    const on = ai !== undefined && ai.enabled;
+    const stats = aiStats(db, nowS());
+    return {
+      enabled: on,
+      vad: ai?.vad.provider ?? 'off',
+      asrProvider: ai?.asr.provider ?? 'off',
+      textProvider: ai?.text.provider ?? 'off',
+      // 关着时不数：没有守护进程在做，数出来只会让人以为它卡住了。
+      todo: on
+        ? countTodo(db, { steps: aiSteps(), sinceStartAt: retentionCutoff(), now: nowS(), recordingsDir: config.recordingsDir })
+        : 0,
+      doneLast24h: stats.doneLast24h,
+      // 和收听页「无意义」那一档的 total 是同一个函数算的，两边不会差。
+      meaningless: meaninglessConversations(db, config, { limit: '1' }).total,
+      ...(aiWorker === undefined ? {} : { worker: aiWorker }),
+      ...(stats.lastError === undefined ? {} : { lastError: stats.lastError }),
+      ...(config.aiProblem === undefined ? {} : { problem: config.aiProblem }),
+    };
+  };
 
   return {
     station: (): {
@@ -137,13 +205,28 @@ export function createStore(db: DatabaseSync, config: Config) {
       channels: Channel[];
       analogEnabled: boolean;
       brandmeisterEnabled: boolean;
-    } => ({
-      station: config.station,
-      channels: config.channels,
-      ...switches(),
-    }),
+      aiEnabled: boolean;
+      map: { provider: 'amap' | 'osm' | 'none'; amapKey?: string };
+    } => {
+      const map = config.map;
+      return {
+        station: config.station,
+        channels: config.channels,
+        ...switches(),
+        aiEnabled: config.ai?.enabled === true,
+        // 高德的 key 是公开的，页面要拿它加载地图。安全密钥不在这里。
+        map:
+          map?.provider === 'amap'
+            ? { provider: 'amap', amapKey: map.amapKey }
+            : { provider: map?.provider ?? 'none' },
+      };
+    },
 
     switches,
+
+    /** 高德代理用。没选高德或者没填安全密钥就是 undefined。 */
+    amapSecurityCode: (): string | undefined =>
+      config.map?.provider === 'amap' && config.map.amapSecurityCode !== '' ? config.map.amapSecurityCode : undefined,
 
     settings: (): Settings => settingsOf(config, config.analog),
 
@@ -152,7 +235,10 @@ export function createStore(db: DatabaseSync, config: Config) {
       const problems = checkSettings(next, config);
       if (problems.length > 0) throw new StoreError(422, problems.join('，'));
       const wasEnabled = config.brandmeisterEnabled;
+      const aiBefore = JSON.stringify(config.ai);
       writeSettings(config, next as Settings);
+      // 改了 ai 多半是在修配置，上次的错误不再算数，让队列重新做。
+      if (JSON.stringify(config.ai) !== aiBefore) resetAiErrors(db);
       if (!wasEnabled && config.brandmeisterEnabled) brandmeisterEnabledSince = nowS();
       if (!config.brandmeisterEnabled) brandmeisterEnabledSince = undefined;
       // 用写完之后的 config，不要用请求体拼。拼出来的会掩盖没落盘的字段。
@@ -164,6 +250,7 @@ export function createStore(db: DatabaseSync, config: Config) {
       pendingConversations(db, config).map((c) => ({
         cluster: { id: c.id, startAt: c.startAt, endAt: c.endAt, activities: c.activities },
         draft: c.draft!,
+        ...(c.aiFilled === undefined ? {} : { aiFilled: c.aiFilled }),
       })),
 
     qsos: () => selectQsos(db),
@@ -217,20 +304,22 @@ export function createStore(db: DatabaseSync, config: Config) {
       channel?: string;
       cursor?: string;
       limit?: string;
+      meaningless?: string;
     }): (ConversationPage & { channels?: { key: string; label: string }[]; total?: number }) => {
       const wantsDay = q.from !== undefined || q.to !== undefined;
       const wantsUnlogged = q.view !== undefined;
       const wantsSearch = q.q !== undefined;
       const count = Number(wantsDay) + Number(wantsUnlogged) + Number(wantsSearch);
       if (count !== 1) {
-        throw new StoreError(422, '要在按天看（from、to）、view=unlogged、按呼号搜（q）三者里选一个');
+        throw new StoreError(422, '要在按天看（from、to）、view=unlogged 或 meaningless、按呼号搜（q）三者里选一个');
       }
-      const filters: { origin?: string; status?: string; channel?: string; cursor?: string; limit?: string } = {
+      const filters = {
         origin: q.origin,
         status: q.status,
         channel: q.channel,
         cursor: q.cursor,
         limit: q.limit,
+        meaningless: q.meaningless,
       };
 
       if (wantsDay) {
@@ -245,7 +334,8 @@ export function createStore(db: DatabaseSync, config: Config) {
         return dayConversations(db, config, from, to, filters);
       }
       if (wantsUnlogged) {
-        if (q.view !== 'unlogged') throw new StoreError(422, 'view 只能是 unlogged');
+        if (q.view === 'meaningless') return meaninglessConversations(db, config, filters);
+        if (q.view !== 'unlogged') throw new StoreError(422, 'view 只能是 unlogged 或 meaningless');
         return unloggedConversations(db, config, filters);
       }
       return searchConversations(db, config, q.q!, filters);
@@ -294,6 +384,46 @@ export function createStore(db: DatabaseSync, config: Config) {
 
       if (settle.length > 0) withTx(db, () => resolveActivities(db, settle, null, nowS()));
       return { ignored: picks.length - missing.length, missing };
+    },
+
+    /**
+     * 整段删掉没入库的对话：发射行、忽略记录、识别结果、人工判定，再记墓碑，
+     * 最后删录音。逐条 pick 检查，一条不过记到 missing，不影响别的；同一个请求里
+     * 更早的合法 pick 用过的 id，后面再挑到算已经不在了。合法的那些一个事务写完，
+     * 录音等提交了再删，事务回滚不会留下没有录音的行。
+     */
+    deleteConversations: (picks: { id: string; activityIds: string[] }[]): { deleted: number; missing: string[] } => {
+      const allIds = [...new Set(picks.flatMap((p) => p.activityIds))];
+      const base = selectActivitiesByIds(db, allIds, config.dmrId);
+      const gone = new Set<string>();
+      const doomed: string[] = [];
+      const missing: string[] = [];
+
+      for (const pick of picks) {
+        try {
+          checkDeleteSet(pick.activityIds, base, gone);
+          for (const id of pick.activityIds) gone.add(id);
+          doomed.push(...pick.activityIds);
+        } catch (e) {
+          if (!(e instanceof StoreError)) throw e;
+          missing.push(pick.id);
+        }
+      }
+
+      if (doomed.length > 0) {
+        withTx(db, () => deleteActivities(db, doomed, nowS()));
+        removeRecordings(config.recordingsDir, doomed);
+      }
+      return { deleted: picks.length - missing.length, missing };
+    },
+
+    /** 人工判定这几次发射是不是无意义，压过 AI 的。有一个不存在就一个都不写。 */
+    setVerdict: (activityIds: string[], meaningless: boolean): void => {
+      const ids = [...new Set(activityIds)];
+      if (ids.length === 0) throw new StoreError(422, '一次发射都没挑');
+      const found = selectActivitiesByIds(db, ids, config.dmrId);
+      if (ids.some((id) => !found.has(id))) throw new StoreError(409, '这几次发射已经不在了，刷新后重试');
+      withTx(db, () => setVerdicts(db, ids, meaningless, nowS()));
     },
 
     // 手工录入没有任何观测，所以不带 clusterId，也不动 activity。
@@ -362,6 +492,38 @@ export function createStore(db: DatabaseSync, config: Config) {
       return { received: rows.length, written };
     },
 
+    /**
+     * 识别队列：还没做完的 sdr-fm 录音，新的在前。steps 是守护进程开着的那几步，
+     * 决定「已经识别但还没提取」这类行算不算待办。
+     */
+    aiTodo: (q: { limit?: string; steps?: string }): { items: TodoItem[] } => {
+      const limit = q.limit === undefined ? 10 : Number(q.limit);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new StoreError(422, 'limit 要是 1 到 50 的整数');
+      const names = q.steps === undefined || q.steps === '' ? [] : q.steps.split(',');
+      if (names.some((n) => !AI_STEPS.includes(n as AiStep))) {
+        throw new StoreError(422, `steps 只能是 ${AI_STEPS.join('、')}，用逗号隔开`);
+      }
+      return {
+        items: selectTodo(db, {
+          steps: new Set(names as AiStep[]),
+          sinceStartAt: retentionCutoff(),
+          now: nowS(),
+          recordingsDir: config.recordingsDir,
+          limit,
+        }),
+      };
+    },
+
+    /** 守护进程推上来的识别结果。验、合并都在 writeAiResults。 */
+    ingestAi: (results: unknown[]): { written: number } => ({ written: writeAiResults(db, results, nowS()) }),
+
+    setAiWorker: (ok: boolean, message: string): void => {
+      aiWorker = { at: nowS(), ok, message: message.slice(0, 500) };
+    },
+
+    /** api 起来时调一次：上次的错误多半是配置问题，清掉重做。 */
+    resetAiErrors: (): number => resetAiErrors(db),
+
     logPoll: (p: PollLog): void => {
       insertPollLog(db, p);
       prune();
@@ -385,6 +547,8 @@ export function createStore(db: DatabaseSync, config: Config) {
       pendingWindowDays: config.pendingWindowDays,
       now: nowS(),
       ...switches(),
+      ai: opsAi(),
+      ...(config.mapProblem === undefined ? {} : { mapProblem: config.mapProblem }),
     }),
   };
 }

@@ -79,7 +79,12 @@ export function rowToActivity(row: Record<string, unknown>, dmrId: number): Acti
 
 const nul = <T>(v: T | undefined) => (v === undefined ? null : v);
 
-/** 判重在写入端做，主键冲突就跳过。返回真正新增的行数。 */
+/**
+ * 判重在写入端做，主键冲突就跳过。返回真正新增的行数。
+ *
+ * 删掉的发射留着墓碑，采集再推来也不写回：BrandMeister 每次轮询都取回最近
+ * 的一批，守护进程的落盘批次也会补发。墓碑里的 id 不算 written。
+ */
 export function insertActivities(
   db: DatabaseSync,
   rows: IngestRow[],
@@ -89,7 +94,8 @@ export function insertActivities(
     INSERT OR IGNORE INTO activity
       (id, origin, start_at, duration_s, mine, freq_mhz, channel, callsign,
        dmr_id, talkgroup, rssi, ber, audio_snr_db, raw, fetched_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+    WHERE NOT EXISTS (SELECT 1 FROM deleted_activity WHERE id = ?)
   `);
   return withTx(db, () => {
     let written = 0;
@@ -99,12 +105,31 @@ export function insertActivities(
       const r = stmt.run(
         a.id, a.origin, a.startAt, a.durationS, mine, nul(a.freqMhz), nul(a.channel),
         nul(a.callsign), nul(a.dmrId), nul(a.talkgroup), nul(a.rssi), nul(a.ber),
-        nul(a.audioSnrDb), raw, fetchedAt,
+        nul(a.audioSnrDb), raw, fetchedAt, a.id,
       );
       written += Number(r.changes);
     }
     return written;
   });
+}
+
+/**
+ * 删掉这几次发射和挂在它们身上的一切，记下墓碑。已忽略的成员在 resolved_activity
+ * 里有一行，一起删。不开事务，调用方包一层，好和别的写入合成一个。
+ */
+export function deleteActivities(db: DatabaseSync, ids: string[], at: number): void {
+  const del = (table: string, col: string) => db.prepare(`DELETE FROM ${table} WHERE ${col} = ?`);
+  const stmts = [
+    del('activity', 'id'),
+    del('resolved_activity', 'activity_id'),
+    del('activity_ai', 'activity_id'),
+    del('activity_verdict', 'activity_id'),
+  ];
+  const tomb = db.prepare('INSERT OR REPLACE INTO deleted_activity (id, deleted_at) VALUES (?,?)');
+  for (const id of ids) {
+    for (const s of stmts) s.run(id);
+    tomb.run(id, at);
+  }
 }
 
 /** 取还没被提升也没被忽略的发射，只看窗口内的。 */
@@ -347,6 +372,21 @@ export function pruneActivities(db: DatabaseSync, olderThan: number): string[] {
   });
 }
 
+/** 发射被裁掉以后，它的识别结果和人工判定也不该留着。 */
+export function pruneAiRows(db: DatabaseSync): void {
+  for (const table of ['activity_ai', 'activity_verdict']) {
+    db.prepare(`
+      DELETE FROM ${table}
+      WHERE NOT EXISTS (SELECT 1 FROM activity a WHERE a.id = ${table}.activity_id)
+    `).run();
+  }
+}
+
+/** 墓碑和发射同一个保留期：过了期，采集也不会再推那一行了。 */
+export function pruneTombstones(db: DatabaseSync, olderThan: number): number {
+  return Number(db.prepare('DELETE FROM deleted_activity WHERE deleted_at < ?').run(olderThan).changes);
+}
+
 export function prunePollLog(db: DatabaseSync, olderThan: number): number {
   return Number(db.prepare('DELETE FROM poll_log WHERE at < ?').run(olderThan).changes);
 }
@@ -553,24 +593,28 @@ export function selectQsoBriefs(db: DatabaseSync, ids: string[]): Map<string, { 
   return out;
 }
 
-/** 结算检查要用的那几个 id，带上是不是已经结算过。 */
+/** 结算检查要用的那几个 id，带上是不是已经结算过、是不是结算成了通联（不是忽略）。 */
 export function selectActivitiesByIds(
   db: DatabaseSync,
   ids: string[],
   dmrId: number,
-): Map<string, { activity: Activity; resolved: boolean }> {
-  const out = new Map<string, { activity: Activity; resolved: boolean }>();
+): Map<string, { activity: Activity; resolved: boolean; logged: boolean }> {
+  const out = new Map<string, { activity: Activity; resolved: boolean; logged: boolean }>();
   if (ids.length === 0) return out;
   const placeholders = ids.map(() => '?').join(',');
   const rows = db
     .prepare(`
-      SELECT a.*, r.activity_id AS resolved_id FROM activity a
+      SELECT a.*, r.activity_id AS resolved_id, r.qso_id AS resolved_qso FROM activity a
       LEFT JOIN resolved_activity r ON r.activity_id = a.id
       WHERE a.id IN (${placeholders})
     `)
     .all(...ids) as Record<string, unknown>[];
   for (const r of rows) {
-    out.set(String(r.id), { activity: rowToActivity(r, dmrId), resolved: r.resolved_id !== null });
+    out.set(String(r.id), {
+      activity: rowToActivity(r, dmrId),
+      resolved: r.resolved_id !== null,
+      logged: r.resolved_qso !== null,
+    });
   }
   return out;
 }

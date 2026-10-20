@@ -1,6 +1,6 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { checkQueries, readAnalogChannels } from './core.ts';
-import type { Channel, StationDefaults } from './core.ts';
+import { aiDefaults, checkQueries, mapDefaults, readAnalogChannels, resolveAiConfig, resolveMapConfig } from './core.ts';
+import type { AiConfig, Channel, MapConfig, StationDefaults } from './core.ts';
 import { loadConfig } from './config.ts';
 import type { Config, Query } from './config.ts';
 
@@ -17,6 +17,26 @@ export interface Settings {
   /** BrandMeister 查询的开关，缺省开。 */
   brandmeisterEnabled?: boolean;
   analog?: AnalogSettings;
+  ai?: AiSettings;
+  map?: MapSettings;
+}
+
+/**
+ * ai 段，读出来的样子：密钥换成 apiKeySet，只写不读。
+ * 提交时 apiKey 才出现（缺省或 null 保留已存的，'' 清掉），*Set 一律忽略。
+ */
+export interface AiSettings {
+  enabled: boolean;
+  vad: AiConfig['vad'];
+  asr: Omit<AiConfig['asr'], 'apiKey'> & { apiKeySet: boolean };
+  text: Omit<AiConfig['text'], 'apiKey'> & { apiKeySet: boolean };
+}
+
+/** 高德的 key 是公开的（页面要拿它加载地图），安全密钥只写不读。 */
+export interface MapSettings {
+  provider: MapConfig['provider'];
+  amapKey: string;
+  amapSecurityCodeSet: boolean;
 }
 
 export interface AnalogSettings {
@@ -69,7 +89,10 @@ const pickMargin = (submitted: unknown, existing: number | undefined, fallback: 
  *   那个凑起来一起验，否则凑出来的组合从来没被验过；BrandMeister 关着时
  *   queries 是否必填也看它。
  */
-export function checkSettings(raw: unknown, current?: Partial<Pick<Config, 'analog' | 'brandmeisterEnabled'>>): string[] {
+export function checkSettings(
+  raw: unknown,
+  current?: Partial<Pick<Config, 'analog' | 'brandmeisterEnabled' | 'ai' | 'map'>>,
+): string[] {
   if (!isObject(raw)) return ['设置的顶层不是对象'];
   const problems: string[] = [];
   const brandmeisterEnabled = raw.brandmeisterEnabled !== false;
@@ -153,19 +176,85 @@ export function checkSettings(raw: unknown, current?: Partial<Pick<Config, 'anal
     }
   }
 
+  // 密钥先按已存的解析出来再验：请求体里没有密钥（读出来就只有 apiKeySet），
+  // 直接验的话，云端那一步每次保存都会报 apiKey 必填。
+  if (raw.ai !== undefined && raw.ai !== null) problems.push(...mergeAi(raw.ai, current?.ai).problems);
+  if (raw.map !== undefined && raw.map !== null) problems.push(...mergeMap(raw.map, current?.map).problems);
+
   return problems;
 }
 
-/** 从当前配置里挑出可改的那部分，给界面填表用。 */
+/**
+ * 请求里的 ai 段并进已存的那一份，返回合并之后严格校验的结果。
+ *
+ * 密钥：缺省或 null 保留已存的，'' 清掉，非空文字就是新值。*Set 是读出来给界面看的，
+ * 提交里带了也忽略。别的键：缺省或 null 保留已存的。
+ */
+export function mergeAi(body: unknown, stored: AiConfig | undefined): { config: AiConfig; problems: string[] } {
+  if (!isObject(body)) return resolveAiConfig(body);
+  const base = stored ?? aiDefaults();
+  const merged: Record<string, unknown> = { ...base };
+  if (body.enabled !== undefined && body.enabled !== null) merged.enabled = body.enabled;
+  for (const sec of ['vad', 'asr', 'text'] as const) {
+    const sub = body[sec];
+    if (sub === undefined || sub === null) continue;
+    // 不是对象的原样放进去，让校验报出来。
+    if (!isObject(sub)) {
+      merged[sec] = sub;
+      continue;
+    }
+    const out: Record<string, unknown> = { ...base[sec] };
+    for (const [k, v] of Object.entries(sub)) {
+      if (k.endsWith('Set') || v === undefined || v === null) continue;
+      out[k] = v;
+    }
+    merged[sec] = out;
+  }
+  return resolveAiConfig(merged);
+}
+
+export function mergeMap(body: unknown, stored: MapConfig | undefined): { config: MapConfig; problems: string[] } {
+  if (!isObject(body)) return resolveMapConfig(body);
+  const merged: Record<string, unknown> = { ...(stored ?? mapDefaults()) };
+  for (const [k, v] of Object.entries(body)) {
+    if (k.endsWith('Set') || v === undefined || v === null) continue;
+    merged[k] = v;
+  }
+  return resolveMapConfig(merged);
+}
+
+/** 从当前配置里挑出可改的那部分，给界面填表用。密钥只报设了没有。 */
 export function settingsOf(config: Config, analog?: AnalogSettings): Settings {
+  const ai = config.ai ?? aiDefaults();
+  const map = config.map ?? mapDefaults();
+  const { apiKey: asrKey, ...asr } = ai.asr;
+  const { apiKey: textKey, ...text } = ai.text;
   return {
     station: config.station,
     channels: config.channels,
     queries: config.queries,
     brandmeisterEnabled: config.brandmeisterEnabled,
     analog,
+    ai: {
+      enabled: ai.enabled,
+      vad: ai.vad,
+      asr: { ...asr, apiKeySet: asrKey !== '' },
+      text: { ...text, apiKeySet: textKey !== '' },
+    },
+    map: {
+      provider: map.provider,
+      amapKey: map.amapKey,
+      amapSecurityCodeSet: map.amapSecurityCode !== '',
+    },
   };
 }
+
+/** 写进文件的样子：空的密钥去掉键，不留一个空串在那里。 */
+const serialise = <T extends object>(section: T, secrets: string[]): Record<string, unknown> => {
+  const out: Record<string, unknown> = JSON.parse(JSON.stringify(section));
+  for (const k of secrets) if (out[k] === '') delete out[k];
+  return out;
+};
 
 /**
  * 把设置写回配置文件，并且就地更新内存里那份。
@@ -212,6 +301,22 @@ export function writeSettings(config: Config, next: Settings): void {
     }
   }
 
+  // ai 和 map：合并密钥、严格校验之后整段写回。请求体里没有这一段就不动文件里的。
+  const touchesAi = next.ai !== undefined && next.ai !== null;
+  const touchesMap = next.map !== undefined && next.map !== null;
+  if (touchesAi) {
+    const merged = mergeAi(next.ai, config.ai);
+    if (merged.problems.length > 0) throw new Error(`ai 设置不对，没有落盘：${merged.problems.join('，')}`);
+    const section = serialise(merged.config, []) as Record<string, Record<string, unknown>>;
+    for (const sec of ['asr', 'text'] as const) if (section[sec]!.apiKey === '') delete section[sec]!.apiKey;
+    raw.ai = section;
+  }
+  if (touchesMap) {
+    const merged = mergeMap(next.map, config.map);
+    if (merged.problems.length > 0) throw new Error(`map 设置不对，没有落盘：${merged.problems.join('，')}`);
+    raw.map = serialise(merged.config, ['amapKey', 'amapSecurityCode']);
+  }
+
   const tmp = `${config.path}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}\n`, { mode: 0o600 });
 
@@ -221,6 +326,11 @@ export function writeSettings(config: Config, next: Settings): void {
   if (!fresh.ok) {
     throw new Error(`写出来的配置读不回来，没有落盘：${fresh.problems.join('，')}`);
   }
+  // 文件里原来就有写坏的 ai 或 map，而这次没碰它们，不能因此拦住别的保存。
+  const bad = [touchesAi ? fresh.config.aiProblem : undefined, touchesMap ? fresh.config.mapProblem : undefined].filter(
+    (p) => p !== undefined,
+  );
+  if (bad.length > 0) throw new Error(`写出来的配置读不回来，没有落盘：${bad.join('，')}`);
   renameSync(tmp, config.path);
 
   // 内存里这份是 createStore 按引用拿着的，就地改它，接口立刻反映新值。
@@ -234,4 +344,8 @@ export function writeSettings(config: Config, next: Settings): void {
   config.brandmeisterEnabled = fresh.config.brandmeisterEnabled;
   config.analog = fresh.config.analog;
   config.recordingsDir = fresh.config.recordingsDir;
+  config.ai = fresh.config.ai;
+  config.aiProblem = fresh.config.aiProblem;
+  config.map = fresh.config.map;
+  config.mapProblem = fresh.config.mapProblem;
 }
