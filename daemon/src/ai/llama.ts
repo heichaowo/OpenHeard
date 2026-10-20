@@ -42,6 +42,8 @@ export class LlamaServer {
   #closed = false;
   #ring: string[] = [];
   #starting?: Promise<string>;
+  /** 当前这个子进程的输出读完了（stderr 的尾巴在 exit 之后才到）。 */
+  #drained: Promise<void> = Promise.resolve();
 
   constructor(cfg: TextConfig, timing: LlamaTiming = LLAMA_TIMING) {
     this.cfg = cfg;
@@ -61,14 +63,32 @@ export class LlamaServer {
     return this.#starting;
   }
 
+  /** 这个端口上已经有东西在答 /health。 */
+  async #answering(): Promise<boolean> {
+    try {
+      return (await fetch(`${this.url}/health`, { signal: AbortSignal.timeout(2000) })).ok;
+    } catch {
+      return false;
+    }
+  }
+
   async #start(): Promise<string> {
-    if (this.#child === undefined) this.#spawn();
+    if (this.#child === undefined) {
+      // 端口上已经有别的实例（上次崩溃留下的）。我们的子进程会绑不上端口，而它的
+      // /health 会让下面的检查误以为我们起好了，请求就发给了一个不知道什么配置的进程。
+      if (await this.#answering()) {
+        throw new WorkerError(`端口 ${this.cfg.port} 已经被别的进程占着，先把它停掉`);
+      }
+      this.#spawn();
+    }
     const child = this.#child!;
     const deadline = Date.now() + this.#timing.healthTimeoutMs;
     while (Date.now() < deadline) {
       // 只认我们自己的子进程：上一次留下的实例还占着这个端口时，它的 /health
       // 会答 200，而我们这个起不来。
       if (this.#child !== child) {
+        // exit 比 stderr 的最后几行早到，等它们读完再把原因带出去
+        await Promise.race([this.#drained, sleep(500)]);
         throw new WorkerError(`llama-server 没就绪就退出了：${this.#tail()}`);
       }
       try {
@@ -109,6 +129,7 @@ export class LlamaServer {
     this.#ring = [];
     renice(child);
 
+    this.#drained = new Promise((resolve) => child.once('close', resolve));
     let pending = '';
     child.stderr!.setEncoding('utf8').on('data', (d: string) => {
       const lines = (pending + d).split('\n');
@@ -128,9 +149,10 @@ export class LlamaServer {
       this.#ring.push(`起不来：${e.message}`);
       gone();
     });
-    child.on('exit', (code, signal) => {
+    child.on('exit', gone);
+    // 日志等 stderr 读完再写，否则最后几行（多半就是原因）漏掉
+    child.on('close', (code, signal) => {
       if (pending !== '') this.#ring.push(pending);
-      gone();
       console.error(`llama-server 退出了（${signal ?? code}），最后几行：${this.#tail()}`);
     });
   }

@@ -1,6 +1,7 @@
 // 识别这一块的测试用具：假二进制（shell 脚本）、假 api 和假云端服务。
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -197,14 +198,18 @@ export async function fakeApi() {
     /** 设了就让这个入口回这个状态码。 */
     failTodo: 0,
     failPost: 0,
+    /** todo 先按收到请求那一刻的内容定下答案，再等这么久才回。 */
+    todoDelayMs: 0,
   };
-  const server = await fakeServer((call, res) => {
+  const server = await fakeServer(async (call, res) => {
     if (call.headers.authorization !== 'Bearer tok') return json(res, 401, {});
     const path = call.path.split('?')[0];
     if (call.method === 'GET' && path === '/api/ingest/ai/todo') {
       if (state.failTodo) return json(res, state.failTodo, {});
       const limit = Number(new URL(call.path, 'http://x').searchParams.get('limit'));
-      return json(res, 200, { items: state.todo.slice(0, limit) });
+      const items = state.todo.slice(0, limit);
+      if (state.todoDelayMs > 0) await sleep(state.todoDelayMs);
+      return json(res, 200, { items });
     }
     if (path === '/api/ingest/ai/status') {
       state.statuses.push(call.body as { ok: boolean; message: string });
@@ -222,6 +227,15 @@ export async function fakeApi() {
     json(res, 404, {});
   });
   return { ...server, state, todoCalls: () => server.calls.filter((c) => c.path.startsWith('/api/ingest/ai/todo')) };
+}
+
+/** 一个当下空闲的端口。先占住再放掉，几个测试文件并行跑也不会撞。 */
+export async function freePort(): Promise<number> {
+  const s = createServer();
+  await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
+  const port = (s.address() as { port: number }).port;
+  await new Promise((r) => s.close(r));
+  return port;
 }
 
 /** 假二进制记下的调用，一行一份。 */

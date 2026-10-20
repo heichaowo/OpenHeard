@@ -4,6 +4,7 @@ import type { AnalogConfig, Query } from "./config.ts";
 import { Ingest } from "./ingest.ts";
 import type { IngestRow } from "./ingest.ts";
 import { normalise } from "./normalise.ts";
+import type { Activity } from "./core.ts";
 
 const nowS = () => Math.floor(Date.now() / 1000);
 
@@ -66,10 +67,48 @@ export interface AnalogHandle {
   stop: () => void;
 }
 
+/**
+ * 推一次发射，顺带记一行 poll_log，这样运维页上看得出模拟侧还活着。
+ *
+ * 推上去了才调 onPushed。识别的 worker 靠它醒来：在 push 之前叫，它的 todo
+ * 会抢在 activity 入库前到，空手而归，新录音白等一个空闲周期。
+ */
+export function pushActivity(ingest: Ingest, activity: Activity, onPushed?: () => void): void {
+  const at = nowS();
+  const started = Date.now();
+  void ingest
+    .push(
+      [
+        {
+          activity,
+          raw: JSON.stringify({
+            source: "sdr-fm",
+            channel: activity.channel,
+            at,
+          }),
+        },
+      ],
+      {
+        queryKey: `analog:${activity.channel}`,
+        at,
+        fetched: 1,
+        parsed: 1,
+        written: 0,
+        ok: true,
+        // 和数字侧一个意思：处理这一批花了多久。这次发射多长在
+        // Activity.durationS 里，把它塞进 ms 会让运维页同一列有两种含义。
+        ms: Date.now() - started,
+      },
+    )
+    .then((r) => {
+      if (r.sent) onPushed?.();
+    });
+}
+
 export function startAnalog(
   cfg: AnalogConfig,
   ingest: Ingest,
-  /** 这次发射推上去之后调。识别的 worker 靠它醒来，不用等满 10 秒。 */
+  /** 每次发射推上去之后调。 */
   onPushed?: () => void,
 ): AnalogHandle {
   let current = cfg;
@@ -103,37 +142,7 @@ export function startAnalog(
         recordingsDir: cfg.recordingsDir,
         rtlSdrPath: "rtl_sdr",
       },
-      (activity) => {
-        const at = nowS();
-        const started = Date.now();
-        void ingest.push(
-          [
-            {
-              activity,
-              raw: JSON.stringify({
-                source: "sdr-fm",
-                channel: activity.channel,
-                at,
-              }),
-            },
-          ],
-          {
-            queryKey: `analog:${activity.channel}`,
-            at,
-            fetched: 1,
-            parsed: 1,
-            written: 0,
-            ok: true,
-            // 和数字侧一个意思：处理这一批花了多久。这次发射多长在
-            // Activity.durationS 里，把它塞进 ms 会让运维页同一列有两种含义。
-            ms: Date.now() - started,
-          },
-        ).then((r) => {
-          // 推上去了才叫醒。在 push 之前叫，worker 的 todo 会抢在 activity 入库前到，
-          // 空手而归，新录音白等一个空闲周期。
-          if (r.sent) onPushed?.();
-        });
-      },
+      (activity) => pushActivity(ingest, activity, onPushed),
       () => {
         if (deliberate) return;
         restarts += 1;

@@ -208,3 +208,60 @@ describe('watchConfig：开关', () => {
     assert.equal(seen.analog[0]?.channels[0]!.freqMhz, 438.7);
   });
 });
+
+describe('watchConfig：识别', () => {
+  it('从没有变成有、设置换了、关掉：各通知一次，没变就不通知', async () => {
+    const { path, write } = setup();
+    const { seen, stop } = start(path);
+
+    await writeUntil(write, { ...base, ai: { enabled: true } }, () => seen.ai.length > 0);
+    assert.equal(seen.ai.length, 1);
+    assert.equal(seen.ai[0]?.asr.provider, 'local');
+
+    await writeUntil(
+      write,
+      { ...base, ai: { enabled: true, asr: { language: 'en' } } },
+      () => seen.ai.length > 1,
+    );
+    assert.equal(seen.ai[1]?.asr.language, 'en');
+
+    await writeUntil(write, { ...base, ai: { enabled: false } }, () => seen.ai.length > 2);
+    stop();
+
+    assert.equal(seen.ai.length, 3);
+    assert.equal(seen.ai[2], undefined);
+    assert.equal(seen.analog.length, 0);
+    assert.equal(seen.queries.length, 0);
+  });
+
+  it('无关的改动不重启识别', async () => {
+    const { path, write } = setup();
+    write({ ...base, ai: { enabled: true } });
+    const { seen, stop } = start(path);
+
+    await writeUntil(write, { ...base, ai: { enabled: true }, analog: { ...base.analog, freqMhz: 145.5 } }, () => seen.analog.length > 0);
+    stop();
+
+    assert.equal(seen.ai.length, 0);
+  });
+
+  // 识别是可选的：手改文件写坏了，不能让进程退出，正在跑的 worker 按生效值 undefined 停掉
+  it('写坏了：通知停掉，原因记日志，进程照常', async () => {
+    const { path, write } = setup();
+    write({ ...base, ai: { enabled: true } });
+    const { seen, stop } = start(path);
+    const logged: string[] = [];
+    const original = console.error;
+    console.error = (...a: unknown[]) => void logged.push(a.join(' '));
+    try {
+      await writeUntil(write, { ...base, ai: { enabled: true, asr: { provider: 'nope' } } }, () => seen.ai.length > 0);
+    } finally {
+      console.error = original;
+      stop();
+    }
+
+    assert.equal(seen.ai.length, 1);
+    assert.equal(seen.ai[0], undefined);
+    assert.ok(logged.some((l) => l.includes('ai.asr.provider')));
+  });
+});

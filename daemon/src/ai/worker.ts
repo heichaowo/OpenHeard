@@ -24,6 +24,8 @@ export interface AiTiming {
   statusMs: number;
   /** 汇总日志的间隔。 */
   statsMs: number;
+  /** 提取请求的超时。测试里缩短，线上用 TEXT_TIMEOUT_MS。 */
+  textTimeoutMs?: number;
   llama: LlamaTiming;
 }
 
@@ -212,6 +214,7 @@ export function startAi(
         cfg.text,
         { transcript: filtered.text, mine: item.mine, channel: item.channel },
         localUrl,
+        timing.textTimeoutMs,
       );
       out.category = got.category;
       out.fields = got.fields;

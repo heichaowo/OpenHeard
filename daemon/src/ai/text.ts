@@ -2,8 +2,8 @@ import { basename } from 'node:path';
 import type { TextConfig } from '../config.ts';
 import { httpError, ItemError, networkError } from './errors.ts';
 
-const LOCAL_TIMEOUT_MS = 120_000;
-const CLOUD_TIMEOUT_MS = 60_000;
+/** 本机 120 秒：从闲置休眠里醒来要装一遍模型。云端 60 秒。 */
+export const TEXT_TIMEOUT_MS = { local: 120_000, cloud: 60_000 };
 
 export interface AiFields {
   call?: string;
@@ -110,6 +110,7 @@ export async function extract(
   input: ExtractInput,
   /** 本机时 llama-server 的地址，已经确认健康。 */
   localUrl?: string,
+  timeoutMs = cfg.provider === 'local' ? TEXT_TIMEOUT_MS.local : TEXT_TIMEOUT_MS.cloud,
 ): Promise<Extracted> {
   const isLocal = cfg.provider === 'local';
   const url = isLocal
@@ -135,7 +136,7 @@ export async function extract(
         ...(isLocal ? {} : { authorization: `Bearer ${cfg.apiKey}` }),
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(isLocal ? LOCAL_TIMEOUT_MS : CLOUD_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
     throw networkError(`提取 ${url}`, e);

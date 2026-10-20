@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, it, mock } from 'node:test';
 import type { AnalogConfig } from './config.ts';
 import type { Ingest } from './ingest.ts';
-import { startAnalog } from './runner.ts';
+import { pushActivity, startAnalog } from './runner.ts';
 
 /**
  * 在 PATH 最前面放一个假的 rtl_sdr。每次被拉起就往计数文件里记一行，
@@ -89,5 +89,50 @@ describe('startAnalog', () => {
     } finally {
       handle.stop();
     }
+  });
+});
+
+describe('pushActivity', () => {
+  const activity = { id: 'fm-1', origin: 'sdr-fm', startAt: 1_789_000_000, durationS: 3, mine: false, channel: '438.500' } as const;
+
+  // 在 push 之前叫醒，worker 的 todo 会抢在 activity 入库前到
+  it('推上去了才叫醒识别', async () => {
+    const order: string[] = [];
+    const ingest = {
+      push: async () => {
+        order.push('push');
+        return { sent: true, replayed: 0 };
+      },
+    } as unknown as Ingest;
+    pushActivity(ingest, activity, () => order.push('wake'));
+    await until(() => order.length === 2);
+    assert.deepEqual(order, ['push', 'wake']);
+  });
+
+  it('没推上去（落盘了）不叫醒：api 那边还没有这条', async () => {
+    let pushed = 0;
+    let woke = 0;
+    const ingest = {
+      push: async () => {
+        pushed += 1;
+        return { sent: false, replayed: 0 };
+      },
+    } as unknown as Ingest;
+    pushActivity(ingest, activity, () => (woke += 1));
+    await until(() => pushed === 1);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(woke, 0);
+  });
+
+  it('不给 onPushed 也照常推', async () => {
+    let pushed = 0;
+    const ingest = {
+      push: async () => {
+        pushed += 1;
+        return { sent: true, replayed: 0 };
+      },
+    } as unknown as Ingest;
+    pushActivity(ingest, activity);
+    await until(() => pushed === 1);
   });
 });
