@@ -33,10 +33,40 @@ const mount = (s: Settings) => {
   )
 }
 
+// 服务端回的是带缺省值的有效配置，AI 关着、地图没选。
+const aiDefaults: Settings['ai'] = {
+  enabled: false,
+  vad: { provider: 'local', binPath: '/opt/homebrew/bin/whisper-vad-speech-segments', modelPath: '/m/silero.bin', threshold: 0.5 },
+  asr: {
+    provider: 'local',
+    binPath: '/opt/homebrew/bin/whisper-cli',
+    modelPath: '/m/large.bin',
+    language: 'zh',
+    prompt: '',
+    baseUrl: '',
+    model: '',
+    extraBody: {},
+    apiKeySet: false,
+  },
+  text: {
+    provider: 'local',
+    binPath: '/opt/homebrew/bin/llama-server',
+    modelPath: '/m/qwen.gguf',
+    port: 8091,
+    idleUnloadS: 120,
+    baseUrl: '',
+    model: '',
+    extraBody: {},
+    apiKeySet: false,
+  },
+}
+
 const base: Settings = {
   station: { myCallsign: 'BG0CG', networkFreqMhz: 439.525 },
   channels: [],
   queries: [],
+  ai: aiDefaults,
+  map: { provider: 'none', amapKey: '', amapSecurityCodeSet: false },
 }
 
 beforeEach(() => vi.clearAllMocks())

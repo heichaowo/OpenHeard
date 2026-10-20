@@ -102,6 +102,8 @@ const store = (pending: PendingRow[] = [], over: Partial<Store> = {}): Store => 
   recordings: new Set<string>(),
   analogEnabled: false,
   brandmeisterEnabled: true,
+  aiEnabled: false,
+  map: { provider: 'none' },
   loading: false,
   error: undefined,
   promote,

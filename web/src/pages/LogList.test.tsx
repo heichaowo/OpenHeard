@@ -46,6 +46,8 @@ const store = (qsos: Qso[]): Store => ({
   recordings: new Set<string>(),
   analogEnabled: true,
   brandmeisterEnabled: true,
+  aiEnabled: false,
+  map: { provider: 'none' },
   loading: false,
   error: undefined,
   promote: vi.fn(),

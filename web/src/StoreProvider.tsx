@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { missingFields } from '@core'
 import type { Channel, PendingItem, Qso, StationDefaults } from '@core'
 import { ApiError, api, errorText } from './api'
+import type { StationMap } from './api'
 import { StoreContext } from './store'
 import type { PendingRow, Store } from './store'
 
@@ -18,6 +19,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // 配置里缺省都是开，请求还没回来之前也当作开，免得界面在首屏闪一下「关着」。
   const [analogEnabled, setAnalogEnabled] = useState(true)
   const [brandmeisterEnabled, setBrandmeisterEnabled] = useState(true)
+  // AI 缺省关，请求没回来之前也当作关，免得首屏闪一下「识别中」。
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [map, setMap] = useState<StationMap>({ provider: 'none' })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | undefined>()
 
@@ -47,6 +51,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // 配置里缺省是开；?? true 只是兜底旧响应漏了这两个字段的情况。
       setAnalogEnabled(s.analogEnabled ?? true)
       setBrandmeisterEnabled(s.brandmeisterEnabled ?? true)
+      setAiEnabled(s.aiEnabled ?? false)
+      setMap(s.map ?? { provider: 'none' })
       setError(undefined)
     } catch (e) {
       if (mine !== seq.current) return
@@ -88,6 +94,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       recordings,
       analogEnabled,
       brandmeisterEnabled,
+      aiEnabled,
+      map,
       loading,
       error,
       refresh,
@@ -129,7 +137,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return r
       },
     }),
-    [station, channels, rows, qsos, recordings, analogEnabled, brandmeisterEnabled, loading, error, refresh],
+    [station, channels, rows, qsos, recordings, analogEnabled, brandmeisterEnabled, aiEnabled, map, loading, error, refresh],
   )
 
   return <StoreContext value={value}>{children}</StoreContext>

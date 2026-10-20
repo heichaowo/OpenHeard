@@ -96,6 +96,52 @@ export interface AnalogSettings {
   enabled?: boolean
 }
 
+export type VadProvider = 'local' | 'off'
+export type AsrProvider = 'local' | 'openai-transcriptions' | 'chat-audio' | 'off'
+export type TextProvider = 'local' | 'openai-chat' | 'off'
+export type MapProvider = 'amap' | 'osm' | 'none'
+
+/**
+ * AI 的三步。key 只写不读：GET 回 apiKeySet，不回 key；PUT 里缺省或 null 是不动，
+ * '' 是清掉，非空是设上。apiKeySet 是 GET 才有的，PUT 里带了也被忽略。
+ */
+export interface AiSettings {
+  enabled: boolean
+  vad: { provider: VadProvider; binPath: string; modelPath: string; threshold: number }
+  asr: {
+    provider: AsrProvider
+    binPath: string
+    modelPath: string
+    language: string
+    prompt: string
+    baseUrl: string
+    model: string
+    extraBody: Record<string, unknown>
+    apiKey?: string
+    apiKeySet?: boolean
+  }
+  text: {
+    provider: TextProvider
+    binPath: string
+    modelPath: string
+    port: number
+    idleUnloadS: number
+    baseUrl: string
+    model: string
+    extraBody: Record<string, unknown>
+    apiKey?: string
+    apiKeySet?: boolean
+  }
+}
+
+/** 地图。高德的 JS key 是公开的，照常回；安全密钥只写不读。 */
+export interface MapSettings {
+  provider: MapProvider
+  amapKey: string
+  amapSecurityCode?: string
+  amapSecurityCodeSet?: boolean
+}
+
 /** 人能在界面上改的那几项。dbPath、监听地址和三个密钥只在配置文件里改。 */
 export interface Settings {
   station: StationDefaults
@@ -104,6 +150,8 @@ export interface Settings {
   analog?: AnalogSettings
   /** BrandMeister 查询的开关。缺省开。关掉之后 queries 原样留在文件里。 */
   brandmeisterEnabled?: boolean
+  ai: AiSettings
+  map: MapSettings
 }
 
 /** 收听记录里的一行。结算过的带上结算成了什么。 */
@@ -150,6 +198,12 @@ export interface QsoChange {
   at: number
   action: 'edit' | 'delete'
   before: Qso
+}
+
+/** /api/station 里的地图：只有页面要用到的那几项，安全密钥不在里面。 */
+export interface StationMap {
+  provider: MapProvider
+  amapKey?: string
 }
 
 export interface Machine {
@@ -209,6 +263,22 @@ export interface Ops {
   /** 效果值：配置里缺省是开，这两个字段告诉界面关没关。 */
   analogEnabled: boolean
   brandmeisterEnabled: boolean
+  ai: OpsAi
+}
+
+/** 识别队列。meaningless 和收听页 无意义 档的数字是同一个：view=meaningless 的总数。 */
+export interface OpsAi {
+  enabled: boolean
+  vad: VadProvider
+  asrProvider: AsrProvider
+  textProvider: TextProvider
+  /** 还没识别的录音。 */
+  todo: number
+  doneLast24h: number
+  meaningless: number
+  /** 守护进程最近一次报的状态，只在 api 内存里。 */
+  worker?: { at: number; ok: boolean; message: string }
+  lastError?: { at: number; message: string }
 }
 
 /** GET /api/conversations 的查询条件。三种视图选一种，见 contract.md。 */
@@ -280,6 +350,8 @@ export const api = {
       channels: Channel[]
       analogEnabled: boolean
       brandmeisterEnabled: boolean
+      aiEnabled: boolean
+      map: StationMap
     }>('/station'),
   pending: () => call<PendingItem[]>('/pending'),
   /** 受保护的这一份带 activities，公开的 /public/qsos 不带。 */

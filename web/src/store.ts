@@ -1,6 +1,6 @@
 import { createContext, use } from 'react'
 import type { Channel, PendingItem, Qso, QsoDraft, QsoField, StationDefaults } from '@core'
-import type { ConversationPick } from './api'
+import type { ConversationPick, StationMap } from './api'
 
 export type PendingRow = PendingItem & { missing: QsoField[] }
 
@@ -14,6 +14,10 @@ export interface Store {
   /** 模拟守听、BrandMeister 查询的效果开关，来自 /api/station。 */
   analogEnabled: boolean
   brandmeisterEnabled: boolean
+  /** AI 识别开着没有。关着时收听页不标「识别中」。 */
+  aiEnabled: boolean
+  /** 选了哪种地图，来自 /api/station。 */
+  map: StationMap
   /** 首次加载还没回来。 */
   loading: boolean
   /** 连不上后端或后端报错时的说明，正常是 undefined。 */

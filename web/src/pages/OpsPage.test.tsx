@@ -48,6 +48,7 @@ const snapshot = (radios: Radio[]): Ops => ({
   now,
   analogEnabled: true,
   brandmeisterEnabled: true,
+  ai: { enabled: false, vad: 'local', asrProvider: 'local', textProvider: 'local', todo: 0, doneLast24h: 0, meaningless: 0 },
 })
 
 const qso = (id: string, startAt: number): Qso => ({
