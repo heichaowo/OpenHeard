@@ -128,6 +128,99 @@ infra/install.sh ~/OpenHeard/openheard.config.json
 
 `-wal` 和 `-shm` 是旧库的，留着会和恢复回来的库对不上。
 
+## 语音识别（可选）
+
+识别在守护进程里跑，不另起服务。缺省关。想用本机识别，先装程序，再下模型，最后打开。想用云端识别，直接看「本机和云端之间切换」。
+
+### 装程序
+
+```bash
+brew install whisper-cpp llama.cpp
+```
+
+装完 `/opt/homebrew/bin` 里有 `whisper-cli`、`whisper-vad-speech-segments` 和 `llama-server`。核对过的版本是 whisper.cpp 1.9.4 和 llama.cpp 0.5.0（build 11146）。
+
+### 下模型
+
+**下载是你的一步，程序不会自己下。** 模型放在配置文件旁的 `models/`，路径缺省就指向那里。
+
+| 文件 | 大小 | sha256 |
+|---|---|---|
+| `ggml-large-v3-turbo-q5_0.bin`（识别） | 574,041,195 字节 | `394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2` |
+| `ggml-silero-v5.1.2.bin`（人声判断） | 885,098 字节 | `29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf` |
+| `Qwen3-4B-Instruct-2507-Q4_K_M.gguf`（提取） | 2,497,281,120 字节 | `3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597` |
+
+从 ModelScope 下，国内连得上：
+
+```bash
+mkdir -p ~/OpenHeard/models && cd ~/OpenHeard/models
+curl -L -O https://www.modelscope.cn/models/viggocx/whisper.cpp/resolve/master/ggml-large-v3-turbo-q5_0.bin
+curl -L -O https://www.modelscope.cn/models/ggml-org/whisper-vad/resolve/master/ggml-silero-v5.1.2.bin
+curl -L -O https://www.modelscope.cn/models/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/master/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+shasum -a 256 ggml-large-v3-turbo-q5_0.bin ggml-silero-v5.1.2.bin Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+```
+
+`shasum` 打出的值要和上表一致。不一致就删掉重下。
+
+三个文件一共约 3.1 GB。mini 上实测磁盘只剩 13 GiB，下之前先看一眼。
+
+`viggocx/whisper.cpp` 是 `ggerganov/whisper.cpp` 的第三方镜像，sha256 和上游一致，ModelScope 上没有官方那份。Qwen3-4B-Instruct-2507 是 Apache-2.0。同名的 lmstudio-community 那份 sha256 不同，换用时以自己下的那份为准。
+
+### 打开之前，先核对一次真实的人声判断输出
+
+程序读 `whisper-vad-speech-segments` 的输出，格式来自上游源码，**还没有在 mini 上用真模型验过**。下好模型之后、打开识别之前，手工跑一次，和下面的格式对一遍：
+
+```bash
+cd ~/OpenHeard
+whisper-vad-speech-segments -vm models/ggml-silero-v5.1.2.bin -f recordings/<一条有话的>.wav -vt 0.5 -np
+```
+
+期望的输出：
+
+```
+Detected 2 speech segments:
+Speech segment 0: start = 10.00, end = 150.00
+Speech segment 1: start = 180.00, end = 250.00
+```
+
+核对三处：
+
+1. 第一行是 `Detected N speech segments:`，N 是段数。
+2. 接下来恰好 N 行，每行是 `Speech segment i: start = T0, end = T1`。
+3. 时间单位是百分之一秒。一条 3 秒、一直有话的录音，数值在 300 上下，不是 3。
+
+再挑一条 1 秒左右的空按跑一次，期望第一行是 `Detected 0 speech segments:`。
+
+任何一处对不上，就不要打开识别。程序遇到对不上的输出会报识别失败，不会当成没有人声，但那样白白耗掉重试次数。先弄清格式，再改程序。
+
+### 打开
+
+设置页「识别」卡里打开，或者在配置里写 `"ai": {"enabled": true}`。守护进程盯着配置文件，不用重启。
+
+打开前，守护进程先查开着的本机步骤要用的程序和模型在不在。缺哪个，运维页上写哪个，守护进程不去要活，每 60 秒再查一次。所以模型可以先打开、后下载，下好就接着做。
+
+### 出错怎么办
+
+出错分两类，处理不同。
+
+**这一条录音的问题**，记成「识别失败」：读不了录音，提供方说这份输入不行（400、413、422），子进程在这个文件上失败，模型回的不是 JSON。每条最多试 3 次，两次之间至少隔 1 小时。同一步连着两条都失败时，当成下一类，不再记。
+
+**环境的问题**，不记在录音上：程序或模型没了，llama-server 90 秒内没就绪或者起来就退出，网络断了，超时，HTTP 401、403、404、429、5xx。这一条留着，等 60 秒再试，之后每次翻倍，最多 10 分钟。服务端给了 `Retry-After` 就按它等。运维页上写着原因。
+
+这样一次配置失误（key 填错、模型没下好）不会把整批积压的重试次数用光。
+
+`daemon.log` 里每小时有一行小结，写处理了几条、几条没有人声、几条无意义、几条出错，以及平均每条几秒。
+
+### 本机和云端之间切换
+
+识别和提取各选各的，改设置页「识别」卡里的下拉，或者改配置里的 `asr.provider` 和 `text.provider`。守护进程盯着文件，不用重启。
+
+- 换到云端要填 `baseUrl`、`model` 和 `apiKey`，各家要加的 `extraBody` 见 [configuration.md](configuration.md)。
+- 云端识别和提取会把每段录音或转写发给第三方。本机的不出这台机器。
+- 只改识别时，llama-server 留着不动。把提取从本机换到云端时，llama-server 退出，内存还回来。
+- 已经识别好的录音不重做。还没做的，按新设置从新到旧接着做。
+- 在设置页改 `ai` 时，api 会清掉识别失败的记录，让它们按新设置重做。手改配置文件的话，要重启 api 才清。
+
 ## 卸
 
 ```bash
@@ -317,6 +410,99 @@ infra/install.sh ~/OpenHeard/openheard.config.json
 
 The `-wal` and `-shm` files belong to the old database and do not match the
 one restored.
+
+## Speech recognition (optional)
+
+Recognition runs inside the daemon, not as another service. Off by default. For local recognition, install the programs, download the models, then turn it on. For cloud recognition, go straight to "Switching between local and cloud".
+
+### Install the programs
+
+```bash
+brew install whisper-cpp llama.cpp
+```
+
+`/opt/homebrew/bin` then holds `whisper-cli`, `whisper-vad-speech-segments` and `llama-server`. The versions checked are whisper.cpp 1.9.4 and llama.cpp 0.5.0 (build 11146).
+
+### Download the models
+
+**Downloading is your step. The program never downloads anything.** Put the models in `models/` next to the config file, which is where the default paths point.
+
+| File | Size | sha256 |
+|---|---|---|
+| `ggml-large-v3-turbo-q5_0.bin` (recognition) | 574,041,195 bytes | `394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2` |
+| `ggml-silero-v5.1.2.bin` (speech detection) | 885,098 bytes | `29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf` |
+| `Qwen3-4B-Instruct-2507-Q4_K_M.gguf` (extraction) | 2,497,281,120 bytes | `3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597` |
+
+Download from ModelScope, which is reachable from China:
+
+```bash
+mkdir -p ~/OpenHeard/models && cd ~/OpenHeard/models
+curl -L -O https://www.modelscope.cn/models/viggocx/whisper.cpp/resolve/master/ggml-large-v3-turbo-q5_0.bin
+curl -L -O https://www.modelscope.cn/models/ggml-org/whisper-vad/resolve/master/ggml-silero-v5.1.2.bin
+curl -L -O https://www.modelscope.cn/models/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/master/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+shasum -a 256 ggml-large-v3-turbo-q5_0.bin ggml-silero-v5.1.2.bin Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+```
+
+The values `shasum` prints must match the table. If they do not, delete the file and download it again.
+
+The three files add up to about 3.1 GB. The mini had only 13 GiB free when measured, so check before downloading.
+
+`viggocx/whisper.cpp` is a third-party mirror of `ggerganov/whisper.cpp` with the same sha256 as upstream; the official repository is not on ModelScope. Qwen3-4B-Instruct-2507 is Apache-2.0. The lmstudio-community copy of the same name has a different sha256, so if you use it, go by the hash of the file you downloaded.
+
+### Before turning it on, compare one real speech-detection run
+
+The program reads the output of `whisper-vad-speech-segments`. The format comes from the upstream source and **has not been checked on the mini with the real model**. After downloading the models and before turning recognition on, run it once by hand and compare it with the format below:
+
+```bash
+cd ~/OpenHeard
+whisper-vad-speech-segments -vm models/ggml-silero-v5.1.2.bin -f recordings/<a clip with speech>.wav -vt 0.5 -np
+```
+
+Expected output:
+
+```
+Detected 2 speech segments:
+Speech segment 0: start = 10.00, end = 150.00
+Speech segment 1: start = 180.00, end = 250.00
+```
+
+Check three things:
+
+1. The first line is `Detected N speech segments:`, where N is the segment count.
+2. Exactly N lines follow, each `Speech segment i: start = T0, end = T1`.
+3. The time unit is hundredths of a second. For a 3 second clip with speech all the way through, the values are around 300, not 3.
+
+Then run a roughly 1 second empty key-up and expect `Detected 0 speech segments:` on the first line.
+
+If anything differs, do not turn recognition on. On output that does not match, the program reports a recognition failure and never treats it as no speech, but that burns retries for nothing. Settle the format first, then fix the program.
+
+### Turning it on
+
+Switch it on in the 识别 card on the settings page, or write `"ai": {"enabled": true}` in the config. The daemon watches the config file, so no restart is needed.
+
+Before it starts, the daemon checks that the programs and models of the enabled local steps exist. For anything missing, the ops page names it, the daemon does not ask for work, and it checks again every 60 seconds. So you may turn it on first and download later; it carries on once the files are there.
+
+### When something goes wrong
+
+Failures come in two kinds and are handled differently.
+
+**A problem with this recording** is recorded as "识别失败" (recognition failed): the recording cannot be read, the provider says this input is bad (400, 413, 422), a child process fails on this file, or the model's reply is not JSON. Each recording is tried at most 3 times, at least 1 hour apart. When two recordings in a row fail at the same step, it counts as the second kind and is not recorded.
+
+**A problem with the environment** is never recorded on the recording: a program or model is gone, llama-server is not ready within 90 seconds or exits on start, the network is down, a timeout, or HTTP 401, 403, 404, 429 or 5xx. The recording is kept and retried after 60 seconds, doubling each time up to 10 minutes. A `Retry-After` from the server is honoured. The ops page shows the reason.
+
+So one configuration mistake, a wrong key or a model not yet downloaded, cannot use up the retries of the whole backlog.
+
+`daemon.log` gets a summary line every hour: how many were processed, how many had no speech, how many were meaningless, how many failed, and the mean seconds per item.
+
+### Switching between local and cloud
+
+Recognition and extraction are chosen separately. Change the dropdowns in the 识别 card on the settings page, or `asr.provider` and `text.provider` in the config. The daemon watches the file, so no restart is needed.
+
+- Switching to cloud needs `baseUrl`, `model` and `apiKey`. The `extraBody` each vendor needs is in [configuration.md](configuration.md).
+- Cloud recognition and extraction send each recording or transcript to a third party. The local ones never leave the machine.
+- Changing only recognition leaves llama-server alone. Switching extraction from local to cloud stops llama-server and returns its memory.
+- Recordings already recognised are not redone. Those not yet done carry on with the new setting, newest first.
+- When `ai` is changed on the settings page, the api clears the recognition-failed records so they are redone with the new setting. After a hand edit of the config file, the api has to restart before it clears them.
 
 ## Uninstalling
 
