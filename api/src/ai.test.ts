@@ -155,6 +155,32 @@ describe('writeAiResults', () => {
     assert.equal(row.meaningless, 1);
   });
 
+  // daemon 的 worker 依赖这一点：提取失败时带着前面做完的 VAD 和转写一起推上来，
+  // 重试成功之前这几列都在，成功之后错误才清掉
+  it('出错的行保留已做完的部分，后来成功才清错误', () => {
+    const { db } = setup([fm('a', NOW - 100)]);
+    writeAiResults(db, [{ activityId: 'a', hasSpeech: true, transcript: '你好', asrModel: 'whisper', error: '不是 JSON' }], NOW);
+    const failed = db.prepare('SELECT * FROM activity_ai').get() as Record<string, unknown>;
+    assert.equal(failed.has_speech, 1);
+    assert.equal(failed.transcript, '你好');
+    assert.equal(failed.asr_model, 'whisper');
+    assert.equal(failed.error, '不是 JSON');
+    assert.equal(failed.meaningless, 0);
+
+    // 再失败一次，这次什么都没带：前面的还在，次数加一
+    writeAiResults(db, [{ activityId: 'a', error: '还是不是 JSON' }], NOW + 4000);
+    const again = db.prepare('SELECT * FROM activity_ai').get() as Record<string, unknown>;
+    assert.equal(again.transcript, '你好');
+    assert.equal(again.attempts, 2);
+
+    writeAiResults(db, [{ activityId: 'a', category: 'qso', fields: { call: 'BD7ABC' }, textModel: 'qwen' }], NOW + 8000);
+    const ok = db.prepare('SELECT * FROM activity_ai').get() as Record<string, unknown>;
+    assert.equal(ok.error, null);
+    assert.equal(ok.attempts, 3);
+    assert.equal(ok.transcript, '你好');
+    assert.equal(ok.text_model, 'qwen');
+  });
+
   it('出错的行不算无意义', () => {
     const { db } = setup([fm('a', NOW - 100)]);
     writeAiResults(db, [{ activityId: 'a', hasSpeech: false, error: 'x' }], NOW);

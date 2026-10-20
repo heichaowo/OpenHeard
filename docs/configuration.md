@@ -103,7 +103,7 @@ openssl rand -hex 32                            # sessionSecret 和 ingestToken
 | `asr.provider` | `local` | `local`（whisper-cli）、`openai-transcriptions`、`chat-audio` 或 `off` |
 | `asr.binPath` | `/opt/homebrew/bin/whisper-cli` | 只对 `local` 有用 |
 | `asr.modelPath` | `./models/ggml-large-v3-turbo-q5_0.bin` | 只对 `local` 有用 |
-| `asr.language` | `zh` | |
+| `asr.language` | `zh` | 识别开着时不能是空的 |
 | `asr.prompt` | 空 | 提示词，见下 |
 | `asr.baseUrl`、`asr.model`、`asr.apiKey` | 空 | 云端必填 |
 | `asr.extraBody` | `{}` | 云端请求体，见下 |
@@ -334,7 +334,7 @@ The defaults below apply when a key is absent. Secrets have no default.
 | `asr.provider` | `local` | `local` (whisper-cli), `openai-transcriptions`, `chat-audio` or `off` |
 | `asr.binPath` | `/opt/homebrew/bin/whisper-cli` | Used by `local` only |
 | `asr.modelPath` | `./models/ggml-large-v3-turbo-q5_0.bin` | Used by `local` only |
-| `asr.language` | `zh` | |
+| `asr.language` | `zh` | Cannot be empty while recognition is on |
 | `asr.prompt` | empty | The initial prompt, below |
 | `asr.baseUrl`, `asr.model`, `asr.apiKey` | empty | Required for the cloud providers |
 | `asr.extraBody` | `{}` | Cloud request body, below |
