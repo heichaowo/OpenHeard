@@ -6,7 +6,8 @@
 // 但只在忽略过的行里聚，不和前两档混在一起。混在一起聚会让同一次入库操作
 // 因为旁边多了一条未结算的行而在两次请求之间换 id。
 import { channelKey, clusterActivities } from './cluster.ts';
-import { draftFromCluster } from './draft.ts';
+import { isMeaninglessConversation } from './ai.ts';
+import { draftWithAi } from './draft.ts';
 import type { StationDefaults } from './draft.ts';
 import type { Activity, Cluster, Conversation, ConversationStatus, HeardItem } from './types.ts';
 
@@ -74,6 +75,7 @@ export interface ConversationOpts {
 export function toConversation(cluster: Cluster, status: ConversationStatus, opts: ConversationOpts = {}): Conversation {
   const first = cluster.activities[0]!;
   const needsDraft = status === 'pending' || status === 'unlogged' || status === 'overheard';
+  const drafted = needsDraft ? draftWithAi(cluster, opts.defaults, opts.known) : undefined;
   return {
     id: cluster.id,
     startAt: cluster.startAt,
@@ -83,7 +85,9 @@ export function toConversation(cluster: Cluster, status: ConversationStatus, opt
     status,
     activities: cluster.activities as HeardItem[],
     qso: opts.qso,
-    draft: needsDraft ? draftFromCluster(cluster, opts.defaults, opts.known) : undefined,
+    draft: drafted?.draft,
+    meaningless: isMeaninglessConversation(status, cluster.activities as HeardItem[]),
+    ...(drafted !== undefined && drafted.aiFilled.length > 0 ? { aiFilled: drafted.aiFilled } : {}),
   };
 }
 

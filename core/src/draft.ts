@@ -1,6 +1,7 @@
+import { aiFill, aiMapOf, applyAiFill } from './ai.ts';
 import { bandOf, modeOf } from './band.ts';
 import { callFor } from './known-calls.ts';
-import type { Cluster, Qso, QsoDraft } from './types.ts';
+import type { Cluster, HeardItem, Qso, QsoDraft } from './types.ts';
 
 /** 本台的固定信息。属于部署配置，不是设计。 */
 export interface StationDefaults {
@@ -45,6 +46,20 @@ export function draftFromCluster(
   defaults: StationDefaults = {},
   known?: Map<number, string>,
 ): QsoDraft {
+  return draftWithAi(cluster, defaults, known).draft;
+}
+
+/**
+ * 和 draftFromCluster 一样，另外说明哪几个字段是 AI 填的。
+ *
+ * AI 只补现有规则留空的字段：呼号取不到、QTH 和备注没人填、报告还是缺省的 59。
+ * 成员上挂着 ai 才有东西可补，没有就和以前完全一样。
+ */
+export function draftWithAi(
+  cluster: Cluster,
+  defaults: StationDefaults = {},
+  known?: Map<number, string>,
+): { draft: QsoDraft; aiFilled: QsoField[] } {
   const first = cluster.activities[0];
   const other =
     cluster.activities.find((a) => !a.mine && a.callsign) ??
@@ -55,7 +70,7 @@ export function draftFromCluster(
     cluster.activities.find((a) => a.freqMhz !== undefined)?.freqMhz ??
     defaults.networkFreqMhz;
 
-  return {
+  const base: QsoDraft = {
     call: other?.callsign ?? (known === undefined ? undefined : callFor(known, other?.dmrId)),
     startAt: cluster.startAt,
     freqMhz,
@@ -71,6 +86,9 @@ export function draftFromCluster(
     myHeightM: defaults.myHeightM,
     clusterId: cluster.id,
   };
+  const members = cluster.activities as HeardItem[];
+  const { draft, filled } = applyAiFill(base, aiFill(members, aiMapOf(members), defaults.myCallsign));
+  return { draft, aiFilled: filled };
 }
 
 /** 还缺哪些必填字段。空数组表示可以直接提升。 */

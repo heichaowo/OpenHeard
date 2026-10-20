@@ -5,6 +5,12 @@
 
 export {
   adifFile,
+  aiDefaults,
+  aiFill,
+  applyAiFill,
+  mapDefaults,
+  resolveAiConfig,
+  resolveMapConfig,
   channelKey,
   channelLabel,
   checkQueries,
@@ -34,6 +40,10 @@ export {
 
 export type {
   Activity,
+  ActivityAi,
+  AiConfig,
+  AiFields,
+  MapConfig,
   Channel,
   Cluster,
   Conversation,

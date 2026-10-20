@@ -1,5 +1,6 @@
 // 纯类型。不依赖框架、数据库和 HTTP。
 // 字段取自 specs/openheard.md。
+import type { QsoField } from './draft.ts';
 
 /** 采集来源。决定这条记录能带哪些字段。 */
 export type Origin = 'brandmeister' | 'sdr-fm' | 'sdr-dmr';
@@ -93,6 +94,8 @@ export type QsoDraft = Partial<Omit<Qso, 'id' | 'createdAt'>>;
 export interface PendingItem {
   cluster: Cluster;
   draft: QsoDraft;
+  /** 草稿里哪几个字段是 AI 填的。 */
+  aiFilled?: QsoField[];
 }
 
 /**
@@ -108,8 +111,35 @@ export interface ClusterPick {
 /** 对话的五档。 */
 export type ConversationStatus = 'pending' | 'unlogged' | 'logged' | 'ignored' | 'overheard';
 
-/** 收听记录里的一行。结算过的带上结算成了什么。 */
-export type HeardItem = Activity & { settled?: 'logged' | 'ignored' };
+/** 文字模型从转写里提取出的字段，全部是候选，人确认才算数。 */
+export interface AiFields {
+  /** 说话的人自己的呼号。 */
+  call?: string;
+  /** 说话的人叫的对方呼号。 */
+  calledCall?: string;
+  qth?: string;
+  rst?: string;
+  device?: string;
+  antenna?: string;
+  power?: string;
+  height?: string;
+}
+
+/** 一次发射的识别结果，人工判定已经算进 meaningless。 */
+export interface ActivityAi {
+  hasSpeech?: boolean;
+  transcript?: string;
+  category?: 'qso' | 'test' | 'noise';
+  fields?: AiFields;
+  error?: string;
+  /** 生效的判定：人工判定优先，没有就用 AI 的。 */
+  meaningless: boolean;
+  /** 人工判定，有才有。 */
+  verdict?: 'meaningless' | 'keep';
+}
+
+/** 收听记录里的一行。结算过的带上结算成了什么，模拟侧的发射可能带识别结果。 */
+export type HeardItem = Activity & { settled?: 'logged' | 'ignored'; ai?: ActivityAi };
 
 /**
  * 收听页列出的一次对话。取代待确认队列的 Cluster，五档共用同一个形状，
@@ -132,4 +162,8 @@ export interface Conversation {
   qso?: { id: string; call: string; rstSent: string; rstRcvd: string };
   /** 只在没结算时才有：待确认、未入库、旁听共用同一个草稿构建方式。 */
   draft?: QsoDraft;
+  /** 每次发射都无意义才算。已入库的永远不是：人已经看过了。 */
+  meaningless: boolean;
+  /** 草稿里哪几个字段是 AI 填的。 */
+  aiFilled?: QsoField[];
 }
