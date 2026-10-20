@@ -17,8 +17,13 @@ import { MAX_CHANNELS, MAX_SPAN_HZ, bandOf, planTuning } from "@core";
 import { api, errorText } from "../api";
 import type { Settings } from "../api";
 import { AsyncContent } from "../components/AsyncContent";
+import { MapPickButton } from "../components/MapPickButton";
 import { PageHeader } from "../components/PageHeader";
 import { useStore } from "../store";
+import { AiCard } from "./settings/AiCard";
+import { MapCard } from "./settings/MapCard";
+import { NO_SECRET, toBody, toForm } from "./settings/model";
+import type { FormValues, SecretState } from "./settings/model";
 
 const filled = (v: unknown) =>
   v !== undefined &&
@@ -47,7 +52,7 @@ const freqsOf = (rows: ChannelRow[] | undefined) =>
  * 表单上（隐藏但没卸载），但不该拦下和这一卡无关的保存。
  */
 const checkChannels =
-  (form: FormInstance<Settings>, enabled: boolean) =>
+  (form: FormInstance<FormValues>, enabled: boolean) =>
   async (_: unknown, rows?: ChannelRow[]) => {
     if (!enabled) return;
     // enabled 本身是开关，不算「这一卡填过东西」。
@@ -104,8 +109,12 @@ const MODES = [
 
 export default function SettingsPage() {
   const { message } = App.useApp();
-  const { refresh } = useStore();
-  const [form] = Form.useForm<Settings>();
+  const { refresh, map } = useStore();
+  const [form] = Form.useForm<FormValues>();
+  // 密钥框不进表单：框里敲错一个字再删掉，表单会把空串当成「清掉」发出去。见 settings/secret.tsx。
+  const [secrets, setSecrets] = useState({ asr: NO_SECRET, text: NO_SECRET, amap: NO_SECRET });
+  const setSecret = (k: "asr" | "text" | "amap", v: SecretState) =>
+    setSecrets((m) => ({ ...m, [k]: v }));
   const [settings, setSettings] = useState<Settings | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
@@ -127,12 +136,13 @@ export default function SettingsPage() {
     | boolean
     | undefined;
   const bmOn = bmEnabledField !== false;
+  const aiOn = (Form.useWatch(["ai", "enabled"], form) as boolean | undefined) === true;
 
   const load = useCallback(async () => {
     try {
       const s = await api.settings();
       setSettings(s);
-      form.setFieldsValue(s);
+      form.setFieldsValue(toForm(s));
       setError(undefined);
     } catch (e) {
       setError(errorText(e));
@@ -151,10 +161,20 @@ export default function SettingsPage() {
     try {
       // 关着的那张卡，body 里 Form.Item 藏着没卸载：getFieldsValue(true) 照样
       // 把它的值带上，原样存回去。onFinish 给的 values 只有校验过的字段，不够全。
-      const values = form.getFieldsValue(true) as Settings;
-      const saved = await api.saveSettings(values);
+      const values = form.getFieldsValue(true) as FormValues;
+      let body: Settings;
+      try {
+        body = toBody(values, secrets);
+      } catch {
+        // 写错的 JSON 在输入框里会当场标红；走到这里是写错之后又把那一块收起来了。
+        message.error("识别或提取的额外参数不是合法的 JSON");
+        return;
+      }
+      const saved = await api.saveSettings(body);
       setSettings(saved);
-      form.setFieldsValue(saved);
+      form.setFieldsValue(toForm(saved));
+      // 存下去的密钥框清空，页面上改显示「已设置」。
+      setSecrets({ asr: NO_SECRET, text: NO_SECRET, amap: NO_SECRET });
       message.success("存好了，守护进程会自己跟上");
       // 本台信息和信道表是全局 store 里的，存完要重拉。
       await refresh();
@@ -339,6 +359,17 @@ export default function SettingsPage() {
             </div>
           </Card>
 
+          <AiCard
+            form={form}
+            on={aiOn}
+            keysSet={{
+              asr: settings?.ai.asr.apiKeySet === true,
+              text: settings?.ai.text.apiKeySet === true,
+            }}
+            secrets={secrets}
+            onSecret={setSecret}
+          />
+
           <Card size="small" title="本台" style={{ marginBottom: 16 }}>
             <Space wrap align="start">
               <Form.Item name={["station", "myCallsign"]} label="呼号">
@@ -370,7 +401,19 @@ export default function SettingsPage() {
                 <InputNumber style={{ width: 160 }} step={0.0125} />
               </Form.Item>
             </Space>
+            <MapPickButton
+              provider={map.provider}
+              gridName={["station", "myGridsquare"]}
+              qthName={["station", "myQth"]}
+            />
           </Card>
+
+          <MapCard
+            form={form}
+            codeSet={settings?.map.amapSecurityCodeSet === true}
+            secret={secrets.amap}
+            onSecret={(v) => setSecret("amap", v)}
+          />
 
           <Card size="small" title="频谱表" style={{ marginBottom: 16 }}>
             <Typography.Paragraph type="secondary">

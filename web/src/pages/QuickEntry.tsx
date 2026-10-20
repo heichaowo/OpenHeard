@@ -15,6 +15,7 @@ import {
 } from 'antd'
 import { errorText } from '../api'
 import { CallInput } from '../components/CallInput'
+import { MapPickButton } from '../components/MapPickButton'
 import { PageHeader } from '../components/PageHeader'
 import type { Dayjs } from 'dayjs'
 import { Grid, TimePicker } from 'antd'
@@ -80,7 +81,7 @@ function ZonedDateTime({ value, onChange }: { value?: Dayjs; onChange?: (v: Dayj
 
 export default function QuickEntry() {
   const { message } = App.useApp()
-  const { station, channels, qsos, addQso, removeQso } = useStore()
+  const { station, channels, qsos, addQso, removeQso, map } = useStore()
   const [form] = Form.useForm<FormValues>()
   const [busy, setBusy] = useState(false)
   // 刚记下的那一条，撑到下一次入库或离开这页（组件卸载状态就没了）。
@@ -276,6 +277,7 @@ export default function QuickEntry() {
             QTH 和网格来自 {time.at(recalledAt)} 那次通联，改掉就是。
           </Typography.Paragraph>
         )}
+        <MapPickButton provider={map.provider} gridName="gridsquare" qthName="qth" />
 
         <Divider titlePlacement="left" plain>
           本台

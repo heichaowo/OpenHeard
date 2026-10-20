@@ -29,6 +29,22 @@ const ORIGINS: Record<string, string> = {
   "sdr-dmr": "数字接收机",
 };
 
+const VAD_LABEL: Record<Ops["ai"]["vad"], string> = {
+  local: "本机",
+  off: "关闭，每段录音都送去转写",
+};
+const ASR_LABEL: Record<Ops["ai"]["asrProvider"], string> = {
+  local: "本机 whisper-cli",
+  "openai-transcriptions": "云端转写接口",
+  "chat-audio": "云端对话式音频接口",
+  off: "关闭",
+};
+const TEXT_LABEL: Record<Ops["ai"]["textProvider"], string> = {
+  local: "本机 llama-server",
+  "openai-chat": "云端对话接口",
+  off: "关闭",
+};
+
 const bytes = (n?: number) =>
   n === undefined ? "—" : `${(n / 1e9).toFixed(1)} GB`;
 
@@ -335,6 +351,62 @@ export default function OpsPage() {
                       </Descriptions.Item>
                     </Descriptions>
                   ))}
+                </>
+              )}
+            </Card>
+
+            {/* 识别队列：关着不算健康问题，这里说明；开着时看队列有没有在走。 */}
+            <Card size="small" title="识别" style={{ marginBottom: 16 }}>
+              {!ops.ai.enabled ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="识别关着。设置页打开开关、存了设置，才会开始识别录音。"
+                />
+              ) : (
+                <>
+                  {ops.ai.worker !== undefined && !ops.ai.worker.ok && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message="识别暂停着"
+                      description={`${ops.ai.worker.message}（${ago(ops.now, ops.ai.worker.at)}）`}
+                    />
+                  )}
+                  <Descriptions size="small" column={1} bordered styles={LABEL_NOWRAP}>
+                    <Descriptions.Item label="人声判断">{VAD_LABEL[ops.ai.vad]}</Descriptions.Item>
+                    <Descriptions.Item label="识别">{ASR_LABEL[ops.ai.asrProvider]}</Descriptions.Item>
+                    <Descriptions.Item label="提取">{TEXT_LABEL[ops.ai.textProvider]}</Descriptions.Item>
+                    <Descriptions.Item label="待识别">{ops.ai.todo} 段</Descriptions.Item>
+                    <Descriptions.Item label="最近 24 小时识别">{ops.ai.doneLast24h} 段</Descriptions.Item>
+                    <Descriptions.Item label="无意义">
+                      {ops.ai.meaningless} 段
+                      <Typography.Text type="secondary"> （收听页「无意义」档里的那些）</Typography.Text>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="守护进程">
+                      {ops.ai.worker === undefined ? (
+                        <Typography.Text type="secondary">还没有报告</Typography.Text>
+                      ) : (
+                        <>
+                          {ops.ai.worker.ok ? <Tag color="green">正常</Tag> : <Tag color="orange">暂停</Tag>}
+                          <Typography.Text type="secondary">
+                            {ops.ai.worker.message}（{ago(ops.now, ops.ai.worker.at)}）
+                          </Typography.Text>
+                        </>
+                      )}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="最近一次出错">
+                      {ops.ai.lastError === undefined ? (
+                        "没有"
+                      ) : (
+                        <>
+                          <span className="mono">{ops.ai.lastError.message}</span>
+                          <Typography.Text type="secondary"> （{ago(ops.now, ops.ai.lastError.at)}）</Typography.Text>
+                        </>
+                      )}
+                    </Descriptions.Item>
+                  </Descriptions>
                 </>
               )}
             </Card>

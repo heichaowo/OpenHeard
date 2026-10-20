@@ -210,3 +210,73 @@ describe('OpsPage 的开关关着时', () => {
     expect(await screen.findByText(/BrandMeister 查询关着/)).toBeInTheDocument()
   })
 })
+
+describe('OpsPage 的识别卡', () => {
+  // 标签和值在同一行里。「识别」这个词卡片标题里也有，所以只认表格里的标签。
+  const rowOf = (label: string) =>
+    screen.getByText(label, { selector: '.ant-descriptions-item-label, .ant-descriptions-item-label *' }).closest('tr')!
+  const on = {
+    enabled: true,
+    vad: 'local' as const,
+    asrProvider: 'local' as const,
+    textProvider: 'openai-chat' as const,
+    todo: 1234,
+    doneLast24h: 56,
+    meaningless: 78,
+  }
+
+  it('关着时说明白，不摆队列数字', async () => {
+    ops.mockResolvedValue(snapshot([]))
+    mount()
+    expect(await screen.findByText(/识别关着。设置页打开开关/)).toBeInTheDocument()
+    expect(screen.queryByText('待识别')).not.toBeInTheDocument()
+  })
+
+  it('开着时：三步各用什么、队列多长、最近 24 小时做了多少、无意义多少', async () => {
+    ops.mockResolvedValue({ ...snapshot([]), ai: on })
+    mount()
+    expect(await screen.findByText('待识别')).toBeInTheDocument()
+    expect(rowOf('人声判断')).toHaveTextContent('本机')
+    expect(rowOf('识别')).toHaveTextContent('本机 whisper-cli')
+    expect(rowOf('提取')).toHaveTextContent('云端对话接口')
+    expect(rowOf('待识别')).toHaveTextContent('1234 段')
+    expect(rowOf('最近 24 小时识别')).toHaveTextContent('56 段')
+    expect(rowOf('无意义')).toHaveTextContent('78 段')
+  })
+
+  it('人声判断关着时写明后果', async () => {
+    ops.mockResolvedValue({ ...snapshot([]), ai: { ...on, vad: 'off' } })
+    mount()
+    expect(await screen.findByText('关闭，每段录音都送去转写')).toBeInTheDocument()
+  })
+
+  it('守护进程没报过：写还没有报告；报了正常：绿标签加原话', async () => {
+    ops.mockResolvedValueOnce({ ...snapshot([]), ai: on })
+    mount()
+    expect(await screen.findByText('还没有报告')).toBeInTheDocument()
+  })
+
+  it('守护进程说暂停了：整卡顶上一条警告，带原话和多久以前', async () => {
+    ops.mockResolvedValue({
+      ...snapshot([]),
+      ai: { ...on, worker: { at: now - 120, ok: false, message: '模型文件不存在：./models/ggml-silero-v5.1.2.bin' } },
+    })
+    mount()
+    expect(await screen.findByText('识别暂停着')).toBeInTheDocument()
+    expect(screen.getAllByText(/模型文件不存在/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/2 分钟前/).length).toBeGreaterThan(0)
+  })
+
+  it('最近一次出错：显示原话；没有就写没有', async () => {
+    ops.mockResolvedValueOnce({ ...snapshot([]), ai: { ...on, lastError: { at: now - 30, message: 'asr: HTTP 400' } } })
+    mount()
+    expect(await screen.findByText('asr: HTTP 400')).toBeInTheDocument()
+  })
+
+  it('最近没出错：写没有', async () => {
+    ops.mockResolvedValueOnce({ ...snapshot([]), ai: on })
+    mount()
+    expect(await screen.findByText('最近一次出错')).toBeInTheDocument()
+    expect(rowOf('最近一次出错')).toHaveTextContent('没有')
+  })
+})

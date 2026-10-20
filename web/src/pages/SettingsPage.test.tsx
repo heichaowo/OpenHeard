@@ -17,15 +17,35 @@ vi.mock('../api', async (importOriginal) => {
   return { ...real, api: { ...real.api, settings, saveSettings } }
 })
 
-const store = { refresh: vi.fn() } as unknown as Store
+const store = (map: Store['map'] = { provider: 'none' }) => ({ refresh: vi.fn(), map, station: {} }) as unknown as Store
 
-const mount = (s: Settings) => {
+/** 服务端存完回的样子：密钥不回，只回设了没有。 */
+const echo = (next: Settings): Settings => {
+  const had = (sent: string | undefined, before: boolean) => (sent === undefined ? before : sent !== '')
+  return {
+    ...next,
+    ai: {
+      ...next.ai,
+      asr: { ...next.ai.asr, apiKey: undefined, apiKeySet: had(next.ai.asr.apiKey, current.ai.asr.apiKeySet === true) },
+      text: { ...next.ai.text, apiKey: undefined, apiKeySet: had(next.ai.text.apiKey, current.ai.text.apiKeySet === true) },
+    },
+    map: {
+      ...next.map,
+      amapSecurityCode: undefined,
+      amapSecurityCodeSet: had(next.map.amapSecurityCode, current.map.amapSecurityCodeSet === true),
+    },
+  }
+}
+let current: Settings
+
+const mount = (s: Settings, map?: Store['map']) => {
+  current = s
   settings.mockResolvedValue(s)
-  saveSettings.mockImplementation(async (next: Settings) => next)
+  saveSettings.mockImplementation(async (next: Settings) => echo(next))
   return render(
     <Preferences>
       <App>
-        <StoreContext value={store}>
+        <StoreContext value={store(map)}>
           <SettingsPage />
         </StoreContext>
       </App>
@@ -292,3 +312,251 @@ describe('SettingsPage 的两个开关', () => {
   })
 })
 
+
+const saveBtn = () => screen.getByRole('button', { name: /^保\s*存$/ })
+const sentBody = () => saveSettings.mock.calls[0]![0] as Settings
+
+// 云端识别：key 已经存着。页面只知道设了没有。
+const cloud: Settings = {
+  ...base,
+  ai: {
+    ...aiDefaults,
+    enabled: true,
+    asr: {
+      ...aiDefaults.asr,
+      provider: 'chat-audio',
+      baseUrl: 'https://api.xiaomimimo.com/v1',
+      model: 'mimo-v2.5-asr',
+      extraBody: { thinking: { type: 'disabled' } },
+      apiKeySet: true,
+    },
+    text: { ...aiDefaults.text, provider: 'off' },
+  },
+}
+
+describe('SettingsPage 的识别卡', () => {
+  it('缺省关着，说明原来的设置都留着', async () => {
+    mount(base)
+    expect(await screen.findByText('识别关着。打开后才能改，原来的设置都留着。')).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: '识别开关' })).not.toBeChecked()
+  })
+
+  it('开着时分人声判断、识别、提取三块，提示词旁写明利弊', async () => {
+    mount(cloud)
+    expect(await screen.findByText('人声判断')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '识别' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '提取' })).toBeInTheDocument()
+    expect(screen.getByLabelText('提示词')).toBeInTheDocument()
+    expect(screen.getByText(/CQTEST 会被转成「QQ赛」/)).toBeInTheDocument()
+    expect(screen.getByLabelText('识别 模型名')).toHaveValue('mimo-v2.5-asr')
+  })
+
+  it('本机识别显示程序和模型路径，云端显示地址、模型、key', async () => {
+    mount({ ...cloud, ai: { ...cloud.ai, asr: { ...cloud.ai.asr, provider: 'local' } } })
+    expect(await screen.findByLabelText('识别 程序路径')).toHaveValue('/opt/homebrew/bin/whisper-cli')
+    expect(screen.queryByLabelText('识别 接口地址')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('识别 key')).not.toBeInTheDocument()
+  })
+
+  it('已经设了 key：框是空的，旁边写已设置，不会把 key 读出来', async () => {
+    mount(cloud)
+    const key = await screen.findByLabelText('识别 key')
+    expect(key).toHaveValue('')
+    expect(screen.getAllByText('已设置').length).toBeGreaterThan(0)
+  })
+
+  // 密钥框不是表单字段，原样 PUT 回去会把它清掉。
+  it('没碰 key 框就保存：不带 apiKey，也不带 apiKeySet', async () => {
+    mount(cloud)
+    await screen.findByLabelText('识别 key')
+    await userEvent.type(screen.getByLabelText('QTH'), '成都')
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    const asr = sentBody().ai.asr
+    expect('apiKey' in asr).toBe(false)
+    expect('apiKeySet' in asr).toBe(false)
+    expect('apiKey' in sentBody().ai.text).toBe(false)
+    expect('apiKeySet' in sentBody().ai.text).toBe(false)
+    expect('amapSecurityCode' in sentBody().map).toBe(false)
+    expect('amapSecurityCodeSet' in sentBody().map).toBe(false)
+  })
+
+  it('敲了一个字又删掉再保存：当作没碰，存着的 key 不清', async () => {
+    mount(cloud)
+    const key = await screen.findByLabelText('识别 key')
+    await userEvent.type(key, 'x')
+    await userEvent.clear(key)
+    await userEvent.type(screen.getByLabelText('QTH'), '成都')
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect('apiKey' in sentBody().ai.asr).toBe(false)
+  })
+
+  it('框里有字才发；存完框清空，仍显示已设置', async () => {
+    mount(cloud)
+    const key = await screen.findByLabelText('识别 key')
+    await userEvent.type(key, 'sk-new')
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(sentBody().ai.asr.apiKey).toBe('sk-new')
+    await waitFor(() => expect(screen.getByLabelText('识别 key')).toHaveValue(''))
+    expect(screen.getAllByText('已设置').length).toBeGreaterThan(0)
+  })
+
+  it('只有点「清除」才发空串，存完显示还没设', async () => {
+    mount(cloud)
+    await screen.findByLabelText('识别 key')
+    await userEvent.click(screen.getByText('清除'))
+    expect(screen.getByText('保存后清除')).toBeInTheDocument()
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(sentBody().ai.asr.apiKey).toBe('')
+    await waitFor(() => expect(screen.queryByText('已设置')).not.toBeInTheDocument())
+    expect(screen.getByText(/还没设|只写不读/)).toBeInTheDocument()
+  })
+
+  it('点了清除又反悔：不发', async () => {
+    mount(cloud)
+    await screen.findByLabelText('识别 key')
+    await userEvent.click(screen.getByText('清除'))
+    await userEvent.click(screen.getByText('不清除了'))
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect('apiKey' in sentBody().ai.asr).toBe(false)
+  })
+
+  it('额外参数是 JSON 文本：存时解析成对象带上', async () => {
+    mount(cloud)
+    const extra = await screen.findByLabelText('识别 额外参数')
+    expect(extra).toHaveValue('{"thinking":{"type":"disabled"}}')
+    await userEvent.clear(extra)
+    await userEvent.click(extra)
+    await userEvent.paste('{"max_completion_tokens":512}')
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(sentBody().ai.asr.extraBody).toEqual({ max_completion_tokens: 512 })
+  })
+
+  it('额外参数不是 JSON 对象：当场说，也存不了', async () => {
+    mount(cloud)
+    const extra = await screen.findByLabelText('识别 额外参数')
+    await userEvent.clear(extra)
+    await userEvent.click(extra)
+    await userEvent.paste('[1,2]')
+    await userEvent.click(saveBtn())
+
+    expect(await screen.findByText(/要写成 JSON 对象/)).toBeInTheDocument()
+    expect(saveSettings).not.toHaveBeenCalled()
+  })
+
+  it('云端要填地址和模型名：开着时必填', async () => {
+    mount({ ...cloud, ai: { ...cloud.ai, asr: { ...cloud.ai.asr, baseUrl: '' } } })
+    await screen.findByLabelText('识别 key')
+    await userEvent.click(saveBtn())
+    expect(await screen.findByText('地址必填')).toBeInTheDocument()
+    expect(saveSettings).not.toHaveBeenCalled()
+  })
+
+  it('识别改成关闭：提取跟着关，提取的云端和本机选项都选不了', async () => {
+    mount({ ...cloud, ai: { ...cloud.ai, text: { ...cloud.ai.text, provider: 'local' } } })
+    await userEvent.click(await screen.findByRole('combobox', { name: '识别方式' }))
+    const option = (await screen.findAllByTitle('关闭')).find((e) => e.classList.contains('ant-select-item-option'))
+    await userEvent.click(option!)
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(sentBody().ai.asr.provider).toBe('off')
+    expect(sentBody().ai.text.provider).toBe('off')
+    expect(screen.getByText('识别关着，提取也只能关。')).toBeInTheDocument()
+  })
+})
+
+describe('SettingsPage 的地图卡', () => {
+  it('三选一：高德、OpenStreetMap、不用地图', async () => {
+    mount(base)
+    expect(await screen.findByRole('radio', { name: '高德' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'OpenStreetMap' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '不用地图' })).toBeChecked()
+  })
+
+  it('选 OpenStreetMap：说国内可能打不开，不要 key', async () => {
+    mount(base)
+    await userEvent.click(await screen.findByRole('radio', { name: 'OpenStreetMap' }))
+    expect(screen.getByText(/国内可能打不开/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('高德 key')).not.toBeInTheDocument()
+  })
+
+  it('选高德：要 key 和安全密钥，写明去哪申请', async () => {
+    mount(base)
+    await userEvent.click(await screen.findByRole('radio', { name: '高德' }))
+    expect(screen.getByLabelText('高德 key')).toBeInTheDocument()
+    expect(screen.getByLabelText('高德安全密钥')).toHaveValue('')
+    expect(screen.getByText(/console\.amap\.com/)).toBeInTheDocument()
+  })
+
+  it('高德 key 必填', async () => {
+    mount(base)
+    await userEvent.click(await screen.findByRole('radio', { name: '高德' }))
+    await userEvent.click(saveBtn())
+    expect(await screen.findByText('key 必填')).toBeInTheDocument()
+    expect(saveSettings).not.toHaveBeenCalled()
+  })
+
+  const amap: Settings = { ...base, map: { provider: 'amap', amapKey: 'pubkey', amapSecurityCodeSet: true } }
+
+  it('高德 key 是公开的照常显示；安全密钥只显示已设置，没碰就不发', async () => {
+    mount(amap)
+    expect(await screen.findByLabelText('高德 key')).toHaveValue('pubkey')
+    expect(screen.getByLabelText('高德安全密钥')).toHaveValue('')
+    await userEvent.type(screen.getByLabelText('QTH'), '成都')
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(sentBody().map).toEqual({ provider: 'amap', amapKey: 'pubkey' })
+  })
+
+  it('安全密钥敲了字才发', async () => {
+    mount(amap)
+    await userEvent.type(await screen.findByLabelText('高德安全密钥'), 'secret123')
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(sentBody().map.amapSecurityCode).toBe('secret123')
+    expect('amapSecurityCodeSet' in sentBody().map).toBe(false)
+  })
+
+  it('安全密钥敲了又删：不发；点清除：发空串', async () => {
+    mount(amap)
+    const box = await screen.findByLabelText('高德安全密钥')
+    await userEvent.type(box, 'a')
+    await userEvent.clear(box)
+    await userEvent.click(saveBtn())
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect('amapSecurityCode' in sentBody().map).toBe(false)
+
+    saveSettings.mockClear()
+    await userEvent.click(await screen.findByText('清除'))
+    await userEvent.click(saveBtn())
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(sentBody().map.amapSecurityCode).toBe('')
+  })
+})
+
+describe('SettingsPage 本台网格旁的地图按钮', () => {
+  it('没选地图：按钮禁用', async () => {
+    mount(base)
+    const btn = await screen.findByRole('button', { name: /在地图上选/ })
+    expect(btn).toBeDisabled()
+  })
+
+  it('选了 OpenStreetMap：按钮能点', async () => {
+    mount(base, { provider: 'osm' })
+    expect(await screen.findByRole('button', { name: /在地图上选/ })).toBeEnabled()
+  })
+})

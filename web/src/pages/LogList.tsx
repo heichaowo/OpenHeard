@@ -49,7 +49,7 @@ function download(name: string, text: string) {
 
 export default function LogList() {
   const { message, modal } = App.useApp();
-  const { qsos, editQso, removeQso, importAdif, loading, error, refresh } =
+  const { qsos, editQso, removeQso, importAdif, loading, error, refresh, map } =
     useStore();
   const wide = Grid.useBreakpoint().md ?? true;
   // 收听页的已入库行链到这里，带着 ?q=。只认初值：改搜索框不回写地址栏。
@@ -499,6 +499,7 @@ export default function LogList() {
             >
               <QsoFields
                 qsos={qsos}
+                mapProvider={map.provider}
                 recalledFrom={
                   recalledAt === undefined ? undefined : time.at(recalledAt)
                 }

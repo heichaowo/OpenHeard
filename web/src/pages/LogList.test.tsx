@@ -65,6 +65,7 @@ const mount = (
   zone?: string,
   path = '/log',
   recordings: Set<string> = new Set(),
+  map: Store['map'] = { provider: 'none' },
 ) => {
   if (zone) localStorage.setItem(ZONE_KEY, zone)
   else localStorage.removeItem(ZONE_KEY)
@@ -72,7 +73,7 @@ const mount = (
     <Preferences>
       <App>
         <MemoryRouter initialEntries={[path]}>
-          <StoreContext value={{ ...store(qsos), recordings }}>
+          <StoreContext value={{ ...store(qsos), recordings, map }}>
             <PlayerProvider>
               <LogList />
             </PlayerProvider>
@@ -136,6 +137,19 @@ describe('LogList 的时间显示', () => {
 })
 
 describe('LogList 的编辑抽屉', () => {
+  // 日志里改对方网格也能点地图。没选地图时按钮在，只是禁用。
+  it('编辑抽屉里有「在地图上选」：选了地图能点，没选禁用', async () => {
+    mount([qso()], undefined, '/log', new Set(), { provider: 'osm' })
+    await userEvent.click(button('编辑'))
+    expect(await screen.findByRole('button', { name: /在地图上选/ })).toBeEnabled()
+  })
+
+  it('没选地图：抽屉里的按钮禁用', async () => {
+    mount()
+    await userEvent.click(button('编辑'))
+    expect(await screen.findByRole('button', { name: /在地图上选/ })).toBeDisabled()
+  })
+
   it('打开时填的是这一行的值', async () => {
     mount([qso({ qth: '深圳' })])
     await userEvent.click(button('编辑'))

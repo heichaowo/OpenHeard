@@ -1,7 +1,9 @@
 import { Divider, Form, Input, InputNumber, Space, Typography } from 'antd'
 import { isValidCallsign, normalizeCallsign } from '@core'
 import type { Qso } from '@core'
+import type { MapProvider } from '../api'
 import { CallInput } from './CallInput'
+import { MapPickButton } from './MapPickButton'
 
 /**
  * 人可以编辑的字段。待确认队列和日志里的编辑用同一份，两处填的是同一件事。
@@ -29,12 +31,15 @@ export function QsoFields({
   autoFocus = true,
   recalledFrom,
   qsos,
+  mapProvider,
 }: {
   autoFocus?: boolean
   /** 对方 QTH 和网格是从哪次通联补来的，已经按当前时区格式化好。 */
   recalledFrom?: string
   /** 给了才带呼号联想，不给就是普通输入框——这样 recall.test.tsx 不用改。 */
   qsos?: Qso[]
+  /** 给了才带「在地图上选」按钮——没给就没有，recall.test.tsx 不在 StoreProvider 里渲染这个组件。 */
+  mapProvider?: MapProvider
 }) {
   return (
     <>
@@ -78,6 +83,9 @@ export function QsoFields({
         <Typography.Paragraph type="secondary" style={{ marginTop: -12 }}>
           QTH 和网格来自 {recalledFrom} 那次通联，改掉就是。
         </Typography.Paragraph>
+      )}
+      {mapProvider !== undefined && (
+        <MapPickButton provider={mapProvider} gridName="gridsquare" qthName="qth" />
       )}
       <Divider titlePlacement="left" plain>
         本台

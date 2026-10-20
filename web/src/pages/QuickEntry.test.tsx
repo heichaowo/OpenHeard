@@ -1,6 +1,6 @@
 import { App, ConfigProvider } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { StationDefaults } from '@core'
@@ -9,25 +9,30 @@ import { StoreContext } from '../store'
 import type { Store } from '../store'
 import QuickEntry from './QuickEntry'
 
+// 真地图不进测试，见 MapPickButton.test.tsx。
+const createOsm = vi.hoisted(() => vi.fn())
+vi.mock('../components/map/osm', () => ({ createOsm }))
+
 const addQso = vi.fn()
 const removeQso = vi.fn()
 
-const store = (station: StationDefaults): Store =>
+const store = (station: StationDefaults, map: Store['map']): Store =>
   ({
     station,
     channels: [{ name: '438.500 中继', freqMhz: 438.5, mode: 'FM' }],
     qsos: [],
+    map,
     addQso,
     removeQso,
   }) as unknown as Store
 
-const tree = (station: StationDefaults) => (
+const tree = (station: StationDefaults, map: Store['map'] = { provider: 'none' }) => (
   // 撤销条的 Popconfirm 用 antd 的缺省按钮文案（确定/取消），真实的 App.tsx
   // 套了 zhCN 这层 ConfigProvider 才有中文；这里补上，不然点到的是英文 OK。
   <ConfigProvider locale={zhCN}>
     <Preferences>
       <App>
-        <StoreContext value={store(station)}>
+        <StoreContext value={store(station, map)}>
           <QuickEntry />
         </StoreContext>
       </App>
@@ -150,5 +155,43 @@ describe('QuickEntry 的撤销条', () => {
     await fillAndSubmit('ba1aa')
     expect(await screen.findByText('已记下 BA1AA')).toBeInTheDocument()
     expect(screen.queryByText('已记下 BD7KLO')).not.toBeInTheDocument()
+  })
+})
+
+describe('QuickEntry 的地图按钮', () => {
+  beforeEach(() => addQso.mockReset())
+
+  it('没选地图：按钮禁用', () => {
+    render(tree({}))
+    expect(screen.getByRole('button', { name: /在地图上选/ })).toBeDisabled()
+  })
+
+  it('选了 OpenStreetMap：点地图、确认之后网格填进「对方网格」，随后一起入库', async () => {
+    let pick: ((p: { lat: number; lon: number }) => void) | undefined
+    createOsm.mockImplementation(async () => ({
+      setMarker: vi.fn(),
+      setCell: vi.fn(),
+      setView: vi.fn(),
+      onPick: (cb: typeof pick) => {
+        pick = cb
+      },
+      search: vi.fn(async () => []),
+      reverse: vi.fn(async () => undefined),
+      destroy: vi.fn(),
+    }))
+    addQso.mockResolvedValue({ id: 'q1', call: 'BD7KLO' })
+    render(tree({}, { provider: 'osm' }))
+
+    await userEvent.click(screen.getByRole('button', { name: /在地图上选/ }))
+    await waitFor(() => expect(pick).toBeDefined())
+    act(() => pick!({ lat: 39.9042, lon: 116.4074 }))
+    await userEvent.click(await screen.findByRole('button', { name: /用这个网格/ }))
+    expect(screen.getByLabelText('对方网格')).toHaveValue('OM89EV')
+
+    await userEvent.type(screen.getByLabelText('对方呼号'), 'bd7klo')
+    await userEvent.type(screen.getByLabelText('频率 MHz'), '438.525')
+    await userEvent.click(screen.getByRole('button', { name: /^入\s*库$/ }))
+    await waitFor(() => expect(addQso).toHaveBeenCalledOnce())
+    expect(addQso.mock.calls[0]![0]).toMatchObject({ call: 'BD7KLO', gridsquare: 'OM89EV' })
   })
 })
