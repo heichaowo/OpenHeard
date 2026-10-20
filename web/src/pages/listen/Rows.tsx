@@ -17,8 +17,8 @@ import {
   aiLine,
   aiTagCounts,
   aiTagOf,
+  aiTagTitle,
   fmMembers,
-  noSpeechRaw,
   reasonLine,
   recognized,
   transcriptOf,
@@ -83,9 +83,8 @@ const durationText = (s: number) => `${Math.round(s)} 秒`
 function AiTagView({ a, aiEnabled }: { a: HeardItem; aiEnabled: boolean }) {
   const tag = aiTagOf(a, aiEnabled)
   if (tag === undefined) return null
-  const title = tag === '无人声' ? noSpeechRaw(a) : tag === '识别失败' ? a.ai?.error : undefined
   return (
-    <Tag color={AI_TAG_COLOR[tag]} title={title} style={{ marginInlineEnd: 4 }}>
+    <Tag color={AI_TAG_COLOR[tag]} title={aiTagTitle(a, tag)} style={{ marginInlineEnd: 4 }}>
       {tag}
     </Tag>
   )
@@ -616,8 +615,8 @@ export function PhoneRows({
                       </Tag>
                     ))
                   ))}
-                {aiTagCounts(conv, aiEnabled).map(([tag, n]) => (
-                  <Tag key={tag} color={AI_TAG_COLOR[tag]} style={{ marginInlineEnd: 0 }}>
+                {aiTagCounts(conv, aiEnabled).map(({ tag, n, title }) => (
+                  <Tag key={tag} color={AI_TAG_COLOR[tag]} title={title} style={{ marginInlineEnd: 0 }}>
                     {n > 1 ? `${tag} ×${n}` : tag}
                   </Tag>
                 ))}

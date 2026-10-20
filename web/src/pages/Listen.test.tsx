@@ -1,17 +1,9 @@
-import { App } from 'antd'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { missingFields } from '@core'
-import type { Activity, Qso, QsoDraft } from '@core'
-import { Preferences } from '../Preferences'
-import { PlayerProvider } from '../PlayerProvider'
+import type { Qso } from '@core'
 import { setViewportWidth } from '../testSetup'
-import { StoreContext } from '../store'
-import type { PendingRow, Store } from '../store'
-import type { Conversation } from '../api'
-import Listen from './Listen'
+import { FakeAudio, T, act, button, confirm, conv, mocks, resetMocks, row, store, tree } from './listenKit'
 
 const conversations = vi.hoisted(() => vi.fn())
 const radios = vi.hoisted(() => vi.fn())
@@ -20,139 +12,12 @@ vi.mock('../api', async (importOriginal) => {
   return { ...real, api: { ...real.api, conversations, radios } }
 })
 
-class FakeAudio {
-  src = ''
-  currentTime = 0
-  duration = NaN
-  paused = true
-  addEventListener() {}
-  removeEventListener() {}
-  play() {
-    this.paused = false
-  }
-  pause() {
-    this.paused = true
-  }
-  load() {}
-  removeAttribute() {
-    this.src = ''
-  }
-}
-
-const T = 1_789_000_000
-
-const act = (id: string, at: number, over: Partial<Activity> = {}): Activity => ({
-  id,
-  origin: 'brandmeister',
-  startAt: T + at,
-  durationS: 4,
-  mine: false,
-  talkgroup: 46001,
-  ...over,
-})
-
-const draftOfActs = (activities: Activity[], draft: QsoDraft = {}): QsoDraft => ({
-  call: activities.find((a) => !a.mine)?.callsign,
-  startAt: activities[0]!.startAt,
-  freqMhz: 439.525,
-  band: '70cm',
-  mode: 'DMR',
-  rstSent: '59',
-  rstRcvd: '59',
-  ...draft,
-})
-
-const row = (activities: Activity[], draft: QsoDraft = {}): PendingRow => {
-  const full = draftOfActs(activities, draft)
-  return {
-    cluster: {
-      id: activities[0]!.id,
-      startAt: activities[0]!.startAt,
-      endAt: activities[activities.length - 1]!.startAt + 4,
-      activities,
-    },
-    draft: full,
-    missing: missingFields(full),
-  }
-}
-
-/** 收听页里除待确认之外那四档共用的 Conversation 构造。 */
-const conv = (activities: Activity[], over: Partial<Conversation> = {}): Conversation => ({
-  id: activities[0]!.id,
-  startAt: activities[0]!.startAt,
-  endAt: activities[activities.length - 1]!.startAt + 4,
-  channel: 'tg:46001',
-  origin: 'brandmeister',
-  status: 'unlogged',
-  activities,
-  draft: draftOfActs(activities),
-  meaningless: false,
-  ...over,
-})
-
-const promote = vi.fn()
-const ignore = vi.fn()
-const ignoreMany = vi.fn()
-const deleteConversations = vi.fn()
-const setVerdict = vi.fn()
-const refresh = vi.fn()
-
-const store = (pending: PendingRow[] = [], over: Partial<Store> = {}): Store => ({
-  station: { myCallsign: 'BG0CG' },
-  channels: [],
-  pending,
-  qsos: [],
-  recordings: new Set<string>(),
-  analogEnabled: false,
-  brandmeisterEnabled: true,
-  aiEnabled: false,
-  map: { provider: 'none' },
-  loading: false,
-  error: undefined,
-  promote,
-  ignore,
-  ignoreMany,
-  deleteConversations,
-  setVerdict,
-  addQso: vi.fn(),
-  editQso: vi.fn(),
-  removeQso: vi.fn(),
-  importAdif: vi.fn(),
-  refresh,
-  ...over,
-})
-
-const tree = (s: Store, path = '/heard?tab=pending') => (
-  <MemoryRouter initialEntries={[path]}>
-    <Preferences>
-      <App>
-        <StoreContext value={s}>
-          <PlayerProvider>
-            <Listen />
-          </PlayerProvider>
-        </StoreContext>
-      </App>
-    </Preferences>
-  </MemoryRouter>
-)
-
-/** 按钮名要整个对上，「忽略」不能对上「忽略选中（1）」。带计数的那几个传 prefix。 */
-const button = (name: string, prefix = false) =>
-  within(document.body).getByRole('button', {
-    name: new RegExp(`^${name.split('').join('\\s*')}${prefix ? '' : '$'}`),
-  })
-
-const confirm = async () => userEvent.click(await screen.findByRole('button', { name: 'OK' }))
+const { promote, ignore, ignoreMany } = mocks
 
 beforeEach(() => {
   vi.clearAllMocks()
   vi.stubGlobal('Audio', FakeAudio)
-  promote.mockResolvedValue(undefined)
-  ignore.mockResolvedValue(undefined)
-  ignoreMany.mockResolvedValue({ ignored: 1, missing: [] })
-  deleteConversations.mockResolvedValue({ deleted: 1, missing: [] })
-  setVerdict.mockResolvedValue(undefined)
-  refresh.mockResolvedValue(undefined)
+  resetMocks()
   conversations.mockResolvedValue({ items: [] })
   radios.mockResolvedValue({ analogEnabled: false, radios: [] })
 })

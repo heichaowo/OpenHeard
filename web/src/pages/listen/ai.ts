@@ -57,14 +57,26 @@ export function transcriptText(conv: Conversation): string | undefined {
   return parts.length > 0 ? parts.join(' / ') : undefined
 }
 
-/** 一段对话上各个标记出现了几次，按出现的先后。手机卡片的标签行用。 */
-export function aiTagCounts(conv: Conversation, aiEnabled: boolean): [AiTag, number][] {
-  const counts = new Map<AiTag, number>()
+/** 一次发射上标记的悬停内容：没人声的原文，识别失败的原因。 */
+export const aiTagTitle = (a: HeardItem, tag: AiTag): string | undefined =>
+  tag === '无人声' ? noSpeechRaw(a) : tag === '识别失败' ? a.ai?.error : undefined
+
+/**
+ * 一段对话上各个标记出现了几次，按出现的先后。手机卡片的标签行用，悬停里是各次发射
+ * 的原文或者错误原因接起来。
+ */
+export function aiTagCounts(conv: Conversation, aiEnabled: boolean): { tag: AiTag; n: number; title?: string }[] {
+  const out = new Map<AiTag, { tag: AiTag; n: number; titles: string[] }>()
   for (const a of conv.activities) {
     const tag = aiTagOf(a, aiEnabled)
-    if (tag !== undefined) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    if (tag === undefined) continue
+    const e = out.get(tag) ?? { tag, n: 0, titles: [] }
+    e.n++
+    const title = aiTagTitle(a, tag)
+    if (title !== undefined && title !== '') e.titles.push(title)
+    out.set(tag, e)
   }
-  return [...counts]
+  return [...out.values()].map((e) => ({ tag: e.tag, n: e.n, title: e.titles.length > 0 ? e.titles.join(' / ') : undefined }))
 }
 
 const AI_FIELD_TEXT: Partial<Record<QsoField, (d: QsoDraft) => string>> = {

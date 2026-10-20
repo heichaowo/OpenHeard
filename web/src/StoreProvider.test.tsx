@@ -13,6 +13,8 @@ const m = vi.hoisted(() => ({
   editQso: vi.fn(),
   promoteActivities: vi.fn(),
   ignoreActivities: vi.fn(),
+  deleteConversations: vi.fn(),
+  setVerdict: vi.fn(),
   addQso: vi.fn(),
   removeQso: vi.fn(),
 }))
@@ -114,6 +116,28 @@ describe('StoreProvider', () => {
       await store.current?.refresh()
     })
     expect(screen.getByTestId('ai')).toHaveTextContent('true,amap,pubkey')
+  })
+
+  // 删除和改判之后待确认队列和 chip 的数都变了，不能等下一个 15 秒。
+  it('删除和改判都会重新拉一遍', async () => {
+    m.deleteConversations.mockResolvedValue({ deleted: 1, missing: [] })
+    m.setVerdict.mockResolvedValue(undefined)
+    mount()
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+    expect(m.pending).toHaveBeenCalledTimes(1)
+
+    const picks = [{ id: 'a1', activityIds: ['a1'] }]
+    await act(async () => {
+      expect(await store.current?.deleteConversations(picks)).toEqual({ deleted: 1, missing: [] })
+    })
+    expect(m.deleteConversations).toHaveBeenCalledWith(picks)
+    expect(m.pending).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      await store.current?.setVerdict(['a1', 'a2'], false)
+    })
+    expect(m.setVerdict).toHaveBeenCalledWith(['a1', 'a2'], false)
+    expect(m.pending).toHaveBeenCalledTimes(3)
   })
 
   // 改完必须重拉，否则页面停在改之前的样子，人会以为没保存上。
