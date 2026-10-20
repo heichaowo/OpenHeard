@@ -90,6 +90,21 @@ describe('新对话自己出现', () => {
     expect(await screen.findByText('BD7BBB')).toBeInTheDocument()
   })
 
+  it('页面滚到下面去了（scrollY 不小于 120）就先攒着', async () => {
+    conversations.mockResolvedValue({ items: [u1] })
+    render(tree(store([]), '/heard?tab=unlogged'))
+    await screen.findByText('BA1AA')
+
+    Object.defineProperty(window, 'scrollY', { value: 500, configurable: true })
+    try {
+      conversations.mockResolvedValue({ items: [u2, u1] })
+      poll()
+      expect(await screen.findByText('有 1 段新的')).toBeInTheDocument()
+    } finally {
+      Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
+    }
+  })
+
   it('开着确认框或者勾着选中的时候不插', async () => {
     const a = conv([act('a1', 0, { mine: true })])
     conversations.mockResolvedValue({ items: [a] })
