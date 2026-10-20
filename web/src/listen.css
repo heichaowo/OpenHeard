@@ -4,7 +4,7 @@
  * 桌面/手机的 Grid.useBreakpoint().md 是同一条线。
  */
 
-/* ---- 五档切换 ---- */
+/* ---- 六档切换 ---- */
 
 .listen-chips {
   display: flex;
@@ -44,11 +44,11 @@
 @media (max-width: 767px) {
   .listen-chips {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
   }
 
-  /* 横排放不下「待确认」+ 徽标这种五等分格子，标签和数字改成上下叠放。 */
+  /* 横排放不下「待确认」+ 徽标这种三等分格子，标签和数字改成上下叠放。 */
   .chip {
     flex-direction: column;
     gap: 2px;

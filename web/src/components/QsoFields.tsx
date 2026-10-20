@@ -1,6 +1,7 @@
-import { Divider, Form, Input, InputNumber, Space, Typography } from 'antd'
+import type { ReactNode } from 'react'
+import { Divider, Form, Input, InputNumber, Space, Tag, Typography } from 'antd'
 import { isValidCallsign, normalizeCallsign } from '@core'
-import type { Qso } from '@core'
+import type { Qso, QsoField } from '@core'
 import type { MapProvider } from '../api'
 import { CallInput } from './CallInput'
 import { MapPickButton } from './MapPickButton'
@@ -32,6 +33,7 @@ export function QsoFields({
   recalledFrom,
   qsos,
   mapProvider,
+  aiFilled,
 }: {
   autoFocus?: boolean
   /** 对方 QTH 和网格是从哪次通联补来的，已经按当前时区格式化好。 */
@@ -40,12 +42,25 @@ export function QsoFields({
   qsos?: Qso[]
   /** 给了才带「在地图上选」按钮，没给就没有。recall.test.tsx 不在 StoreProvider 里渲染这个组件。 */
   mapProvider?: MapProvider
+  /** 草稿里哪几个字段是 AI 填的，标签上挂一个 AI。 */
+  aiFilled?: QsoField[]
 }) {
+  const label = (key: QsoField, text: string): ReactNode =>
+    aiFilled?.includes(key) ? (
+      <>
+        {text}
+        <Tag color="purple" style={{ marginInlineStart: 6, marginInlineEnd: 0 }}>
+          AI
+        </Tag>
+      </>
+    ) : (
+      text
+    )
   return (
     <>
       <Form.Item
         name="call"
-        label="对方呼号"
+        label={label('call', '对方呼号')}
         normalize={normalizeCallsign}
         rules={[
           { required: true, message: '呼号必填' },
@@ -64,10 +79,10 @@ export function QsoFields({
         )}
       </Form.Item>
       <Space wrap>
-        <Form.Item name="rstSent" label="发出报告">
+        <Form.Item name="rstSent" label={label('rstSent', '发出报告')}>
           <Input style={{ width: 100 }} />
         </Form.Item>
-        <Form.Item name="rstRcvd" label="收到报告">
+        <Form.Item name="rstRcvd" label={label('rstRcvd', '收到报告')}>
           <Input style={{ width: 100 }} />
         </Form.Item>
       </Space>
@@ -75,7 +90,7 @@ export function QsoFields({
         <Form.Item name="gridsquare" label="对方网格">
           <Input style={{ width: 100 }} placeholder="OM24" />
         </Form.Item>
-        <Form.Item name="qth" label="对方 QTH">
+        <Form.Item name="qth" label={label('qth', '对方 QTH')}>
           <Input style={{ width: 140 }} />
         </Form.Item>
       </Space>
@@ -112,7 +127,7 @@ export function QsoFields({
           <InputNumber style={{ width: 140 }} />
         </Form.Item>
       </Space>
-      <Form.Item name="note" label="备注">
+      <Form.Item name="note" label={label('note', '备注')}>
         <Input.TextArea rows={2} />
       </Form.Item>
     </>

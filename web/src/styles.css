@@ -545,6 +545,12 @@ select {
 
 .pending-card-actions > * {
   flex: 1;
+  min-width: 0;
+}
+
+/* 最多四个按钮（直接入库、编辑、忽略、删除）挤一行，默认的内边距放不下「直接入库」。 */
+.pending-card-actions .ant-btn {
+  padding-inline: 4px;
 }
 
 /* 设置页里一条一条的表：信道、频谱表、查询。每条一个带边框的块，每格带标签，
@@ -736,4 +742,65 @@ select {
 .audio-pill-label {
   position: relative;
   z-index: 1;
+}
+
+/* ---- 识别结果：转写、标记 ---- */
+
+/* 手机卡片上转写那一块固定两行：高度写死，识别结果什么时候来都不推动下面的卡片。 */
+.card-transcript {
+  --line: 20px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  min-height: calc(var(--line) * 2);
+  max-height: calc(var(--line) * 2);
+  margin-block-end: 8px;
+  font-size: 13px;
+  line-height: var(--line);
+  overflow-wrap: anywhere;
+}
+
+/* 展开后每次发射一行转写，装不下的截断。一行的高度固定。 */
+.transcript-line {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 22px;
+  font-size: 13px;
+}
+
+.transcript-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 内层表格的格子默认可以折行，转写那一列不行。 */
+.flush-card .ant-table-expanded-row .ant-table-cell.transcript-cell {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.drawer-transcripts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-block-start: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: var(--ant-border-radius);
+  font-size: 13px;
+}
+
+.drawer-transcript {
+  overflow-wrap: anywhere;
+}
+
+/* 手机上禁用的删除按钮没有悬停提示，原因直接写在按钮下面。 */
+.pending-card-reason {
+  display: block;
+  margin-block-start: 6px;
+  font-size: 12px;
 }

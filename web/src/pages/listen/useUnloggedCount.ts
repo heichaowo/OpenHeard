@@ -7,7 +7,7 @@ const POLL_MS = 15000
  * 未入库 N：不管现在哪一档被选中都要拉，徽标才不会显示上一次选中未入库
  * 时留下的旧数。items.length 就是数，next 还在就说明还不止这 200 条。
  */
-export function useUnloggedCount(): { count: number; capped: boolean } {
+export function useUnloggedCount(refreshKey = 0): { count: number; capped: boolean } {
   const [state, setState] = useState({ count: 0, capped: false })
   const seq = useRef(0)
 
@@ -32,7 +32,8 @@ export function useUnloggedCount(): { count: number; capped: boolean } {
       clearInterval(t)
       document.removeEventListener('visibilitychange', tick)
     }
-  }, [])
+    // refreshKey 变了就立刻重拉一次：删除、忽略之后徽标不用等下一个 15 秒。
+  }, [refreshKey])
 
   return state
 }

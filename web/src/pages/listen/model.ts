@@ -3,10 +3,10 @@ import type { Activity, ConversationStatus, Origin } from '@core'
 import { midnightIn, shiftDate, todayIn } from '../../time'
 import type { Zone } from '../../time'
 
-/** URL 里 tab 的五个值：待确认这一档加对话分的那五档。 */
-export type Tab = 'pending' | 'unlogged' | 'all' | 'logged' | 'ignored'
+/** URL 里 tab 的六个值：待确认这一档，对话分的那几档，加默认藏起来的无意义。 */
+export type Tab = 'pending' | 'unlogged' | 'all' | 'logged' | 'ignored' | 'meaningless'
 
-export const TABS: Tab[] = ['pending', 'unlogged', 'all', 'logged', 'ignored']
+export const TABS: Tab[] = ['pending', 'unlogged', 'all', 'logged', 'ignored', 'meaningless']
 
 export const TAB_LABEL: Record<Tab, string> = {
   pending: '待确认',
@@ -14,6 +14,7 @@ export const TAB_LABEL: Record<Tab, string> = {
   all: '全部',
   logged: '已入库',
   ignored: '已忽略',
+  meaningless: '无意义',
 }
 
 /** 全部/已入库/已忽略按天看；待确认和未入库两档不分天。 */

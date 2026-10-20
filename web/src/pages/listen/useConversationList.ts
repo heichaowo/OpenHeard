@@ -103,7 +103,7 @@ function claimSlots(items: Conversation[], buffer: Conversation[], fetched: Conv
 }
 
 /** 旧的 renamed 和这次的接起来：a→b 再来 b→c 就是 a→c。 */
-function composeRenamed(prev: Record<string, string>, add: Record<string, string>): Record<string, string> {
+export function composeRenamed(prev: Record<string, string>, add: Record<string, string>): Record<string, string> {
   if (Object.keys(add).length === 0) return prev
   const out = { ...prev }
   for (const [k, v] of Object.entries(out)) if (add[v] !== undefined) out[k] = add[v]

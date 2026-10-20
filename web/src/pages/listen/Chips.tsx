@@ -2,10 +2,10 @@ import { TABS, TAB_LABEL, badgeText } from './model'
 import type { Tab } from './model'
 
 /**
- * 五档切换。只有待确认、未入库带计数，全部/已入库/已忽略不带——那三档
+ * 六档切换。待确认、未入库、无意义带计数，全部/已入库/已忽略不带——那三档
  * 本来就不需要一眼看出「有多少条」。
  *
- * 手机上是固定的五等分网格，数字涨到两位数、三位数也不会把布局挤成
+ * 手机上是固定的三加三网格，数字涨到两位数、三位数也不会把布局挤成
  * 两行：计数徽标自己留了三位数的宽度，网格本身的列宽不随文字变。
  */
 export function Chips({
@@ -13,13 +13,19 @@ export function Chips({
   onSelect,
   pendingCount,
   unloggedCount,
+  meaninglessCount,
 }: {
   tab: Tab
   onSelect: (tab: Tab) => void
   pendingCount: number
   unloggedCount: number
+  meaninglessCount: number
 }) {
-  const counts: Partial<Record<Tab, number>> = { pending: pendingCount, unlogged: unloggedCount }
+  const counts: Partial<Record<Tab, number>> = {
+    pending: pendingCount,
+    unlogged: unloggedCount,
+    meaningless: meaninglessCount,
+  }
   return (
     <div className="listen-chips" role="tablist" aria-label="收听页视图">
       {TABS.map((t) => {

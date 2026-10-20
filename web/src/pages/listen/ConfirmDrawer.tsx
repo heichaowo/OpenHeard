@@ -1,10 +1,11 @@
-import { Button, Descriptions, Drawer, Form } from 'antd'
+import { Button, Descriptions, Drawer, Form, Typography } from 'antd'
 import type { FormInstance } from 'antd'
 import { QsoFields } from '../../components/QsoFields'
 import type { QsoFormValues } from '../../components/QsoFields'
-import type { Conversation } from '../../api'
-import type { Qso, QsoDraft } from '@core'
+import type { Conversation, MapProvider } from '../../api'
+import type { Qso, QsoDraft, QsoField } from '@core'
 import { useTime } from '../../useTime'
+import { transcriptOf } from './ai'
 import { ORIGIN_LABEL } from './model'
 
 /**
@@ -22,8 +23,10 @@ export function ConfirmDrawer({
   submitting,
   onClose,
   onSubmit,
+  mapProvider,
 }: {
-  editing: { conv: Conversation; draft: QsoDraft } | null
+  /** ids 是打开时挑中的那几次，aiFilled 是草稿里哪几个字段是 AI 填的。 */
+  editing: { conv: Conversation; ids: string[]; draft: QsoDraft; aiFilled: QsoField[] } | null
   wide: boolean
   form: FormInstance<QsoFormValues>
   recalledFrom?: string
@@ -33,8 +36,11 @@ export function ConfirmDrawer({
   submitting: boolean
   onClose: () => void
   onSubmit: (values: QsoFormValues) => void
+  mapProvider?: MapProvider
 }) {
   const time = useTime()
+  // 这次要入库的那几次发射里，听出了什么。没人声的那次转写是凭空编的，不列。
+  const heard = (editing?.conv.activities ?? []).filter((a) => editing?.ids.includes(a.id) && transcriptOf(a) !== undefined)
   return (
     <Drawer
       title="确认入库"
@@ -60,6 +66,19 @@ export function ConfirmDrawer({
             <Descriptions.Item label="模式">{editing.draft.mode}</Descriptions.Item>
             <Descriptions.Item label="来源">{ORIGIN_LABEL[editing.conv.origin]}</Descriptions.Item>
           </Descriptions>
+          {heard.length > 0 && (
+            <div className="drawer-transcripts">
+              <Typography.Text type="secondary">识别出的内容，仅供参考</Typography.Text>
+              {heard.map((a) => (
+                <div key={a.id} className="drawer-transcript">
+                  <Typography.Text type="secondary" className="mono">
+                    {time.atShort(a.startAt)} {a.mine ? '本台' : '对方'}
+                  </Typography.Text>
+                  <div>{transcriptOf(a)}</div>
+                </div>
+              ))}
+            </div>
+          )}
           <Form
             form={form}
             layout="vertical"
@@ -67,7 +86,7 @@ export function ConfirmDrawer({
             onValuesChange={onValuesChange}
             style={{ marginTop: 24 }}
           >
-            <QsoFields recalledFrom={recalledFrom} qsos={qsos} />
+            <QsoFields recalledFrom={recalledFrom} qsos={qsos} mapProvider={mapProvider} aiFilled={editing.aiFilled} />
             {/* 让输入框里按回车也能提交，抽屉标题栏那个按钮在表单外面 */}
             <Button htmlType="submit" style={{ display: 'none' }} />
           </Form>

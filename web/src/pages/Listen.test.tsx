@@ -86,12 +86,15 @@ const conv = (activities: Activity[], over: Partial<Conversation> = {}): Convers
   status: 'unlogged',
   activities,
   draft: draftOfActs(activities),
+  meaningless: false,
   ...over,
 })
 
 const promote = vi.fn()
 const ignore = vi.fn()
 const ignoreMany = vi.fn()
+const deleteConversations = vi.fn()
+const setVerdict = vi.fn()
 const refresh = vi.fn()
 
 const store = (pending: PendingRow[] = [], over: Partial<Store> = {}): Store => ({
@@ -109,6 +112,8 @@ const store = (pending: PendingRow[] = [], over: Partial<Store> = {}): Store => 
   promote,
   ignore,
   ignoreMany,
+  deleteConversations,
+  setVerdict,
   addQso: vi.fn(),
   editQso: vi.fn(),
   removeQso: vi.fn(),
@@ -145,6 +150,8 @@ beforeEach(() => {
   promote.mockResolvedValue(undefined)
   ignore.mockResolvedValue(undefined)
   ignoreMany.mockResolvedValue({ ignored: 1, missing: [] })
+  deleteConversations.mockResolvedValue({ deleted: 1, missing: [] })
+  setVerdict.mockResolvedValue(undefined)
   refresh.mockResolvedValue(undefined)
   conversations.mockResolvedValue({ items: [] })
   radios.mockResolvedValue({ analogEnabled: false, radios: [] })
@@ -336,8 +343,8 @@ describe('一段里的发射很多时', () => {
   })
 })
 
-describe('五档切换', () => {
-  it('五个都在，待确认和未入库带徽标，切换刷新对应视图', async () => {
+describe('六档切换', () => {
+  it('六个都在，待确认、未入库、无意义带徽标，切换刷新对应视图', async () => {
     conversations.mockResolvedValue({ items: [] })
     render(tree(store([row([act('m1', 0, { mine: true })])])))
 
@@ -348,6 +355,7 @@ describe('五档切换', () => {
       '全部',
       '已入库',
       '已忽略',
+      expect.stringContaining('无意义'),
     ])
 
     await userEvent.click(screen.getByRole('tab', { name: /全部/ }))
