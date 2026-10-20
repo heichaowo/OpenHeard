@@ -13,3 +13,5 @@ export * from './adif-parse.ts';
 export * from './tuning.ts';
 export * from './ai.ts';
 export * from './ai-config.ts';
+export * from './maidenhead.ts';
+export * from './gcj02.ts';
