@@ -38,7 +38,7 @@ export function QsoFields({
   recalledFrom?: string
   /** 给了才带呼号联想，不给就是普通输入框——这样 recall.test.tsx 不用改。 */
   qsos?: Qso[]
-  /** 给了才带「在地图上选」按钮——没给就没有，recall.test.tsx 不在 StoreProvider 里渲染这个组件。 */
+  /** 给了才带「在地图上选」按钮，没给就没有。recall.test.tsx 不在 StoreProvider 里渲染这个组件。 */
   mapProvider?: MapProvider
 }) {
   return (

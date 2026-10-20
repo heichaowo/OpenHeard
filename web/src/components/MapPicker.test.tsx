@@ -111,6 +111,15 @@ describe('MapPicker 填回网格', () => {
     expect(onPick).toHaveBeenCalledExactlyOnceWith({ grid: 'OM89', qth: undefined })
   })
 
+  it('没动过时显示的就是要填回去的：4 位的输入显示 4 位，不显示成 6 位', async () => {
+    const f = fake()
+    mount(f, { fieldGrid: 'OM89' })
+    await ready(f)
+    expect(await screen.findByText(/4 位/)).toBeInTheDocument()
+    expect(screen.getByText('OM89')).toBeInTheDocument()
+    expect(screen.queryByText(/6 位/)).not.toBeInTheDocument()
+  })
+
   it('点地图：显示 6 位（要填的）和 8 位（参考），标记和格子跟着走，填回 6 位', async () => {
     const f = fake()
     mount(f)
@@ -274,6 +283,15 @@ describe('MapPicker 的 QTH', () => {
 
 describe('MapPicker 打不开', () => {
   const failure = '地图打不开，网格可以直接填'
+
+  it('打不开时没有网格线索，不再催人点地图', async () => {
+    const f = fake()
+    f.factory.mockRejectedValueOnce(new Error('脚本加载失败'))
+    mount(f)
+    await screen.findByText(failure)
+    expect(screen.queryByText(/点地图、拖标记/)).not.toBeInTheDocument()
+    expect(useButton()).toBeDisabled()
+  })
 
   it('加载失败立刻说：弹窗还在，输入框里已有的网格照样能填回去', async () => {
     const f = fake()

@@ -190,13 +190,12 @@ export default function MapPicker({
 
   const grid6 = point === null ? undefined : toGrid(point.lat, point.lon, 6)
   const grid8 = point === null ? undefined : toGrid(point.lat, point.lon, 8)
+  // 没动过就是输入框原来的那个（可能是 4 位或 8 位），动过才是这个点算出来的 6 位。
+  const filled = !moved && fieldValid ? fieldGrid.toUpperCase() : grid6
 
   const confirm = () => {
-    if (grid6 === undefined) return
-    onPick({
-      grid: !moved && fieldValid ? fieldGrid.toUpperCase() : grid6,
-      qth: withQth ? qth : undefined,
-    })
+    if (filled === undefined) return
+    onPick({ grid: filled, qth: withQth ? qth : undefined })
   }
 
   return (
@@ -266,15 +265,19 @@ export default function MapPicker({
         )}
         <div>
           {grid6 === undefined ? (
-            <Typography.Text type="secondary">点地图、拖标记或者搜个地名，选出一个点。</Typography.Text>
+            status !== 'failed' && (
+              <Typography.Text type="secondary">点地图、拖标记或者搜个地名，选出一个点。</Typography.Text>
+            )
           ) : (
             <Space size={16} wrap>
               <span>
-                6 位 <Typography.Text strong className="mono">{grid6}</Typography.Text>（要填的）
+                {filled!.length} 位 <Typography.Text strong className="mono">{filled}</Typography.Text>（要填的）
               </span>
-              <Typography.Text type="secondary">
-                8 位 <span className="mono">{grid8}</span>（参考）
-              </Typography.Text>
+              {filled !== grid8 && (
+                <Typography.Text type="secondary">
+                  8 位 <span className="mono">{grid8}</span>（参考）
+                </Typography.Text>
+              )}
             </Space>
           )}
         </div>

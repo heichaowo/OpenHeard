@@ -69,6 +69,10 @@ describe('qthFromNominatim', () => {
     expect(qthFromNominatim({ state: '甘肃省', town: '某镇', county: '某县' })).toBe('某镇某县')
   })
 
+  it('街道不要：克拉玛依的反查只有 city（区级）和 suburb（街道），只写区', () => {
+    expect(qthFromNominatim({ city: '克拉玛依区', suburb: '昆仑路街道', state: '新疆维吾尔自治区' } as never)).toBe('克拉玛依区')
+  })
+
   it('城市和区重名不写两遍', () => {
     expect(qthFromNominatim({ city: '嘉峪关市', district: '嘉峪关市' })).toBe('嘉峪关市')
   })

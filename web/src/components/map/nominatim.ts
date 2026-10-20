@@ -38,14 +38,16 @@ interface NominatimAddress {
   municipality?: string
   city_district?: string
   district?: string
-  suburb?: string
 }
 
-/** 城市加区县，不用 display_name：那是一长串逗号隔开的地址。 */
+/**
+ * 城市加区县，不用 display_name：那是一长串逗号隔开的地址。街道（suburb）太细，不要：
+ * 克拉玛依的反查是 city 克拉玛依区 加 suburb 昆仑路街道，写到街道就是把对方的位置说得比事实准。
+ */
 export function qthFromNominatim(a: NominatimAddress | undefined): string | undefined {
   if (a === undefined) return undefined
   const place = a.city ?? a.town ?? a.municipality ?? a.county ?? a.state
-  const district = a.city_district ?? a.district ?? (a.county !== place ? a.county : undefined) ?? a.suburb
+  const district = a.city_district ?? a.district ?? (a.county !== place ? a.county : undefined)
   const out = [place, district].filter((v, i, all): v is string => !!v && all.indexOf(v) === i).join('')
   return out === '' ? undefined : out
 }

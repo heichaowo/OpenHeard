@@ -390,8 +390,10 @@ export default function OpsPage() {
                       ) : (
                         <>
                           {ops.ai.worker.ok ? <Tag color="green">正常</Tag> : <Tag color="orange">暂停</Tag>}
+                          {/* 暂停时原话已经在卡片顶上的警告里，这里不再写第二遍。 */}
                           <Typography.Text type="secondary">
-                            {ops.ai.worker.message}（{ago(ops.now, ops.ai.worker.at)}）
+                            {ops.ai.worker.ok && `${ops.ai.worker.message}，`}
+                            {ago(ops.now, ops.ai.worker.at)}
                           </Typography.Text>
                         </>
                       )}

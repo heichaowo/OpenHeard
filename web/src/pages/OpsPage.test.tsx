@@ -250,10 +250,17 @@ describe('OpsPage 的识别卡', () => {
     expect(await screen.findByText('关闭，每段录音都送去转写')).toBeInTheDocument()
   })
 
-  it('守护进程没报过：写还没有报告；报了正常：绿标签加原话', async () => {
+  it('守护进程没报过：写还没有报告', async () => {
     ops.mockResolvedValueOnce({ ...snapshot([]), ai: on })
     mount()
     expect(await screen.findByText('还没有报告')).toBeInTheDocument()
+  })
+
+  it('守护进程报了正常：绿标签、原话和多久以前', async () => {
+    ops.mockResolvedValueOnce({ ...snapshot([]), ai: { ...on, worker: { at: now - 5, ok: true, message: '在跑' } } })
+    mount()
+    expect(await screen.findByText('正常')).toBeInTheDocument()
+    expect(rowOf('守护进程')).toHaveTextContent('在跑，5 秒前')
   })
 
   it('守护进程说暂停了：整卡顶上一条警告，带原话和多久以前', async () => {
@@ -263,7 +270,9 @@ describe('OpsPage 的识别卡', () => {
     })
     mount()
     expect(await screen.findByText('识别暂停着')).toBeInTheDocument()
-    expect(screen.getAllByText(/模型文件不存在/).length).toBeGreaterThan(0)
+    // 原话只写一遍，在顶上的警告里；守护进程那一行只有标签和时间。
+    expect(screen.getAllByText(/模型文件不存在/)).toHaveLength(1)
+    expect(rowOf('守护进程')).toHaveTextContent('暂停')
     expect(screen.getAllByText(/2 分钟前/).length).toBeGreaterThan(0)
   })
 

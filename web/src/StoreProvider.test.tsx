@@ -45,6 +45,9 @@ function Probe() {
       <p data-testid="calls">
         {store.current?.qsos.map((q) => `${q.call}:${q.rstSent}`).join(',')}
       </p>
+      <p data-testid="ai">
+        {String(store.current?.aiEnabled)},{store.current?.map.provider},{store.current?.map.amapKey ?? ''}
+      </p>
       <p data-testid="error">{store.current?.error ?? ''}</p>
       <p data-testid="loading">{String(store.current?.loading)}</p>
       <p data-testid="switches">
@@ -93,6 +96,24 @@ describe('StoreProvider', () => {
     mount()
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
     expect(screen.getByTestId('switches')).toHaveTextContent('false,true')
+  })
+
+  // AI 和地图缺省关：请求没回来、或者旧响应里没有这两项，都当作关着、没选地图。
+  it('识别开关和地图来自 /api/station，缺省关、没选地图', async () => {
+    mount()
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+    expect(screen.getByTestId('ai')).toHaveTextContent('false,none')
+
+    m.station.mockResolvedValue({
+      station: {},
+      channels: [],
+      aiEnabled: true,
+      map: { provider: 'amap', amapKey: 'pubkey' },
+    })
+    await act(async () => {
+      await store.current?.refresh()
+    })
+    expect(screen.getByTestId('ai')).toHaveTextContent('true,amap,pubkey')
   })
 
   // 改完必须重拉，否则页面停在改之前的样子，人会以为没保存上。
