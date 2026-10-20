@@ -1,7 +1,7 @@
 import { watch } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { loadConfig } from './config.ts';
-import type { AnalogConfig, DaemonConfig, Query } from './config.ts';
+import type { AiConfig, AnalogConfig, DaemonConfig, Query } from './config.ts';
 
 /** 编辑器和原子替换都会连着触发好几次事件，等它停下来再读。 */
 const SETTLE_MS = 400;
@@ -9,6 +9,8 @@ const SETTLE_MS = 400;
 const sameQueries = (a: Query[], b: Query[]) => JSON.stringify(a) === JSON.stringify(b);
 
 const sameAnalog = (a?: AnalogConfig, b?: AnalogConfig) => JSON.stringify(a) === JSON.stringify(b);
+
+const sameAi = (a?: AiConfig, b?: AiConfig) => JSON.stringify(a) === JSON.stringify(b);
 
 /**
  * 盯着配置文件，改了就把新值应用上去。
@@ -22,7 +24,11 @@ const sameAnalog = (a?: AnalogConfig, b?: AnalogConfig) => JSON.stringify(a) ===
 export function watchConfig(
   path: string,
   applied: DaemonConfig,
-  apply: { queries: (q: Query[]) => void; analog: (a: AnalogConfig | undefined) => void },
+  apply: {
+    queries: (q: Query[]) => void;
+    analog: (a: AnalogConfig | undefined) => void;
+    ai: (a: AiConfig | undefined) => void;
+  },
 ): () => void {
   let current = applied;
   let timer: NodeJS.Timeout | undefined;
@@ -41,6 +47,13 @@ export function watchConfig(
     // 就是关，从 undefined 变成有值就是开，两头都有值就是换。开关一变
     // 也算数，不用等两头都配过才生效。
     if (!sameAnalog(current.analog, next.analog)) apply.analog(next.analog);
+
+    // 识别和模拟守听一样：关、开、换设置都在这一条里。写坏了 next.ai 是
+    // undefined，那时正在跑的 worker 会被停掉，原因记在日志里。
+    if (next.aiProblem !== current.aiProblem && next.aiProblem !== undefined) {
+      console.error(next.aiProblem);
+    }
+    if (!sameAi(current.ai, next.ai)) apply.ai(next.ai);
 
     current = next;
   };

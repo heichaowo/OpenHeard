@@ -5,7 +5,12 @@ import { readFileSync } from 'node:fs';
 import { watchAnalog } from './analog.ts';
 import { planTuning } from './core.ts';
 import { decodeMdc } from './mdc.ts';
+import { AiApi } from './ai/api.ts';
+import { sameLlama } from './ai/llama.ts';
+import { startAi } from './ai/worker.ts';
+import type { AiHandle } from './ai/worker.ts';
 import { loadConfig } from './config.ts';
+import type { AiConfig } from './config.ts';
 import { Ingest } from './ingest.ts';
 import { normalise } from './normalise.ts';
 import { watchConfig } from './reload.ts';
@@ -142,21 +147,44 @@ if (values['mdc-probe']) {
     for (const p of result.problems) console.error(`配置: ${p}`);
     process.exit(2);
   }
-  const { dmrId, queries, apiUrl, ingestToken, spoolDir, analog } = result.config;
+  const { dmrId, queries, apiUrl, ingestToken, spoolDir, analog, ai: aiConfig, aiProblem } = result.config;
+  // 识别是可选的：写坏了只记日志，采集照常起。
+  if (aiProblem !== undefined) console.error(aiProblem);
   const ingest = new Ingest(apiUrl, ingestToken, spoolDir);
   console.log(
     `openheard-daemon 起来了，${queries.length} 条查询` +
       `${analog ? `，守听 ${analog.channels.map((c) => `${c.freqMhz} MHz`).join('、')}` : '，没配模拟守听'}，推给 ${apiUrl}`,
   );
   const digital = start(queries, dmrId, ingest);
+  const aiApi = new AiApi(apiUrl, ingestToken);
+  // 可变的句柄：重载之后收到叫醒的得是新的那个 worker，所以别处只通过这个变量找它。
+  let ai: AiHandle | undefined = aiConfig ? startAi(aiConfig, aiApi) : undefined;
   // 可变的句柄：开关一变，这里在起、停、换之间切换，不再需要重启整个进程。
-  let radio: AnalogHandle | undefined = analog ? startAnalog(analog, ingest) : undefined;
+  let radio: AnalogHandle | undefined = analog ? startAnalog(analog, ingest, () => ai?.wake()) : undefined;
+  // 换 worker 要等旧的停干净：旧的 llama-server 还占着端口时，新的起不来。
+  // 排成一条链，连着两次改配置也不会交叉。
+  let swapping: Promise<void> = Promise.resolve();
+  const swapAi = (next: AiConfig | undefined) => {
+    swapping = swapping
+      .then(async () => {
+        const old = ai;
+        // 提取的设置没变就把 llama-server 留给新的 worker，省一次装模型
+        const keep =
+          old?.llama !== undefined && next?.text.provider === 'local' && sameLlama(old.llama.cfg, next.text);
+        await old?.stop(keep);
+        ai = next === undefined ? undefined : startAi(next, aiApi, { llama: keep ? old?.llama : undefined });
+        console.log(next === undefined ? '识别停了' : '识别按新设置起来了');
+      })
+      .catch((e) => console.error(`换识别设置出错：${(e as Error).message}`));
+  };
   // launchd 停这个任务时发 SIGTERM。挂了监听，Node 就不再自己退出，
   // 所以这里要明说退出，否则 launchd 要等 20 秒再补一个 SIGKILL。
   process.once('SIGTERM', () => {
     // 先让推送改成当场落盘，再停接收机：停的时候正在收的那次发射会收尾推出来。
     ingest.close();
     radio?.stop();
+    // 子进程不会跟着 process.exit 走。留下的 llama-server 占着内存和端口
+    ai?.kill();
     process.exit(0);
   });
 
@@ -168,10 +196,11 @@ if (values['mdc-probe']) {
         radio?.stop();
         radio = undefined;
       } else if (radio === undefined) {
-        radio = startAnalog(a, ingest);
+        radio = startAnalog(a, ingest, () => ai?.wake());
       } else {
         radio.retune(a);
       }
     },
+    ai: swapAi,
   });
 }

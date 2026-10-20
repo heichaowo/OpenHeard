@@ -6,7 +6,7 @@ import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { loadConfig } from './config.ts';
 import { watchConfig } from './reload.ts';
-import type { AnalogConfig, Query } from './config.ts';
+import type { AiConfig, AnalogConfig, Query } from './config.ts';
 
 const base = {
   dmrId: 4616460,
@@ -67,10 +67,15 @@ async function writeUntil(write: (next: unknown) => void, next: unknown, ok: () 
 const start = (path: string) => {
   const r = loadConfig(path);
   assert.ok(r.ok);
-  const seen: { queries: Query[][]; analog: (AnalogConfig | undefined)[] } = { queries: [], analog: [] };
+  const seen: { queries: Query[][]; analog: (AnalogConfig | undefined)[]; ai: (AiConfig | undefined)[] } = {
+    queries: [],
+    analog: [],
+    ai: [],
+  };
   const stop = watchConfig(path, r.config, {
     queries: (q) => seen.queries.push(q),
     analog: (a) => seen.analog.push(a),
+    ai: (a) => seen.ai.push(a),
   });
   return { seen, stop };
 };
@@ -189,6 +194,7 @@ describe('watchConfig：开关', () => {
     const stop = watchConfig(path, r.config, {
       queries: () => undefined,
       analog: (a) => seen.analog.push(a),
+      ai: () => undefined,
     });
 
     const write = (next: unknown) => {

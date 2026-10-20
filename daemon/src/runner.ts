@@ -66,7 +66,12 @@ export interface AnalogHandle {
   stop: () => void;
 }
 
-export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
+export function startAnalog(
+  cfg: AnalogConfig,
+  ingest: Ingest,
+  /** 这次发射推上去之后调。识别的 worker 靠它醒来，不用等满 10 秒。 */
+  onPushed?: () => void,
+): AnalogHandle {
   let current = cfg;
   let stop: (() => void) | undefined;
   let restarts = 0;
@@ -123,7 +128,11 @@ export function startAnalog(cfg: AnalogConfig, ingest: Ingest): AnalogHandle {
             // Activity.durationS 里，把它塞进 ms 会让运维页同一列有两种含义。
             ms: Date.now() - started,
           },
-        );
+        ).then((r) => {
+          // 推上去了才叫醒。在 push 之前叫，worker 的 todo 会抢在 activity 入库前到，
+          // 空手而归，新录音白等一个空闲周期。
+          if (r.sent) onPushed?.();
+        });
       },
       () => {
         if (deliberate) return;
