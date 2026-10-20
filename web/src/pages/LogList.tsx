@@ -22,6 +22,7 @@ import { confirmDiscard } from "../discard";
 import { AsyncContent } from "../components/AsyncContent";
 import { PageHeader } from "../components/PageHeader";
 import { PlayAll } from "../components/PlayAll";
+import { TimeHeader } from "../components/TimeHeader";
 import { QsoFields } from "../components/QsoFields";
 import { FIELD_LABELS } from "../fields";
 import type { QsoFormValues } from "../components/QsoFields";
@@ -266,7 +267,7 @@ export default function LogList() {
 
   const columns: TableColumnsType<Qso> = [
     {
-      title: `时间 ${time.label}`,
+      title: <TimeHeader />,
       dataIndex: "startAt",
       render: time.at,
       width: 184,

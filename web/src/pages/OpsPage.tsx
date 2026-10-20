@@ -16,6 +16,7 @@ import { api, errorText } from "../api";
 import type { Ops, PollRow } from "../api";
 import { AsyncContent } from "../components/AsyncContent";
 import { PageHeader } from "../components/PageHeader";
+import { TimeHeader } from "../components/TimeHeader";
 import { useStore } from "../store";
 import { useTime } from "../useTime";
 
@@ -111,7 +112,7 @@ export default function OpsPage() {
 
   const columns: TableColumnsType<PollRow> = [
     {
-      title: `时间 ${time.label}`,
+      title: <TimeHeader />,
       dataIndex: "at",
       render: time.at,
       width: 190,

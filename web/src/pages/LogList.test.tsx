@@ -96,8 +96,8 @@ describe('LogList 在手机上', () => {
     setViewportWidth(375)
     try {
       mount([qso({ qth: '深圳' })])
-      // 表头不该出现
-      expect(screen.queryAllByText('时间 UTC')).toHaveLength(0)
+      // 表头不该出现：没有任何一个 columnheader
+      expect(screen.queryAllByRole('columnheader')).toHaveLength(0)
       expect(screen.getByText('BD7KLO')).toBeInTheDocument()
       expect(button('编辑')).toBeInTheDocument()
       expect(button('删除')).toBeInTheDocument()
@@ -109,18 +109,27 @@ describe('LogList 在手机上', () => {
 
 describe('LogList 的时间显示', () => {
   // antd 的 Table 会把表头渲染两处（量宽度那一行和真正那一行），所以按数量断言。
+  // 「时间」和时区名分在两个元素里，表头的可访问名字是两段连起来。
   const seen = (text: string) => screen.getAllByText(text).length > 0
+  const header = (zone: RegExp) => screen.getAllByRole('columnheader', { name: zone })
 
   it('缺省 UTC，表头写明时区', () => {
     mount()
-    expect(seen('时间 UTC')).toBe(true)
+    expect(header(/时间\s*UTC/).length).toBeGreaterThan(0)
     expect(seen('2026-09-10 00:26:40')).toBe(true)
   })
 
   it('选了成都就按成都显示，表头跟着改', () => {
     mount([qso()], 'Asia/Shanghai')
-    expect(seen('时间 Asia/Shanghai UTC+08:00')).toBe(true)
+    expect(header(/时间\s*Asia\/Shanghai UTC\+08:00/).length).toBeGreaterThan(0)
     expect(seen('2026-09-10 08:26:40')).toBe(true)
+  })
+
+  it('时区名在小字里，装不下时截省略号，悬停看全文', () => {
+    mount([qso()], 'Asia/Shanghai')
+    const zone = screen.getAllByText('Asia/Shanghai UTC+08:00')[0]!
+    expect(zone).toHaveClass('time-header-zone')
+    expect(zone.closest('.time-header')).toHaveAttribute('title', '时间 Asia/Shanghai UTC+08:00')
   })
 })
 

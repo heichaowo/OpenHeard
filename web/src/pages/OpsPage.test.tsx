@@ -127,6 +127,23 @@ describe('OpsPage 的时间和采集记录', () => {
   })
 })
 
+describe('OpsPage 的时间表头', () => {
+  afterEach(() => localStorage.removeItem('openheard.zone'))
+
+  // 190 宽的列放不下「时间 Asia/Shanghai UTC+08:00」，和收听页、日志共用 TimeHeader。
+  it('IANA 时区的表头是「时间」加一行时区小字，不挤在一行里', async () => {
+    localStorage.setItem('openheard.zone', 'Asia/Shanghai')
+    ops.mockResolvedValue({
+      ...snapshot([]),
+      polls: [{ queryKey: 'src:4616460', at: now - 60, fetched: 200, parsed: 200, written: 3, ok: true, ms: 812 }],
+    })
+    mount()
+    const heads = await screen.findAllByRole('columnheader', { name: /时间\s*Asia\/Shanghai UTC\+08:00/ })
+    expect(heads.length).toBeGreaterThan(0)
+    expect(heads[0]!.querySelector('.time-header-zone')).toHaveTextContent('Asia/Shanghai UTC+08:00')
+  })
+})
+
 describe('OpsPage 的刷新按钮', () => {
   // 第一次拉完之后 loading 一直是假，按了刷新看不出有没有在拉。
   it('手动刷新时按钮转圈，拉完停下', async () => {

@@ -291,6 +291,13 @@ select {
   overflow: hidden;
 }
 
+/* 展开行里的内层表格不吃上面那条。antd 给内层表格的上下外边距是 -16px，
+   用来抵消展开格的内边距，它因此伸出自己的 wrapper 16px，被 overflow:hidden
+   裁掉表头上沿和最后一行（分页条也一样）。外层表格的 wrapper 照旧裁。 */
+.flush-card .ant-table-expanded-row .ant-table-wrapper {
+  overflow: visible;
+}
+
 /* 只管正常的数据格。展开行里是备注和改动历史，那些要能换行。
    装不下的截成省略号，不压到隔壁列上。固定在右边的操作列除外，
    它的阴影画在格子外面，一截就没了。 */
@@ -315,6 +322,29 @@ select {
 .flush-card .ant-table-expanded-row .ant-table-cell {
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* 内层表格的表头不折行：上面那条让每个格子都换行，窄屏上表头被拆成三行。 */
+.flush-card .ant-table-expanded-row .ant-table-thead .ant-table-cell {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+/* 表头里的「时间」和时区名分两行，见 components/TimeHeader.tsx。 */
+.time-header {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.time-header-zone {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ant-color-text-secondary);
 }
 
 .flush-card .ant-pagination {
