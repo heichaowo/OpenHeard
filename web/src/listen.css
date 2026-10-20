@@ -247,6 +247,13 @@
     justify-content: center;
   }
 
+  /* IANA 时区名带偏移二十多个字符，一行放不下，把「今天」和日期框挤出屏幕。让它折行。 */
+  .day-nav-label {
+    flex: 1 1 0;
+    min-width: 0;
+    white-space: normal;
+  }
+
   .day-nav-filters {
     flex-direction: column;
     align-items: stretch;
