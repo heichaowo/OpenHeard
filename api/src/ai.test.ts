@@ -8,6 +8,7 @@ import {
   aiVerdict,
   cleanAiResult,
   countTodo,
+  MEANINGLESS_SEEDS_SQL,
   resetAiErrors,
   selectAiByIds,
   selectMeaninglessSeeds,
@@ -224,6 +225,18 @@ describe('selectMeaninglessSeeds', () => {
     setVerdicts(db, ['d'], true, NOW);
     const ids = selectMeaninglessSeeds(db, 0, 1).map((a) => a.id).sort();
     assert.deepEqual(ids, ['a', 'd']);
+  });
+
+  // 库里有过 ANALYZE、而当时 activity_ai 还是空的，统计会让规划器改成扫整张 activity。
+  it('统计说 activity_ai 是空的，也不扫 activity', () => {
+    const rows = Array.from({ length: 3000 }, (_, i) => fm(`x${i}`, NOW - 5000 + i));
+    const { db } = setup(rows);
+    db.exec('ANALYZE');
+    const plan = (db.prepare(`EXPLAIN QUERY PLAN ${MEANINGLESS_SEEDS_SQL}`).all(0, 0) as { detail: string }[])
+      .map((r) => r.detail)
+      .join('|');
+    assert.doesNotMatch(plan, /SCAN a(\||$)/);
+    assert.match(plan, /SCAN ai/);
   });
 
   it('保留期之前的不要', () => {

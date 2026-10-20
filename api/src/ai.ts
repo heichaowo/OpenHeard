@@ -185,20 +185,23 @@ export function selectAiByIds(db: DatabaseSync, ids: string[]): Map<string, Acti
  * 无意义视图的种子：生效判定是无意义的发射。从 activity_ai 往 activity 连，
  * 走主键，25 万行的库上约 1 毫秒。反过来从 activity 扫过去要 158 毫秒。
  * 只有人工判定、还没有识别结果的发射另走一路，也是主键。
+ *
+ * 用 CROSS JOIN 钉死连接顺序：库里要是有过 ANALYZE，而当时 activity_ai 还是空的，
+ * 统计会让规划器改成扫 activity（25 万行上 74 毫秒）。
  */
+export const MEANINGLESS_SEEDS_SQL = `
+  SELECT a.* FROM activity_ai ai
+  CROSS JOIN activity a ON a.id = ai.activity_id
+  LEFT JOIN activity_verdict v ON v.activity_id = ai.activity_id
+  WHERE COALESCE(v.meaningless, ai.meaningless) = 1 AND a.start_at >= ?
+  UNION
+  SELECT a.* FROM activity_verdict v
+  CROSS JOIN activity a ON a.id = v.activity_id
+  WHERE v.meaningless = 1 AND a.start_at >= ?
+`;
+
 export function selectMeaninglessSeeds(db: DatabaseSync, sinceStartAt: number, dmrId: number): Activity[] {
-  const rows = db
-    .prepare(`
-      SELECT a.* FROM activity_ai ai
-      JOIN activity a ON a.id = ai.activity_id
-      LEFT JOIN activity_verdict v ON v.activity_id = ai.activity_id
-      WHERE COALESCE(v.meaningless, ai.meaningless) = 1 AND a.start_at >= ?
-      UNION
-      SELECT a.* FROM activity_verdict v
-      JOIN activity a ON a.id = v.activity_id
-      WHERE v.meaningless = 1 AND a.start_at >= ?
-    `)
-    .all(sinceStartAt, sinceStartAt) as Record<string, unknown>[];
+  const rows = db.prepare(MEANINGLESS_SEEDS_SQL).all(sinceStartAt, sinceStartAt) as Record<string, unknown>[];
   return rows.map((r) => rowToActivity(r, dmrId));
 }
 
