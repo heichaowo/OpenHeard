@@ -18,6 +18,7 @@ const conv = (id: string, startAt: number, over: Partial<Conversation> = {}): Co
   origin: 'brandmeister',
   status: 'unlogged',
   activities: [],
+  meaningless: false,
   ...over,
 })
 

@@ -118,6 +118,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await refresh()
         return r
       },
+      deleteConversations: async (picks) => {
+        const r = await api.deleteConversations(picks)
+        await refresh()
+        return r
+      },
+      setVerdict: async (activityIds, meaningless) => {
+        await api.setVerdict(activityIds, meaningless)
+        await refresh()
+      },
       addQso: async (draft) => {
         const qso = await api.addQso(draft)
         await refresh()

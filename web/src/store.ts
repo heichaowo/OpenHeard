@@ -30,6 +30,10 @@ export interface Store {
   ignore: (id: string, activityIds: string[]) => Promise<void>
   /** 一次忽略好几段。一条一条调的话，剩下那些段的 id 会变，后面全会 409。 */
   ignoreMany: (picks: ConversationPick[]) => Promise<{ ignored: number; missing: string[] }>
+  /** 整段删掉没入库的对话，连同录音。删不了的那几段报在 missing 里，不抛错。 */
+  deleteConversations: (picks: ConversationPick[]) => Promise<{ deleted: number; missing: string[] }>
+  /** 人工判定。meaningless 为 false 是「不是无意义」。 */
+  setVerdict: (activityIds: string[], meaningless: boolean) => Promise<void>
   addQso: (draft: QsoDraft) => Promise<Qso>
   /** 改一条已入库的。id、创建时间和来源聚类不动。 */
   editQso: (id: string, draft: QsoDraft) => Promise<void>

@@ -1,12 +1,8 @@
-import type {
-  Activity,
-  Channel,
-  Origin,
-  PendingItem,
-  Qso,
-  QsoDraft,
-  StationDefaults,
-} from '@core'
+import type { Channel, Conversation, ConversationStatus, Origin, PendingItem, Qso, QsoDraft, StationDefaults } from '@core'
+
+// 对话和发射的形状在 core 里定义，api 和页面共用同一份：识别结果、无意义判定、
+// AI 填了哪几个字段都在里面。
+export type { ActivityAi, AiFields, Conversation, ConversationStatus, HeardItem } from '@core'
 
 /** 后端回的错误。422 会带上还缺哪些字段。 */
 export class ApiError extends Error {
@@ -154,38 +150,10 @@ export interface Settings {
   map: MapSettings
 }
 
-/** 收听记录里的一行。结算过的带上结算成了什么。 */
-export type HeardItem = Activity & { settled?: 'logged' | 'ignored' }
-
 /** 通联本身之外还带上它用到的哪几次发射，只有受保护的 /api/qsos 才给。
  *  手工录入和 ADIF 导入的通联没有观测，这里是空数组。 */
 export type QsoWithActivities = Qso & {
   activities: { id: string; startAt: number; durationS: number }[]
-}
-
-/** 对话结算成什么了。旁听没有本台，永远到不了 pending/unlogged。 */
-export type ConversationStatus = 'pending' | 'unlogged' | 'logged' | 'ignored' | 'overheard'
-
-/**
- * 发射聚成的一次对话，跨 收听/待确认/日志 三种看法的同一张图。
- *
- * id、startAt、activities 无论从哪个视图（按天、未入库、搜索……）拼出来
- * 都得是同一份，靠后端按 contract.md「Windows and chains」那条规则保证。
- */
-export interface Conversation {
-  id: string
-  startAt: number
-  endAt: number
-  /** channelKey()：'tg:46001' | 'ch:438.500 中继' | 'fq:438.5' | origin。 */
-  channel: string
-  origin: Origin
-  status: ConversationStatus
-  /** 按时间升序。 */
-  activities: HeardItem[]
-  /** 只有结算成通联（status 'logged'）时才有。 */
-  qso?: { id: string; call: string; rstSent: string; rstRcvd: string }
-  /** 只有还没结算时才有，和 /api/pending 用的是同一套草稿构造。 */
-  draft?: QsoDraft
 }
 
 /** 批量结算里挑中的一段。id 是对话 id，不是段里成员的 id。 */
@@ -286,8 +254,8 @@ export interface ConversationsParams {
   /** 按天看：[from, to)，Unix 秒。 */
   from?: number
   to?: number
-  /** 未入库：出了待确认窗口、还没结算、还在保留期内的对话。 */
-  view?: 'unlogged'
+  /** 未入库：出了待确认窗口、还没结算、还在保留期内的对话。无意义：AI 或人判成无意义、还没入库的对话。 */
+  view?: 'unlogged' | 'meaningless'
   /** 搜呼号，至少 2 个字符，前缀匹配，跨整个保留期。 */
   q?: string
   origin?: Origin
@@ -303,7 +271,7 @@ export interface ConversationsResponse {
   next?: string
   /** 只有按天看才有：这一天这个来源出现过的信道。 */
   channels?: { key: string; label: string }[]
-  /** 只有 未入库 才有，q view 不给总数，见 contract.md。 */
+  /** 只有 未入库 和 无意义 才有，q view 不给总数，见 contract.md。 */
   total?: number
 }
 
@@ -375,6 +343,23 @@ export const api = {
     call<{ ignored: number; missing: string[] }>('/conversations/ignore', {
       method: 'POST',
       body: JSON.stringify({ picks }),
+    }),
+
+  /**
+   * 整段删掉没入库的对话，连同录音。picks 里每一项带上人看到的那几次发射。
+   * 永远 200：删不了的那段（已入库、已经没了、信道不一样）报在 missing 里，不挡别的段。
+   */
+  deleteConversations: (picks: ConversationPick[]) =>
+    call<{ deleted: number; missing: string[] }>('/conversations/delete', {
+      method: 'POST',
+      body: JSON.stringify({ picks }),
+    }),
+
+  /** 人工判定：meaningless 为 false 是「不是无意义」，改判回来。204。 */
+  setVerdict: (activityIds: string[], meaningless: boolean) =>
+    call<void>('/conversations/verdict', {
+      method: 'POST',
+      body: JSON.stringify({ activityIds, meaningless }),
     }),
 
   /** 每个模拟信道此刻开没开，api 内存里的状态，每 3 秒拉一次，不碰数据库。 */

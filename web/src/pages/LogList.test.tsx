@@ -53,6 +53,8 @@ const store = (qsos: Qso[]): Store => ({
   promote: vi.fn(),
   ignore: vi.fn(),
   ignoreMany: vi.fn(),
+  deleteConversations: vi.fn(),
+  setVerdict: vi.fn(),
   addQso: vi.fn(),
   editQso,
   removeQso,

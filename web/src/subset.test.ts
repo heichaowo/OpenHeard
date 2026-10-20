@@ -57,6 +57,7 @@ describe('fromPending', () => {
       status: 'pending',
       activities: acts,
       draft,
+      meaningless: false,
     })
   })
 
