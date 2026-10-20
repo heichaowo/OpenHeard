@@ -190,7 +190,7 @@ export const json = (res: ServerResponse, status: number, body: unknown, headers
 };
 
 /** 假 api：todo 里放什么就返回什么，推上来的结果记下，并把那条从 todo 里拿掉。 */
-export async function fakeApi() {
+export async function fakeApi(token = 'tok') {
   const state = {
     todo: [] as TodoItem[],
     posts: [] as AiResult[],
@@ -202,7 +202,7 @@ export async function fakeApi() {
     todoDelayMs: 0,
   };
   const server = await fakeServer(async (call, res) => {
-    if (call.headers.authorization !== 'Bearer tok') return json(res, 401, {});
+    if (call.headers.authorization !== `Bearer ${token}`) return json(res, 401, {});
     const path = call.path.split('?')[0];
     if (call.method === 'GET' && path === '/api/ingest/ai/todo') {
       if (state.failTodo) return json(res, state.failTodo, {});

@@ -40,7 +40,7 @@ export class AiSwitch {
           next === undefined
             ? undefined
             : startAi(next, this.#api, { timing: this.#timing, llama: keep ? old?.llama : undefined });
-        console.log(next === undefined ? '识别停了' : '识别按新设置起来了');
+        console.log(next === undefined ? '识别停了' : '识别起来了');
       })
       .catch((e) => console.error(`换识别设置出错：${(e as Error).message}`));
     return this.#chain;
