@@ -133,7 +133,7 @@ describe('ai 的生效值', () => {
   };
 
   it('没写、enabled 缺省或者是 false：undefined，不是错', () => {
-    for (const ai of [undefined, {}, { enabled: false }, { enabled: false, asr: { provider: 'bogus' } }]) {
+    for (const ai of [undefined, {}, { enabled: false }]) {
       const r = withRaw({ ai });
       assert.ok(r.ok);
       assert.equal(r.config.ai, undefined);
@@ -227,6 +227,7 @@ describe('ai 的生效值', () => {
       ['阈值越界', { enabled: true, vad: { threshold: 1.5 } }, /threshold/],
       ['端口', { enabled: true, text: { port: 70000 } }, /ai\.text\.port/],
       ['闲置时间', { enabled: true, text: { idleUnloadS: 0 } }, /idleUnloadS/],
+      ['语言是空的', { enabled: true, asr: { language: '' } }, /ai\.asr\.language 必填/],
       ['识别关着提取开着', { enabled: true, asr: { provider: 'off' } }, /ai\.asr 关着时 ai\.text 也要关/],
     ];
     for (const [name, ai, problem] of bad) {
@@ -237,7 +238,15 @@ describe('ai 的生效值', () => {
     }
     const notObject = withRaw({ ai: 'yes' });
     assert.ok(notObject.ok);
-    assert.equal(notObject.config.aiProblem, 'ai 要是对象');
+    assert.match(notObject.config.aiProblem!, /ai 要是对象/);
+  });
+
+  // 和 api 的 loadConfig 一个口径：关着的段写坏了也报，打开那一刻才会撞上
+  it('enabled 是 false 但段写坏了：ai 是 undefined，原因照报', () => {
+    const r = withRaw({ ai: { enabled: false, asr: { provider: 'bogus' } } });
+    assert.ok(r.ok);
+    assert.equal(r.config.ai, undefined);
+    assert.match(r.config.aiProblem!, /ai\.asr\.provider 只能是/);
   });
 
   it('三步都关着：当成没开，不报错', () => {

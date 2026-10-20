@@ -228,6 +228,8 @@ export function resolveAiConfig(raw: unknown): { config: AiConfig; problems: str
   if (vad.provider === 'local') needLocal(problems, 'ai.vad', vad);
   if (asr.provider === 'local') needLocal(problems, 'ai.asr', asr);
   else if (asr.provider !== 'off') needCloud(problems, 'ai.asr', asr);
+  // 语言空着，whisper-cli 的 -l 就没有值，云端也收不到 language。
+  if (asr.provider !== 'off' && asr.language === '') problems.push('ai.asr.language 必填');
   if (text.provider === 'local') needLocal(problems, 'ai.text', text);
   else if (text.provider !== 'off') needCloud(problems, 'ai.text', text);
   // 没有转写，文字模型拿到的是空串，会把每一次发射都判成噪声。

@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { Rule } from './brandmeister.ts';
 import { checkQueries } from '../../core/src/queries.ts';
-import { readAnalogChannels } from './core.ts';
+import { readAnalogChannels, resolveAiConfig } from './core.ts';
+import type { AiConfig as FileAiConfig } from './core.ts';
 
 export interface Query {
   key: string;
@@ -31,47 +32,15 @@ export interface AnalogConfig {
   recordingsDir: string;
 }
 
-/** 人声判断。只在本机跑，或者关掉。 */
-export interface VadConfig {
-  provider: 'local' | 'off';
-  /** 不带 `/` 的名字去 PATH 里找，带 `/` 的相对配置文件所在目录。 */
-  binPath: string;
-  modelPath: string;
-  threshold: number;
-}
-
-export interface AsrConfig {
-  provider: 'local' | 'openai-transcriptions' | 'chat-audio' | 'off';
-  binPath: string;
-  modelPath: string;
-  language: string;
-  prompt: string;
-  baseUrl: string;
-  model: string;
-  apiKey: string;
-  /** 最后合并进云端请求体，厂商各自的开关（关思考、限输出）都靠它，代码里不认厂商。 */
-  extraBody: Record<string, unknown>;
-}
-
-export interface TextConfig {
-  provider: 'local' | 'openai-chat' | 'off';
-  binPath: string;
-  modelPath: string;
-  port: number;
-  idleUnloadS: number;
-  baseUrl: string;
-  model: string;
-  apiKey: string;
-  extraBody: Record<string, unknown>;
-}
+// 三步的字段和 core 的校验是同一份类型，不在这里再抄一遍。
+export type VadConfig = FileAiConfig['vad'];
+export type AsrConfig = FileAiConfig['asr'];
+export type TextConfig = FileAiConfig['text'];
 
 /** 语音识别。生效值：关着或者写坏了是 undefined，不起识别。 */
-export interface AiConfig {
+export interface AiConfig extends Omit<FileAiConfig, 'enabled'> {
   /** 和 api 的 recordingsDirOf 同一个算法：有没有开模拟守听都有值。 */
   recordingsDir: string;
-  vad: VadConfig;
-  asr: AsrConfig;
-  text: TextConfig;
 }
 
 export interface DaemonConfig {
@@ -92,102 +61,32 @@ export interface DaemonConfig {
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
-const str = (v: unknown, fallback: string) => (typeof v === 'string' ? v : fallback);
-
 /**
  * 读 `ai`。写坏了给 undefined 和原因，不给 problems：识别是可选的，
  * 为它退出会让 launchd 每 30 秒重启一次，采集跟着停。
- * 严格的校验在 api 的设置页上，那里拦得住手填的值；这里只管手改文件的情况。
+ * 校验和 api 用的是 core 里同一个函数，这里只补路径：裸名字的 binPath 留着去
+ * PATH 找，带 / 的和 modelPath 相对配置文件。
  */
 export function readAi(
   raw: unknown,
   recordingsDir: string,
   near: (p: string) => string,
 ): { ai?: AiConfig; problem?: string } {
-  if (raw === undefined) return {};
-  if (!isObject(raw)) return { problem: 'ai 要是对象' };
-  if (raw.enabled !== true) return {};
-
-  const bad: string[] = [];
-  const section = (name: string): Record<string, unknown> => {
-    const v = raw[name];
-    if (v === undefined) return {};
-    if (isObject(v)) return v;
-    bad.push(`ai.${name} 要是对象`);
-    return {};
-  };
-  const pick = <T extends string>(name: string, v: unknown, allowed: readonly T[]): T => {
-    const given = v === undefined ? allowed[0]! : v;
-    if (allowed.includes(given as T)) return given as T;
-    bad.push(`ai.${name}.provider 只能是 ${allowed.join('、')}`);
-    return allowed[0]!;
-  };
-  // 路径：裸名字留着去 PATH 找，带 / 的相对配置文件。
-  const bin = (v: unknown, fallback: string) => {
-    const p = str(v, fallback);
-    return p.includes('/') ? near(p) : p;
-  };
-  const body = (name: string, v: unknown) => {
-    if (v === undefined) return {};
-    if (isObject(v)) return v;
-    bad.push(`ai.${name}.extraBody 要是对象`);
-    return {};
-  };
-  const cloud = (name: string, c: { baseUrl: string; model: string; apiKey: string }) => {
-    if (!/^https?:\/\/\S+$/.test(c.baseUrl)) bad.push(`ai.${name}.baseUrl 要是 http(s) 地址`);
-    if (c.model === '') bad.push(`ai.${name}.model 必填`);
-    if (c.apiKey === '') bad.push(`ai.${name}.apiKey 必填`);
-  };
-
-  const v = section('vad');
-  const vad: VadConfig = {
-    provider: pick('vad', v.provider, ['local', 'off']),
-    binPath: bin(v.binPath, '/opt/homebrew/bin/whisper-vad-speech-segments'),
-    modelPath: near(str(v.modelPath, './models/ggml-silero-v5.1.2.bin')),
-    threshold: typeof v.threshold === 'number' ? v.threshold : 0.5,
-  };
-  if (!(vad.threshold > 0 && vad.threshold < 1)) bad.push('ai.vad.threshold 要在 0 和 1 之间');
-
-  const a = section('asr');
-  const asr: AsrConfig = {
-    provider: pick('asr', a.provider, ['local', 'openai-transcriptions', 'chat-audio', 'off']),
-    binPath: bin(a.binPath, '/opt/homebrew/bin/whisper-cli'),
-    modelPath: near(str(a.modelPath, './models/ggml-large-v3-turbo-q5_0.bin')),
-    language: str(a.language, 'zh'),
-    prompt: str(a.prompt, ''),
-    baseUrl: str(a.baseUrl, ''),
-    model: str(a.model, ''),
-    apiKey: str(a.apiKey, ''),
-    extraBody: body('asr', a.extraBody),
-  };
-  if (asr.language === '') bad.push('ai.asr.language 不能是空的');
-  if (asr.provider === 'openai-transcriptions' || asr.provider === 'chat-audio') cloud('asr', asr);
-
-  const t = section('text');
-  const text: TextConfig = {
-    provider: pick('text', t.provider, ['local', 'openai-chat', 'off']),
-    binPath: bin(t.binPath, '/opt/homebrew/bin/llama-server'),
-    modelPath: near(str(t.modelPath, './models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf')),
-    port: typeof t.port === 'number' ? t.port : 8091,
-    idleUnloadS: typeof t.idleUnloadS === 'number' ? t.idleUnloadS : 120,
-    baseUrl: str(t.baseUrl, ''),
-    model: str(t.model, ''),
-    apiKey: str(t.apiKey, ''),
-    extraBody: body('text', t.extraBody),
-  };
-  if (text.provider === 'local') {
-    if (!Number.isInteger(text.port) || text.port < 1 || text.port > 65535) bad.push('ai.text.port 要是端口号');
-    if (!Number.isInteger(text.idleUnloadS) || text.idleUnloadS < 1) bad.push('ai.text.idleUnloadS 要是正整数');
-  }
-  if (text.provider === 'openai-chat') cloud('text', text);
-  // 没有转写就没东西可提取。放行的话文字模型拿到空文本，会回 noise，
-  // 有人声的发射全被标成无意义藏起来。
-  if (asr.provider === 'off' && text.provider !== 'off') bad.push('ai.asr 关着时 ai.text 也要关');
-
-  if (bad.length > 0) return { problem: `ai 写得不对，识别没起：${bad.join('，')}` };
+  const { config, problems } = resolveAiConfig(raw);
+  if (problems.length > 0) return { problem: `ai 写得不对，识别没起：${problems.join('，')}` };
+  if (!config.enabled) return {};
+  const { vad, asr, text } = config;
   // 三步都关着没有事可做。当成没开，不报错。
   if (vad.provider === 'off' && asr.provider === 'off' && text.provider === 'off') return {};
-  return { ai: { recordingsDir, vad, asr, text } };
+  const bin = (p: string) => (p.includes('/') ? near(p) : p);
+  return {
+    ai: {
+      recordingsDir,
+      vad: { ...vad, binPath: bin(vad.binPath), modelPath: near(vad.modelPath) },
+      asr: { ...asr, binPath: bin(asr.binPath), modelPath: near(asr.modelPath) },
+      text: { ...text, binPath: bin(text.binPath), modelPath: near(text.modelPath) },
+    },
+  };
 }
 
 export type ConfigResult =

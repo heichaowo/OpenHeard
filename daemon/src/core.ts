@@ -6,3 +6,6 @@
 
 export type { Activity, Origin } from '../../core/src/index.ts';
 export { planTuning, readAnalogChannels } from '../../core/src/tuning.ts';
+// ai 配置的缺省值和校验。api 的设置页和 loadConfig 用的是同一个函数，两边不会对不上。
+export { resolveAiConfig, resolveMapConfig } from '../../core/src/ai-config.ts';
+export type { AiConfig } from '../../core/src/ai-config.ts';

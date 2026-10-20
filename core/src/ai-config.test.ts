@@ -33,6 +33,13 @@ describe('resolveAiConfig', () => {
     expect(ok.problems).toEqual([]);
   });
 
+  it('识别开着时语言不能是空的，关着时不管', () => {
+    const r = resolveAiConfig({ asr: { language: ' ' }, text: { provider: 'off' } });
+    expect(r.problems).toEqual(['ai.asr.language 必填']);
+    const off = resolveAiConfig({ asr: { provider: 'off', language: '' }, text: { provider: 'off' } });
+    expect(off.problems).toEqual([]);
+  });
+
   it('baseUrl 不是 http 地址就报', () => {
     const r = resolveAiConfig({ text: { provider: 'openai-chat', baseUrl: 'ftp://x', model: 'm', apiKey: 'k' } });
     expect(r.problems).toEqual(['ai.text.baseUrl 要是 http 或 https 地址']);
