@@ -81,7 +81,8 @@ describe('MapPicker 的起点和标记', () => {
     mount(f, { fieldQth: '深圳' })
     await waitFor(() => expect(f.adapter.setView).toHaveBeenCalledWith({ lat: 22.54, lon: 114.06 }, 10))
     expect(f.adapter.search).toHaveBeenCalledExactlyOnceWith('深圳')
-    expect(f.adapter.setMarker).toHaveBeenLastCalledWith(null)
+    // 摆标记的 effect 要等「就绪」那次渲染提交之后才跑，可能比搜索回来还晚。
+    await waitFor(() => expect(f.adapter.setMarker).toHaveBeenLastCalledWith(null))
     expect(useButton()).toBeDisabled()
   })
 
