@@ -40,12 +40,26 @@ interface NominatimAddress {
   district?: string
 }
 
+const PREFECTURE = /[市州盟]$|地区$/
+const DISTRICT = /[区县旗]$/
+
 /**
- * 城市加区县，不用 display_name：那是一长串逗号隔开的地址。街道（suburb）太细，不要：
- * 克拉玛依的反查是 city 克拉玛依区 加 suburb 昆仑路街道，写到街道就是把对方的位置说得比事实准。
+ * 地级市加区县，不用 display_name 整串：那是一长串逗号隔开的地址。街道（suburb）太细，不要：
+ * 克拉玛依的反查是 city 克拉玛依区 加 suburb 迎宾街道，写到街道就是把对方的位置说得比事实准。
+ *
+ * 大陆的反查把区放在 city 里，地级市不在 address 里，只在 display_name 里 city 的下一段
+ * （春熙路街道, 锦江区, 成都市, 四川省）。那一段不像地级单位，或者就是省名（直辖市），
+ * 就用省名，省名也没有就只写区。
  */
-export function qthFromNominatim(a: NominatimAddress | undefined): string | undefined {
+export function qthFromNominatim(a: NominatimAddress | undefined, displayName?: string): string | undefined {
   if (a === undefined) return undefined
+  if (a.city !== undefined && DISTRICT.test(a.city)) {
+    const parts = displayName?.split(', ') ?? []
+    const i = parts.indexOf(a.city)
+    const next = i < 0 ? undefined : parts[i + 1]
+    const upper = next !== undefined && next !== a.state && PREFECTURE.test(next) ? next : a.state
+    return `${upper ?? ''}${a.city}`
+  }
   const place = a.city ?? a.town ?? a.municipality ?? a.county ?? a.state
   const district = a.city_district ?? a.district ?? (a.county !== place ? a.county : undefined)
   const out = [place, district].filter((v, i, all): v is string => !!v && all.indexOf(v) === i).join('')
@@ -92,7 +106,7 @@ export function nominatimReverse(p: LatLon): Promise<string | undefined> {
       zoom: 14,
       addressdetails: 1,
       'accept-language': 'zh',
-    })) as { address?: NominatimAddress }
-    return qthFromNominatim(r.address)
+    })) as { address?: NominatimAddress; display_name?: string }
+    return qthFromNominatim(r.address, r.display_name)
   }).then((r) => r)
 }
