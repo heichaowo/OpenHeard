@@ -211,6 +211,10 @@ export function useConversationList(
 ) {
   const [state, setState] = useState<ListState>(EMPTY)
   const seq = useRef(0)
+  // mergeLatest 每次调用领一个号，已经应用过更新的号之后，更旧的响应作废。
+  // 轮询和结算之后的刷新会同时在路上，先发的未必先回。
+  const reqSeq = useRef(0)
+  const appliedReq = useRef(0)
   const stateRef = useRef(state)
   useEffect(() => {
     stateRef.current = state
@@ -278,9 +282,11 @@ export function useConversationList(
       const viewParams = paramsRef.current
       if (viewParams === null) return
       const mine = seq.current
+      const req = ++reqSeq.current
       try {
         const r = await api.conversations({ ...viewParams, cursor: undefined })
-        if (mine !== seq.current) return
+        if (mine !== seq.current || req < appliedReq.current) return
+        appliedReq.current = req
         // 此刻能不能动列表，在回来的这一刻问一次：请求在路上时人可能已经按下去了。
         const can = canInsertRef.current()
         setState((s) => {

@@ -497,6 +497,37 @@ describe('游标', () => {
   })
 })
 
+// 轮询和结算之后的刷新会同时在路上，先发的未必先回。
+describe('旧的响应', () => {
+  const params: ConversationsParams = { view: 'unlogged' }
+
+  it('结算之前发出的轮询迟到了：不把已经摘掉的行带回来', async () => {
+    const c = [conv('c3', 30), conv('c2', 20), conv('c1', 10)]
+    conversations.mockResolvedValueOnce({ items: c })
+    const hook = renderHook(() => useConversationList(params, null, () => true))
+    await waitFor(() => expect(hook.result.current.items.length).toBe(3))
+
+    let late!: (v: unknown) => void
+    conversations.mockReturnValueOnce(new Promise((r) => (late = r)))
+    let slow!: Promise<void>
+    act(() => {
+      slow = hook.result.current.settleRefresh()
+    })
+    conversations.mockResolvedValueOnce({ items: [c[0]!, c[2]!] })
+    await act(async () => {
+      await hook.result.current.settleRefresh(['c2'])
+    })
+    expect(hook.result.current.items.map((x) => x.id)).toEqual(['c3', 'c1'])
+
+    await act(async () => {
+      late({ items: c })
+      await slow
+    })
+
+    expect(hook.result.current.items.map((x) => x.id)).toEqual(['c3', 'c1'])
+  })
+})
+
 // 行要离开视图（比如 AI 刚把它判成无意义）和行要进来受同一道门：人在操作时先留在原处。
 describe('行离开视图', () => {
   const params: ConversationsParams = { view: 'unlogged' }
