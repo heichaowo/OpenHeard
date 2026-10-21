@@ -69,7 +69,8 @@ export function qthFromNominatim(a: NominatimAddress | undefined, displayName?: 
 async function getJson(path: string, params: Record<string, string | number>): Promise<unknown> {
   const qs = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)]))
   // 不设 referrerPolicy、不加自定义头：规定要求浏览器带上有效的 Referer。
-  const res = await fetch(`${BASE}${path}?${qs}`)
+  // 挂住的请求不超时的话，队列里后面的搜索和反查都跟着等。
+  const res = await fetch(`${BASE}${path}?${qs}`, { signal: AbortSignal.timeout(10_000) })
   if (!res.ok) throw new Error(`地名服务回了 ${res.status}`)
   return res.json()
 }

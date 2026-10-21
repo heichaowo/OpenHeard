@@ -159,7 +159,8 @@ describe('Nominatim 请求', () => {
       limit: '5',
       format: 'jsonv2',
     })
-    expect(init).toBeUndefined()
+    // 只带超时信号，不设 referrerPolicy，不加自定义头。
+    expect(Object.keys(init as object)).toEqual(['signal'])
     expect(hits).toEqual([{ name: '北京', detail: '北京市, 中国', point: { lat: 39.9, lon: 116.4 } }])
   })
 
@@ -179,5 +180,15 @@ describe('Nominatim 请求', () => {
     fetchMock.mockResolvedValue({ ok: false, status: 429 })
     await new Promise((r) => setTimeout(r, 1150))
     await expect(nominatimSearch('北京')).rejects.toThrow('429')
+  })
+
+  // 一个请求挂住的话，队列里后面的搜索和反查都跟着等。
+  it('请求带 10 秒超时的信号，挂住的请求会被放弃', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => [] })
+    await new Promise((r) => setTimeout(r, 1150))
+    await nominatimSearch('北京')
+    const signal = (fetchMock.mock.calls[0]![1] as { signal: AbortSignal }).signal
+    expect(signal).toBeInstanceOf(AbortSignal)
+    expect(signal.aborted).toBe(false)
   })
 })
