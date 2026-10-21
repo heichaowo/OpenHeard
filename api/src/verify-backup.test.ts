@@ -90,6 +90,36 @@ describe('verifyBackup', () => {
     assert.equal(problems[0], `schema 版本对不上：${expect.version + 1} -> ${expect.version}`);
   });
 
+  // 升级前的备份由新代码去备份旧库。第 3 版的库里还没有第 4 版那三张表，
+  // 一张张去数就报 SQL logic error，install.sh 于是停在备份这一步，永远升不上去。
+  it('旧版本的库少了新表，照样备份得过', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'openheard-bk-'));
+    const src = join(dir, 'v3.db');
+    const db = openDb(src);
+    insertQso(db, qso('q1'));
+    db.exec('DROP TABLE deleted_activity; DROP TABLE activity_ai; DROP TABLE activity_verdict');
+    const expect = { version: userVersion(db), counts: tableCounts(db) };
+    const out = join(dir, 'backup.db');
+    db.exec(`VACUUM INTO '${out}'`);
+    db.close();
+
+    assert.equal('activity_ai' in expect.counts, false);
+    assert.deepEqual(verifyBackup(out, expect), []);
+  });
+
+  it('源库有的表备份里没有，要报出来', () => {
+    const { dir, expect } = madeBackup();
+    const bare = join(dir, 'bare2.db');
+    const db = new DatabaseSync(bare);
+    db.exec('CREATE TABLE activity (id TEXT); CREATE TABLE resolved_activity (activity_id TEXT); CREATE TABLE poll_log (at INTEGER)');
+    db.exec(`PRAGMA user_version = ${expect.version}`);
+    db.close();
+
+    const problems = verifyBackup(bare, expect);
+
+    assert.equal(problems.some((p) => p.startsWith('qso ')), true);
+  });
+
   it('少一张表也算读不了', () => {
     const { dir, expect } = madeBackup();
     const bare = join(dir, 'bare.db');

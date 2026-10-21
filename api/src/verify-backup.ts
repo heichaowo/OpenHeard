@@ -20,9 +20,19 @@ export function backupStamp(now = new Date()): string {
   return now.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
 }
 
+/**
+ * 只数这个库里有的表。升级前的备份是新代码在备份旧库，旧库还没有新版本加的表，
+ * 一张张硬数就报 SQL logic error，备份失败，升级也就停住了。
+ */
 export function tableCounts(db: DatabaseSync): Record<string, number> {
+  const have = new Set(
+    (db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all() as { name: string }[]).map(
+      (r) => r.name,
+    ),
+  );
   const out: Record<string, number> = {};
   for (const t of TABLES) {
+    if (!have.has(t)) continue;
     out[t] = Number((db.prepare(`SELECT count(*) AS n FROM ${t}`).get() as { n: number }).n);
   }
   return out;
@@ -55,8 +65,9 @@ export function verifyBackup(
     if (version !== expect.version) {
       problems.push(`schema 版本对不上：${expect.version} -> ${version}`);
     }
+    // 按源库数到的那几张表比。源库有、备份里没有的表，after 里是 undefined，照样报出来。
     const after = tableCounts(db);
-    for (const t of TABLES) {
+    for (const t of Object.keys(expect.counts)) {
       if (after[t] !== expect.counts[t]) {
         problems.push(`${t} 行数对不上：${expect.counts[t]} -> ${after[t]}`);
       }
