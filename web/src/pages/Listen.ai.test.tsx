@@ -107,6 +107,26 @@ describe('转写和标记', () => {
     expect(blocks[1]).toHaveTextContent('还没识别')
   })
 
+  it('手机上模拟侧的每张卡都留着 AI 字段那一行和两行的标签行，数字侧没有', async () => {
+    setViewportWidth(375)
+    const waiting = fmConv([fm('w1', 0, { mine: true })])
+    const digital = conv([act('d1', 0, { mine: true }), act('d2', 10, { callsign: 'BD7DDD' })])
+    serve(filled(), waiting, digital)
+    const { container } = render(tree(store([], { aiEnabled: true }), unlogged))
+
+    await screen.findByText('BD7DDD')
+    const cards = [...container.querySelectorAll('.ant-list-item .ant-card')]
+    expect(cards).toHaveLength(3)
+    const [withFields, bare, plain] = cards
+    // 有字段的写字段，没结果的留空行，两张的行本身一样在。
+    expect(withFields!.querySelector('.card-ai-line')).toHaveTextContent('AI：QTH 深圳')
+    expect(bare!.querySelector('.card-ai-line')).toHaveTextContent('')
+    expect(withFields!.querySelector('.card-tags-reserved')).not.toBeNull()
+    expect(bare!.querySelector('.card-tags-reserved')).not.toBeNull()
+    expect(plain!.querySelector('.card-ai-line')).toBeNull()
+    expect(plain!.querySelector('.card-tags-reserved')).toBeNull()
+  })
+
   it('数字侧的卡片没有转写块', async () => {
     setViewportWidth(375)
     serve(conv([act('d1', 0, { mine: true }), act('d2', 10, { callsign: 'BA1AA' })]))

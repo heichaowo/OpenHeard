@@ -273,3 +273,27 @@
   padding: 10px 16px;
   border-block-end: 1px solid var(--ant-color-border-secondary);
 }
+
+/* ---- 手机卡片：识别结果来之前先占好的位置 ---- */
+
+/* 标签行：模拟侧的卡片留两行的高度（标签 22px，行距 4px）。识别中变成别的标签、
+   还缺变成可直接入库时换行数不同，也不推动下面的按钮。 */
+.card-tags {
+  margin-block-end: 8px;
+}
+
+.card-tags-reserved {
+  min-height: 48px;
+  align-content: flex-start;
+}
+
+/* AI 填了哪些字段，固定一行，长了截断。没有结果时是空行，位置先占着。 */
+.card-ai-line {
+  height: 20px;
+  margin-block-end: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  line-height: 20px;
+}

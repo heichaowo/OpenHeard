@@ -573,6 +573,9 @@ export function PhoneRows({
       renderItem={(r) => {
         const { conv } = r
         const extra = mode === 'normal' ? aiLine(r.draft, r.aiFilled) : undefined
+        // 模拟侧的卡片，标签行和 AI 字段那一行都先占好位置：识别结果什么时候来，
+        // 按钮都不挪。数字侧没有识别，不留。
+        const fm = mode === 'normal' && fmMembers(conv).length > 0
         return (
           <List.Item style={{ padding: '0 0 12px' }}>
             <Card size="small" style={{ width: '100%' }}>
@@ -603,7 +606,7 @@ export function PhoneRows({
                 </div>
               )}
 
-              <Space size={4} wrap style={{ marginBottom: 8 }}>
+              <Space size={4} wrap className={fm ? 'card-tags card-tags-reserved' : 'card-tags'}>
                 {mode === 'normal' &&
                   isUnresolved(conv.status) &&
                   (r.missing.length === 0 ? (
@@ -629,8 +632,8 @@ export function PhoneRows({
 
               <CardTranscript conv={conv} />
 
-              {extra !== undefined && (
-                <div style={{ marginBottom: 8 }}>
+              {(fm || extra !== undefined) && (
+                <div className="card-ai-line" title={extra}>
                   <Typography.Text type="secondary">{extra}</Typography.Text>
                 </div>
               )}
