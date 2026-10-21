@@ -119,8 +119,10 @@ describe('watchAnalog', () => {
       assert.ok(near(d[0]!, 2, 0.05) && near(d[1]!, 1, 0.1) && near(d[2]!, 1, 0.1), `时长 ${d.join(', ')}`);
 
       const samples = (a: Activity) => (statSync(join(rec, `${a.id}.wav`)).size - 44) / 2;
-      // 第一段：0.6 秒前导加 2 秒，强制关掉的那一块也在里面。录音不超过这个上限。
-      assert.ok(near(samples(events[0]!), AUDIO_RATE * 2.6, 1200), `第一段 ${samples(events[0]!)} 个样点`);
+      // 第一段：2 秒加载波到来前的一两块，强制关掉的那一块也在里面。0.6 秒前导里
+      // 载波来之前的底噪不进录音。
+      const first = samples(events[0]!);
+      assert.ok(first >= AUDIO_RATE * 2 && first <= AUDIO_RATE * 2.15, `第一段 ${first} 个样点`);
       assert.equal(readdirSync(rec).length, 3);
 
       // 两个信道都报了状态
@@ -129,6 +131,28 @@ describe('watchAnalog', () => {
         statuses.at(-1)!.map((s) => s.freqMhz),
         [438.5, 438.975],
       );
+    } finally {
+      radio.stop();
+    }
+  });
+
+  // 前导留 0.6 秒是给 MDC 解码的。载波来之前那一截是接收机的底噪，写进录音
+  // 就是每段开头一截沙声。录音从载波到来前一块开始。
+  it('录音开头不带载波来之前的底噪', async () => {
+    const rec = mkdtempSync(join(tmpdir(), 'openheard-rec-'));
+    const bin = fakeRtlSdr(iq([['noise', 1.5], ['carrier', 1], ['noise', 0.6]]));
+    const events: Activity[] = [];
+    let exited = false;
+    const radio = watchAnalog(cfg(bin, rec), (a) => events.push(a), () => {
+      exited = true;
+    });
+    try {
+      await until(() => exited && events.length >= 1);
+      const e = events[0]!;
+      const n = (statSync(join(rec, `${e.id}.wav`)).size - 44) / 2;
+      // 发射本身约 1 秒，前面最多多出两块（100 毫秒），不是 0.6 秒前导。
+      assert.ok(n <= AUDIO_RATE * (e.durationS + 0.15), `录音 ${n} 个样点，发射 ${e.durationS} 秒`);
+      assert.ok(n >= AUDIO_RATE * e.durationS, `录音 ${n} 个样点不该比发射还短`);
     } finally {
       radio.stop();
     }

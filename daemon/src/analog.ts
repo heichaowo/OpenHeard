@@ -137,9 +137,17 @@ function listen(
   let capturedN = 0;
   const preroll = new Int16Array(prerollN);
   let prerollLen = 0;
+  // 前导里每一块的噪声能量，和 preroll 里的块一一对应，旧的在前。开门时靠它找
+  // 载波是从哪一块来的：前导只给 MDC 解码用，写进录音的从那里开始。
+  const prerollBlocks = Math.ceil(prerollN / blockN);
+  let prerollNoise: number[] = [];
+  // 这一次录音从 captured 的第几个样点开始写进文件。
+  let captureTrim = 0;
 
   /** 静噪关着时只留最后 prerollN 个样点。 */
-  const keep = (pcm: Int16Array) => {
+  const keep = (pcm: Int16Array, noiseDb: number | undefined) => {
+    prerollNoise.push(noiseDb ?? Infinity);
+    if (prerollNoise.length > prerollBlocks) prerollNoise = prerollNoise.slice(-prerollBlocks);
     if (pcm.length >= prerollN) {
       preroll.set(pcm.subarray(pcm.length - prerollN));
       prerollLen = prerollN;
@@ -221,12 +229,14 @@ function listen(
 
     // 强制关掉的那一块还压着载波，属于这次发射，不是下一次的前导。
     if (!detector.isOpen && !event?.forced) {
-      keep(pcm);
+      keep(pcm, detector.noiseDb);
     } else {
       if (!wasOpen) {
         captured.set(preroll.subarray(0, prerollLen));
         capturedN = prerollLen;
+        captureTrim = carrierStart(prerollLen);
         prerollLen = 0;
+        prerollNoise = [];
       }
       capture(pcm);
     }
@@ -235,9 +245,24 @@ function listen(
     // 否则它会串进下一次发射。所以按状态翻转清，不按有没有事件清。
     const closedNow = wasOpen && !detector.isOpen;
     const audio = closedNow ? captured.slice(0, capturedN) : undefined;
+    const trim = captureTrim;
     if (closedNow) capturedN = 0;
 
-    if (event && audio) emit(event, audio);
+    if (event && audio) emit(event, audio, trim);
+  };
+
+  /**
+   * 前导里载波是从哪个样点来的。从开门那一刻往回数，噪声一直压在关门门限以下的
+   * 那几块是载波，再多留一块给按下 PTT 那一下和紧跟着的 MDC。2026-10-21 量过
+   * 4 段录音，0.6 秒的前导里前 0.55 秒都是底噪。
+   */
+  const carrierStart = (len: number): number => {
+    const closeAbove = detector.closeAboveDb;
+    if (closeAbove === undefined) return 0;
+    let j = prerollNoise.length;
+    while (j > 0 && prerollNoise[j - 1]! < closeAbove) j--;
+    const keepBlocks = prerollNoise.length - Math.max(0, j - 1);
+    return Math.max(0, len - keepBlocks * blockN);
   };
 
   /**
@@ -245,8 +270,9 @@ function listen(
    * 里正常关闭的事件和 flush() 里收尾时还开着的那次共用这一份，否则两处
    * 各写一遍，字段迟早会对不上。
    */
-  const emit = (event: SquelchEvent, audio: Int16Array): void => {
+  const emit = (event: SquelchEvent, audio: Int16Array, trim: number): void => {
     // 只有 CRC 通过且 unit ID 相等才算本台。op 和 arg 不参与判定。
+    // 解码用完整的音频，前导里有什么都不丢。录音才去掉载波来之前那一截。
     const frames = cfg.myUnitId === undefined ? [] : decodeMdc(audio, rate);
     const mine = frames.some((f) => f.unitId === cfg.myUnitId);
     if (frames.length > 0) {
@@ -271,7 +297,7 @@ function listen(
       channel: ch.channel,
       audioSnrDb: Number(event.audioSnrDb.toFixed(1)),
     };
-    const buf = wav(audio, rate);
+    const buf = wav(audio.subarray(Math.min(trim, audio.length)), rate);
     if (cfg.recordingsDir) {
       writeFileSync(join(cfg.recordingsDir, `${activity.id}.wav`), buf);
     }
@@ -317,7 +343,7 @@ function listen(
       const last = detector.flush();
       if (!last) return;
       console.error(`${mhz} MHz 收尾时还有一次未闭合的发射，时长 ${last.durationS.toFixed(2)} 秒，照常记下`);
-      emit(last, captured.slice(0, capturedN));
+      emit(last, captured.slice(0, capturedN), captureTrim);
       capturedN = 0;
     },
   };
