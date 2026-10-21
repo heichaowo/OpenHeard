@@ -475,6 +475,21 @@ describe('游标', () => {
     expect(conversations).toHaveBeenLastCalledWith({ ...params, cursor: 'n2' })
   })
 
+  it('翻到了头：之后的轮询不把「更早的」带回来', async () => {
+    const hook = await setup([conv('c3', 30)], 'n1')
+    conversations.mockResolvedValueOnce({ items: [conv('c2', 20)], next: undefined })
+    await act(async () => {
+      hook.result.current.loadMore()
+    })
+    await waitFor(() => expect(hook.result.current.loadingMore).toBe(false))
+    expect(hook.result.current.hasMore).toBe(false)
+
+    await poll(hook, [conv('c3', 30)], 'n1')
+
+    expect(hook.result.current.hasMore).toBe(false)
+    expect(hook.result.current.items.map((c) => c.id)).toEqual(['c3', 'c2'])
+  })
+
   it('第一页已经是全部：没有「更早的」', async () => {
     const hook = await setup([conv('c2', 20), conv('c1', 10)], 'n1')
     await poll(hook, [conv('c2', 20), conv('c1', 10)])

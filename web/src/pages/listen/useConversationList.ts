@@ -13,6 +13,9 @@ export interface Live {
 
 interface ListState extends Live {
   next?: string
+  /** 已经用「更早的」翻到了头。之后轮询拉回来的第一页还带着游标，不能当成又有下一页。
+   *  换视图时随 EMPTY 一起清掉。 */
+  reachedEnd: boolean
   channels?: { key: string; label: string }[]
   total?: number
   /** 旧 id 到新 id：更早的发射补进来、对话拆开合并时 id 会变，页面按它把挑中的、展开的搬到新 id 上。
@@ -28,6 +31,7 @@ const EMPTY: ListState = {
   buffer: [],
   stale: new Set(),
   renamed: {},
+  reachedEnd: false,
   loading: false,
   loadingMore: false,
 }
@@ -296,8 +300,9 @@ export function useConversationList(
             channels: r.channels ?? s.channels,
             total: r.total ?? s.total,
             // 整个视图一页装得下，后面就没有了。原来没有下一页、现在装不下了，
-            // 才用这一页的游标。已经往后翻了的不动：游标得是翻到的那一头。
-            next: r.next === undefined ? undefined : (s.next ?? r.next),
+            // 才用这一页的游标。已经往后翻了的不动：游标得是翻到的那一头，
+            // 翻到头了的不再要游标。
+            next: r.next === undefined || s.reachedEnd ? undefined : (s.next ?? r.next),
           }
         })
       } catch {
@@ -341,6 +346,7 @@ export function useConversationList(
             stale: m.stale,
             renamed: composeRenamed(v.renamed, m.renamed),
             next: r.next,
+            reachedEnd: r.next === undefined,
             loadingMore: false,
           }
         })
