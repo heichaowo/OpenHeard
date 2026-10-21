@@ -187,6 +187,26 @@ describe('转写和标记', () => {
     expect(digital.querySelector('.transcript-line')).toBeNull()
   })
 
+  it('桌面展开表的识别列有宽度，表自己横向滚动（平板宽度下不会被外层裁成 0 宽）', async () => {
+    serve(filled())
+    const { container } = render(tree(store([], { aiEnabled: true }), unlogged))
+    await screen.findByText('BA1AA')
+    await userEvent.click(container.querySelector('.ant-table-row-expand-icon')!)
+
+    const nested = await waitFor(() => {
+      const t = container.querySelector('.ant-table-expanded-row .ant-table')
+      expect(t).not.toBeNull()
+      return t!
+    })
+    // 列宽写在 colgroup 里，没写宽度的列拿到的是 col 上没有 style。
+    const widths = [...nested.querySelectorAll('colgroup col')].map((c) => (c as HTMLElement).style.width)
+    expect(widths.at(-1)).toBe('240px')
+    // scroll.x 有值，antd 才给内容区加横向滚动。
+    expect(nested.querySelector('.ant-table-content')).toHaveStyle({ overflowX: 'auto' })
+    // 固定排版，长转写才会被省略号截掉，不把这一列撑宽。
+    expect(nested.querySelector('table')).toHaveStyle({ tableLayout: 'fixed', width: '1052px' })
+  })
+
   it('手机展开后每次发射下面一行转写', async () => {
     setViewportWidth(375)
     serve(filled())

@@ -126,7 +126,7 @@ describe('结算一个挑过子集的对话之后，余下的一段是全选的'
     await screen.findByText('BA1AA')
     await userEvent.click(expandIcon(rowOf('BA1AA')))
     const boxes = await waitFor(() => {
-      const b = container.querySelectorAll('.ant-table-expanded-row .ant-table-tbody .ant-checkbox-input')
+      const b = container.querySelectorAll('.ant-table-expanded-row .ant-table-tbody tr.ant-table-row .ant-checkbox-input')
       expect(b.length).toBe(3)
       return b
     })

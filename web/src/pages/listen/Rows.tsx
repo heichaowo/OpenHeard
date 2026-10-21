@@ -235,22 +235,29 @@ function ActivityTableDesktop({
       render: (_, a) => <AudioPill id={a.id} durationS={a.durationS} />,
     },
   ]
-  // 只有模拟侧有识别。这一列占剩下的宽度，一次发射一行，装不下的截断。
-  if (activities.some((a) => a.origin === 'sdr-fm')) {
+  // 只有模拟侧有识别。一次发射一行，装不下的截断。这一列要写宽度：前面几列固定共 812，
+  // 没写宽度的话平板上只剩 0，转写看不到。外层的展开格是 overflow:hidden，
+  // 嵌套的表自己横向滚动（scroll.x），别让它撑出去被裁掉。
+  const withTranscript = activities.some((a) => a.origin === 'sdr-fm')
+  if (withTranscript) {
     columns.push({
       title: '识别',
       key: 'transcript',
       ellipsis: true,
+      width: 240,
       className: 'transcript-cell',
       render: (_, a) => <TranscriptLine a={a} aiEnabled={aiEnabled} />,
     })
   }
+  // 写数字不写 'max-content'：后者让表按内容排版，长转写会把识别列撑到一千多，省略号不起作用。
+  const tableWidth = columns.reduce((n, c) => n + (typeof c.width === 'number' ? c.width : 0), checkable ? 32 : 0)
   return (
     <Table
       size="small"
       rowKey="id"
       columns={columns}
       dataSource={activities}
+      scroll={{ x: tableWidth }}
       rowSelection={
         checkable
           ? { selectedRowKeys: chosen, onChange: (keys) => onChange(keys as string[]) }

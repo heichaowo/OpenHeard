@@ -175,7 +175,7 @@ describe('对话 id 变了：挑中的、勾选的、展开的搬到新 id 上',
     await screen.findByText('BA1AA')
     await userEvent.click(expandIcon(rowOf('BA1AA')))
     const boxes = await waitFor(() => {
-      const b = container.querySelectorAll('.ant-table-expanded-row .ant-table-tbody .ant-checkbox-input')
+      const b = container.querySelectorAll('.ant-table-expanded-row .ant-table-tbody tr.ant-table-row .ant-checkbox-input')
       expect(b.length).toBe(3)
       return b
     })
@@ -187,7 +187,7 @@ describe('对话 id 变了：挑中的、勾选的、展开的搬到新 id 上',
     poll()
     expect(await screen.findByText('挑中 2 / 4 次')).toBeInTheDocument()
     // 展开的状态也跟着搬过去了。
-    expect(container.querySelectorAll('.ant-table-expanded-row .ant-table-tbody .ant-checkbox-input').length).toBe(4)
+    expect(container.querySelectorAll('.ant-table-expanded-row .ant-table-tbody tr.ant-table-row .ant-checkbox-input').length).toBe(4)
 
     await userEvent.click(screen.getByText(/^直\s*接\s*入\s*库$/))
     await waitFor(() => expect(promote).toHaveBeenCalledOnce())

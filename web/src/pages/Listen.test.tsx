@@ -195,7 +195,7 @@ describe('一段里的发射很多时', () => {
     await userEvent.click(container.querySelector('.ant-table-row-expand-icon')!)
 
     const boxes = await waitFor(() => {
-      const b = container.querySelectorAll('.ant-table-expanded-row .ant-table-tbody .ant-checkbox-input')
+      const b = container.querySelectorAll('.ant-table-expanded-row .ant-table-tbody tr.ant-table-row .ant-checkbox-input')
       expect(b.length).toBe(3)
       return b
     })
