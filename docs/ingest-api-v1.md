@@ -94,7 +94,7 @@ token 不对回 `401`。
 
 只有第 4 条的行带 `hasSpeech` 和 `transcript`，守护进程据此只做提取，不再识别一遍。别的行都不带。
 
-录音文件只对候选行检查，一页一页读，凑够 `limit` 条就停。录音不在的行不返回。查询走 `activity_origin` 索引，从新往旧读，不扫整张 `activity`。
+录音文件只对候选行检查，一页一页读，凑够 `limit` 条就停。录音不在的行不返回，并记一条错误「录音不在了」，次数直接记满，之后不再当候选。录音目录本身不在时不记。清错误的时候（见下）这一行会再查一次。查询走 `activity_origin` 索引，从新往旧读，不扫整张 `activity`。
 
 出错的行最多做 3 次，每次隔一小时。用满了就不再返回。换了 key 或者下好了模型之后，不用等：设置页改了 `ai` 的值，或者 api 重启，就清掉所有出错的记录，队列重新做。
 
@@ -274,7 +274,10 @@ extraction alone and does not recognise again. Other rows carry neither.
 
 File existence is checked only for candidate rows, read a page at a time and
 stopping once `limit` is reached. A row whose recording is gone is not
-returned. The query uses the `activity_origin` index, reading newest first, and
+returned, and gets an error row "录音不在了" with its attempts already at the
+cap, so it stops being a candidate. Nothing is recorded when the recordings
+directory itself is missing. Clearing errors (below) makes the row checked
+again. The query uses the `activity_origin` index, reading newest first, and
 never scans the whole `activity` table.
 
 A row with an error is tried at most 3 times, an hour apart, then it stops

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import {
+  AI_MAX_ATTEMPTS,
   aiStats,
   aiVerdict,
   cleanAiResult,
@@ -18,7 +19,7 @@ import {
 } from './ai.ts';
 import type { AiStep } from './ai.ts';
 import type { Activity } from './core.ts';
-import { insertActivities, openDb } from './db.ts';
+import { insertActivities, openDb, pruneActivities, pruneAiRows } from './db.ts';
 
 const NOW = Math.floor(Date.now() / 1000);
 
@@ -299,6 +300,67 @@ describe('selectTodo', () => {
     writeFileSync(join(dir, 'old.wav'), 'x');
     const ids = selectTodo(db, { steps: steps(), sinceStartAt: NOW - 1000, now: NOW, recordingsDir: dir, limit: 10 }).map((i) => i.id);
     assert.deepEqual(ids, ['a']);
+  });
+
+  describe('录音不在了', () => {
+    const rowOf = (db: ReturnType<typeof openDb>, id: string) => {
+      const r = db.prepare('SELECT attempts, error, has_speech, meaningless FROM activity_ai WHERE activity_id = ?').get(id);
+      return r === undefined ? undefined : { ...r };
+    };
+
+    // 没有这一行，没录音的发射永远是候选，空闲时每次轮询都要把它们全查一遍。
+    it('遇到没有 wav 的候选，记一条用满重试次数的错误，之后不再是候选', () => {
+      const { db, dir } = setup([fm('gone', NOW - 500), fm('here', NOW - 400)]);
+      rmSync(join(dir, 'gone.wav'));
+      assert.deepEqual(todoIds(db, dir, steps()), ['here']);
+      assert.deepEqual(rowOf(db, 'gone'), { attempts: AI_MAX_ATTEMPTS, error: '录音不在了', has_speech: null, meaningless: 0 });
+      // wav 回来了也不排：重试闸门看 attempts
+      writeFileSync(join(dir, 'gone.wav'), 'RIFF');
+      assert.deepEqual(todoIds(db, dir, steps()), ['here']);
+      assert.equal(countTodo(db, { steps: steps(), sinceStartAt: 0, now: NOW, recordingsDir: dir }), 1);
+    });
+
+    it('已经做完前面几步的行，保留已有的结果，只补上错误', () => {
+      const { db, dir } = setup([fm('half', NOW - 500)]);
+      writeAiResults(db, [{ activityId: 'half', hasSpeech: true }], NOW - 100);
+      rmSync(join(dir, 'half.wav'));
+      assert.deepEqual(todoIds(db, dir, steps('vad', 'asr')), []);
+      assert.deepEqual(rowOf(db, 'half'), { attempts: AI_MAX_ATTEMPTS, error: '录音不在了', has_speech: 1, meaningless: 0 });
+    });
+
+    it('启动和改 ai 设置时清错误，wav 回来了的行重新排队；还没回来的再记一次', () => {
+      const { db, dir } = setup([fm('back', NOW - 500), fm('lost', NOW - 400)]);
+      rmSync(join(dir, 'back.wav'));
+      rmSync(join(dir, 'lost.wav'));
+      assert.deepEqual(todoIds(db, dir, steps()), []);
+      writeFileSync(join(dir, 'back.wav'), 'RIFF');
+      resetAiErrors(db);
+      assert.deepEqual(todoIds(db, dir, steps()), ['back']);
+      assert.equal(rowOf(db, 'lost')?.error, '录音不在了');
+      assert.equal(rowOf(db, 'back'), undefined);
+    });
+
+    it('发射被裁掉，这一行跟着走', () => {
+      const { db, dir } = setup([fm('gone', NOW - 5000)]);
+      rmSync(join(dir, 'gone.wav'));
+      todoIds(db, dir, steps());
+      assert.ok(rowOf(db, 'gone'));
+      pruneActivities(db, NOW - 1000);
+      pruneAiRows(db);
+      assert.equal(rowOf(db, 'gone'), undefined);
+    });
+
+    it('录音目录本身不在（盘没挂上）不算录音不在，什么都不记', () => {
+      const { db } = setup([fm('a', NOW - 500)]);
+      const missing = join(tmpdir(), 'openheard-no-such-dir-xyz');
+      assert.deepEqual(todoIds(db, missing, steps()), []);
+      assert.equal(rowOf(db, 'a'), undefined);
+      assert.deepEqual(
+        selectTodo(db, { steps: steps(), sinceStartAt: 0, now: NOW, recordingsDir: undefined, limit: 5 }),
+        [],
+      );
+      assert.equal(rowOf(db, 'a'), undefined);
+    });
   });
 
   it('候选行很多、前面一大批没有录音时，照样凑得够 limit', () => {

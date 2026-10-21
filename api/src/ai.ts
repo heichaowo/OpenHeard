@@ -227,7 +227,7 @@ const PAGE = 50;
  * 逐页读候选行，只对候选检查录音在不在，凑够 limit 条就停。
  *
  * 候选条件见合同 §5：没有结果；出错且还能重试；有人声、识别开着、还没识别；
- * 有人声、提取开着、有转写、还没提取。录音不在的行不返回（对应的 wav 可能被删了）。
+ * 有人声、提取开着、有转写、还没提取。录音不在的行不返回，并记一条错误（见 markGone）。
  * 走 activity_origin 索引，从新往旧读，不扫整张 activity。
  */
 function* todoRows(
@@ -253,6 +253,17 @@ function* todoRows(
     LIMIT ${PAGE}
   `;
   const stmt = db.prepare(sql);
+  // 没有 wav 的行记成出错、次数用满。不记的话它永远是候选，空闲时每次轮询都要查一遍。
+  // 已有的结果（VAD、转写）留着，只补错误。启动和改 ai 设置会清错误，wav 回来了就重新排队。
+  const markGone = (() => {
+    const put = db.prepare(`
+      INSERT INTO activity_ai (activity_id, at, attempts, meaningless, error) VALUES (?,?,${AI_MAX_ATTEMPTS},0,?)
+      ON CONFLICT(activity_id) DO UPDATE SET at = excluded.at, attempts = excluded.attempts,
+        meaningless = 0, error = excluded.error
+    `);
+    return (id: string, now: number) => void put.run(id, now, '录音不在了');
+  })();
+  let dirThere: boolean | undefined;
   let beforeStart = Number.MAX_SAFE_INTEGER;
   let beforeRid = Number.MAX_SAFE_INTEGER;
   for (;;) {
@@ -264,7 +275,11 @@ function* todoRows(
       const id = String(r.id);
       // 目录是 api 自己配的，id 来自库，这里再挡一道别跑出目录。
       if (o.recordingsDir === undefined || !/^[A-Za-z0-9_-]{1,120}$/.test(id)) continue;
-      if (!existsSync(join(o.recordingsDir, `${id}.wav`))) continue;
+      if (!existsSync(join(o.recordingsDir, `${id}.wav`))) {
+        // 录音目录整个不在（盘没挂上）不能记：一次就会把整个保留期的行都标成出错。
+        if (dirThere ??= existsSync(o.recordingsDir)) markGone(id, o.now);
+        continue;
+      }
       const item: TodoItem = {
         id,
         startAt: Number(r.start_at),
