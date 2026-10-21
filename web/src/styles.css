@@ -339,9 +339,9 @@ select {
 }
 
 .time-header-zone {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 换行而不是省略号：偏移在最后，截掉的就是它。断点在斜杠和空格，见 TimeHeader.tsx。 */
+  white-space: normal;
+  overflow-wrap: break-word;
   font-size: 12px;
   font-weight: 400;
   color: var(--ant-color-text-secondary);
