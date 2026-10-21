@@ -74,12 +74,12 @@ See [docs/deployment.md](docs/deployment.md) for details.
 
 ## Documentation
 
-- **`specs/openheard.md`** — Technical specification
-- **`docs/api-admin.md`** — Admin interface API
-- **`docs/api-public.md`** — Public page API
-- **`docs/api-ingest.md`** — Data capture API
-- **`docs/config.md`** — Configuration reference
-- **`docs/deployment.md`** — Setup and deployment
+- [`specs/openheard.md`](specs/openheard.md) — Technical specification
+- [`docs/admin-api-v1.md`](docs/admin-api-v1.md) — Admin interface API
+- [`docs/public-api-v1.md`](docs/public-api-v1.md) — Public page API
+- [`docs/ingest-api-v1.md`](docs/ingest-api-v1.md) — Data capture API
+- [`docs/configuration.md`](docs/configuration.md) — Configuration reference
+- [`docs/deployment.md`](docs/deployment.md) — Setup and deployment
 
 ## License
 
