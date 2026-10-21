@@ -242,6 +242,8 @@ export interface Ops {
   analogEnabled: boolean
   brandmeisterEnabled: boolean
   ai: OpsAi
+  /** 配置文件里 map 段写坏了，坏在哪。这时地图按「不用」处理。 */
+  mapProblem?: string
 }
 
 /** 识别队列。meaningless 和收听页 无意义 档的数字是同一个：view=meaningless 的总数。 */
@@ -257,6 +259,8 @@ export interface OpsAi {
   /** 守护进程最近一次报的状态，只在 api 内存里。 */
   worker?: { at: number; ok: boolean; message: string }
   lastError?: { at: number; message: string }
+  /** 配置文件里 ai 段写坏了，坏在哪。这时识别按关着处理。 */
+  problem?: string
 }
 
 /** GET /api/conversations 的查询条件。三种视图选一种，见 contract.md。 */

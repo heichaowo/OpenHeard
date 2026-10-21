@@ -219,6 +219,16 @@ export default function OpsPage() {
               />
             )}
 
+            {ops.mapProblem !== undefined && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="配置文件里的 map 段有问题，地图按不用处理"
+                description={ops.mapProblem}
+              />
+            )}
+
             {/* 列数交给 CSS，写成行内样式的话媒体查询永远赢不了它。 */}
             <div className="stat-row stat-row-2">
               <Card size="small">
@@ -357,6 +367,15 @@ export default function OpsPage() {
 
             {/* 识别队列：关着不算健康问题，这里说明；开着时看队列有没有在走。 */}
             <Card size="small" title="识别" style={{ marginBottom: 16 }}>
+              {ops.ai.problem !== undefined && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="配置文件里的 ai 段有问题，整段不生效"
+                  description={ops.ai.problem}
+                />
+              )}
               {!ops.ai.enabled ? (
                 <Alert
                   type="info"

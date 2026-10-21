@@ -276,6 +276,30 @@ describe('OpsPage 的识别卡', () => {
     expect(screen.getAllByText(/2 分钟前/).length).toBeGreaterThan(0)
   })
 
+  it('ai 段写坏了：识别卡里先说坏在哪，再说识别关着', async () => {
+    const problem = 'ai.asr.provider 只能是 local、openai-transcriptions、chat-audio、off'
+    ops.mockResolvedValue({ ...snapshot([]), ai: { enabled: false, vad: 'off', asrProvider: 'off', textProvider: 'off', todo: 0, doneLast24h: 0, meaningless: 0, problem } })
+    mount()
+    const warn = await screen.findByText(new RegExp(problem))
+    const off = screen.getByText(/识别关着。设置页打开开关/)
+    expect(warn.compareDocumentPosition(off) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByText(/配置文件里的 ai 段有问题/)).toBeInTheDocument()
+  })
+
+  it('map 段写坏了：页面上写出来', async () => {
+    ops.mockResolvedValue({ ...snapshot([]), mapProblem: 'map.amapSecurityCode 必填' })
+    mount()
+    expect(await screen.findByText(/map\.amapSecurityCode 必填/)).toBeInTheDocument()
+    expect(screen.getByText(/配置文件里的 map 段有问题/)).toBeInTheDocument()
+  })
+
+  it('两段都没问题：不出警告', async () => {
+    ops.mockResolvedValue(snapshot([]))
+    mount()
+    expect(await screen.findByText(/识别关着/)).toBeInTheDocument()
+    expect(screen.queryByText(/段有问题/)).not.toBeInTheDocument()
+  })
+
   it('最近一次出错：显示原话；没有就写没有', async () => {
     ops.mockResolvedValueOnce({ ...snapshot([]), ai: { ...on, lastError: { at: now - 30, message: 'asr: HTTP 400' } } })
     mount()
