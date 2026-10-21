@@ -22,9 +22,12 @@ const TEXT_OPTIONS: { value: TextProvider; label: string }[] = [
   { value: 'off', label: '关闭' },
 ]
 
-/** extraBody 的输入框是文本，保存时才解析成对象。 */
-const jsonObject = async (_: unknown, v?: string) => {
-  if (v === undefined || v.trim() === '') return
+/**
+ * extraBody 的输入框是文本，保存时才解析成对象。识别关着时整卡藏起来但字段还挂着，
+ * 这时不校验，否则藏着的错会无声无息地拦下整个保存。
+ */
+const jsonObject = (on: boolean) => async (_: unknown, v?: string) => {
+  if (!on || v === undefined || v.trim() === '') return
   let parsed: unknown
   try {
     parsed = JSON.parse(v)
@@ -81,7 +84,7 @@ function CloudFields({
         name={['extra', step]}
         label={`${name} 额外参数`}
         extra={'原样并进请求体，写成 JSON 对象。关掉思考模式之类的厂商参数放这里，例如 {"thinking":{"type":"disabled"}}。'}
-        rules={[{ validator: jsonObject }]}
+        rules={[{ validator: jsonObject(on) }]}
       >
         <Input.TextArea rows={2} spellCheck={false} className="mono" />
       </Form.Item>

@@ -453,7 +453,39 @@ describe('SettingsPage 的识别卡', () => {
     await userEvent.paste('[1,2]')
     await userEvent.click(saveBtn())
 
-    expect(await screen.findByText(/要写成 JSON 对象/)).toBeInTheDocument()
+    // 字段下面一条，弹出的提示里还有一条。
+    expect((await screen.findAllByText(/要写成 JSON 对象/)).length).toBeGreaterThan(0)
+    expect(saveSettings).not.toHaveBeenCalled()
+  })
+
+  // 识别关着时整卡藏起来，字段还挂在表单上。藏着的 JSON 校验不能把别的保存也拦住，还拦得没有一点声音。
+  it('额外参数写坏了又把识别关掉：不静默，弹出提示说 JSON 不对', async () => {
+    mount(cloud)
+    const extra = await screen.findByLabelText('识别 额外参数')
+    await userEvent.clear(extra)
+    await userEvent.click(extra)
+    await userEvent.paste('{bad')
+    await userEvent.click(screen.getByRole('switch', { name: '识别开关' }))
+    await userEvent.click(saveBtn())
+
+    expect(await screen.findByText('识别或提取的额外参数不是合法的 JSON')).toBeInTheDocument()
+    expect(saveSettings).not.toHaveBeenCalled()
+  })
+
+  it('识别关着、额外参数没碰：别的保存照常', async () => {
+    mount(cloud)
+    await userEvent.click(await screen.findByRole('switch', { name: '识别开关' }))
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(sentBody().ai.enabled).toBe(false)
+  })
+
+  it('校验没过：弹出提示，写明第一处是什么', async () => {
+    mount({ ...cloud, ai: { ...cloud.ai, asr: { ...cloud.ai.asr, baseUrl: '' } } })
+    await screen.findByLabelText('识别 key')
+    await userEvent.click(saveBtn())
+    expect(await screen.findByText('保存没成功，地址必填')).toBeInTheDocument()
     expect(saveSettings).not.toHaveBeenCalled()
   })
 

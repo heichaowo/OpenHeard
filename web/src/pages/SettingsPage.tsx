@@ -216,6 +216,13 @@ export default function SettingsPage() {
           form={form}
           layout="vertical"
           onFinish={save}
+          // 校验没过时 save 不会跑，没有这一句就一点动静也没有（错误可能在页面别处，或者藏着的卡里）。
+          onFinishFailed={({ errorFields }) => {
+            const first = errorFields[0];
+            if (first === undefined) return;
+            message.error(`保存没成功，${first.errors[0] ?? "有一项没填对"}`);
+            form.scrollToField(first.name);
+          }}
           // 信道表和查询表整体的规则挂在 Form.List 上，改某一行时不会自己重跑。
           // 不补这一下，名字重复要点了保存才看得到；开关一变，也要让旧的校验
           // 结果跟着重算（关掉就该把「至少要有一个信道」这类错误收回去）。
