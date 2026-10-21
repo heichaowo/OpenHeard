@@ -607,6 +607,66 @@ describe('设置里的 ai 和 map', () => {
     assert.equal(diskOf(m).station.myQth, '成都');
   });
 
+  describe('文件里写坏的 ai 和 map', () => {
+    const brokenFile = {
+      ai: {
+        enabled: true,
+        asr: { provider: 'chat-audoi', baseUrl: 'https://asr.example/v1', model: 'asr-1', apiKey: 'KEEP-ASR' },
+        text: { provider: 'openai-chat', baseUrl: 'https://llm.example/v1', model: 'llm-1', apiKey: 'KEEP-TEXT' },
+      },
+      map: { provider: 'amapp', amapKey: 'pub', amapSecurityCode: 'KEEP-CODE' },
+    };
+
+    it('GET 带上 aiProblem 和 mapProblem，没坏就没有这两个键', async () => {
+      const s = await settingsOf(make({ file: brokenFile }));
+      assert.match(s.aiProblem, /ai\.asr\.provider/);
+      assert.match(s.mapProblem, /map\.provider/);
+      const clean = await settingsOf(make({ file: { ai: cloudAi } }));
+      assert.equal('aiProblem' in clean || 'mapProblem' in clean, false);
+    });
+
+    it('保存的请求体不带这两段，文件里的原样留着', async () => {
+      const m = make({ file: brokenFile });
+      const s = await settingsOf(m);
+      const { ai: _ai, map: _map, aiProblem: _a, mapProblem: _m, ...rest } = s;
+      assert.equal((await req(m.app, 'PUT', '/api/settings', { ...rest, station: { ...s.station, myQth: '成都' } })).status, 200);
+      assert.deepEqual(diskOf(m).ai, brokenFile.ai);
+      assert.deepEqual(diskOf(m).map, brokenFile.map);
+    });
+
+    // 用户改的是这两段本身：界面交上来的是 GET 的缺省值再加上他改的几项，密钥不在里面。
+    it('用户改了这两段：请求体里没有的密钥取文件里的，不取缺省值', async () => {
+      const m = make({ file: brokenFile });
+      const s = await settingsOf(m);
+      const ai = {
+        ...s.ai,
+        enabled: true,
+        asr: { ...s.ai.asr, provider: 'chat-audio', baseUrl: 'https://asr.example/v1', model: 'asr-1' },
+        text: { ...s.ai.text, provider: 'openai-chat', baseUrl: 'https://llm.example/v1', model: 'llm-1' },
+      };
+      const res = await req(m.app, 'PUT', '/api/settings', { ...s, ai, map: { ...s.map, provider: 'amap', amapKey: 'pub' } });
+      assert.equal(res.status, 200);
+      const disk = diskOf(m);
+      assert.equal(disk.ai.asr.apiKey, 'KEEP-ASR');
+      assert.equal(disk.ai.text.apiKey, 'KEEP-TEXT');
+      assert.equal(disk.ai.enabled, true);
+      assert.equal(disk.map.amapSecurityCode, 'KEEP-CODE');
+      // 改好了，问题也跟着没了
+      const after = await settingsOf(m);
+      assert.equal('aiProblem' in after || 'mapProblem' in after, false);
+    });
+
+    it('用户只改了一段，另一段坏的原样留着', async () => {
+      const m = make({ file: brokenFile });
+      const s = await settingsOf(m);
+      const { ai: _ai, ...rest } = s;
+      const res = await req(m.app, 'PUT', '/api/settings', { ...rest, map: { ...s.map, provider: 'amap', amapKey: 'pub' } });
+      assert.equal(res.status, 200);
+      assert.deepEqual(diskOf(m).ai, brokenFile.ai);
+      assert.equal(diskOf(m).map.amapSecurityCode, 'KEEP-CODE');
+    });
+  });
+
   it('ai 的值写进文件后，extraBody 原样保留', async () => {
     const m = make();
     const s = await settingsOf(m);

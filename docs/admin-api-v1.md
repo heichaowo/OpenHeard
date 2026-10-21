@@ -245,7 +245,9 @@ curl -b cookie.txt -X POST http://127.0.0.1:3000/api/qsos \
 
 `ai` 的值变了（不只是密钥），保存时顺手清掉所有出错的识别记录，让队列重新做。api 启动时也清一次。换了 key、下好了模型之后，不用再等一小时的重试间隔。
 
-文件里原来就有写坏的 `ai` 或 `map`，而这次请求没碰它们，保存不受影响。读配置时，写坏的 `ai` 当作没开，写坏的 `map` 当作不用地图，各留一句原因，显示在运维页上。它们不会让 api 回 `503`。
+文件里原来就有写坏的 `ai` 或 `map`，而这次请求没带它们，保存不受影响，文件里的那一段原样留着。读配置时，写坏的 `ai` 当作没开，写坏的 `map` 当作不用地图，各留一句原因，显示在运维页上。它们不会让 api 回 `503`。
+
+`GET` 在这时多返回 `aiProblem` 或 `mapProblem`，值是那句原因。没坏就没有这个键。`PUT` 里带了写坏的那一段，就拿文件里原样的那一段当底，再并上请求体里给的键。请求体没给的密钥取文件里的，不取缺省值。界面只在人改了这一段时才带它。提交里的 `aiProblem` 和 `mapProblem` 一律忽略。
 
 `brandmeisterEnabled` 和 `analog.enabled` 是两个开关，缺省都是开。关掉不清空设置，原来的 `queries` 和 `analog.channels` 留在文件里，界面收起对应的卡片，改不了里面的字段。
 
@@ -727,9 +729,16 @@ the same once at startup. After fixing a key or finishing a model download,
 there is no need to wait out the one-hour retry gap.
 
 A broken `ai` or `map` already in the file does not block a save that does not
-touch them. When the config is read, a broken `ai` counts as off and a broken
-`map` as no map, each leaving one sentence of reason that the ops page shows.
-Neither makes the api answer `503`.
+send them, and the file keeps that section as it is. When the config is read, a
+broken `ai` counts as off and a broken `map` as no map, each leaving one
+sentence of reason that the ops page shows. Neither makes the api answer `503`.
+
+While a section is broken, `GET` also returns `aiProblem` or `mapProblem` with
+that reason. Missing when the section is fine. If a `PUT` does send the broken
+section, it merges over the section as written in the file, not over the
+defaults, and a secret the body does not carry comes from the file. The UI
+sends a section only when the user changed it. `aiProblem` and `mapProblem` in
+the body are ignored.
 
 `brandmeisterEnabled` and `analog.enabled` are two switches, both on by
 default. Turning one off does not clear its settings: `queries` and

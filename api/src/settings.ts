@@ -19,6 +19,10 @@ export interface Settings {
   analog?: AnalogSettings;
   ai?: AiSettings;
   map?: MapSettings;
+  /** 文件里的 ai 段写坏了：原因。只在读出来时有，提交时忽略。 */
+  aiProblem?: string;
+  /** 同上，map 段。 */
+  mapProblem?: string;
 }
 
 /**
@@ -91,7 +95,7 @@ const pickMargin = (submitted: unknown, existing: number | undefined, fallback: 
  */
 export function checkSettings(
   raw: unknown,
-  current?: Partial<Pick<Config, 'analog' | 'brandmeisterEnabled' | 'ai' | 'map'>>,
+  current?: Partial<Pick<Config, 'analog' | 'brandmeisterEnabled' | 'ai' | 'map' | 'aiProblem' | 'mapProblem' | 'path'>>,
 ): string[] {
   if (!isObject(raw)) return ['设置的顶层不是对象'];
   const problems: string[] = [];
@@ -178,10 +182,29 @@ export function checkSettings(
 
   // 密钥先按已存的解析出来再验：请求体里没有密钥（读出来就只有 apiKeySet），
   // 直接验的话，云端那一步每次保存都会报 apiKey 必填。
-  if (raw.ai !== undefined && raw.ai !== null) problems.push(...mergeAi(raw.ai, current?.ai).problems);
-  if (raw.map !== undefined && raw.map !== null) problems.push(...mergeMap(raw.map, current?.map).problems);
+  if (raw.ai !== undefined && raw.ai !== null) {
+    const stored = current?.aiProblem === undefined ? current?.ai : undefined;
+    problems.push(...mergeAi(raw.ai, stored, brokenRaw(current, 'ai')).problems);
+  }
+  if (raw.map !== undefined && raw.map !== null) {
+    const stored = current?.mapProblem === undefined ? current?.map : undefined;
+    problems.push(...mergeMap(raw.map, stored, brokenRaw(current, 'map')).problems);
+  }
 
   return problems;
+}
+
+/**
+ * 读配置时 ai 或 map 写坏了，内存里的那份是缺省值，不是文件里的。合并要拿文件里
+ * 原样的那一段当底，否则缺省值会顶掉文件里的密钥。没坏返回 undefined。
+ */
+function brokenRaw(current: Pick<Partial<Config>, 'aiProblem' | 'mapProblem' | 'path'> | undefined, key: 'ai' | 'map'): unknown {
+  if (current?.path === undefined || current[key === 'ai' ? 'aiProblem' : 'mapProblem'] === undefined) return undefined;
+  try {
+    return (JSON.parse(readFileSync(current.path, 'utf8')) as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -189,10 +212,16 @@ export function checkSettings(
  *
  * 密钥：缺省或 null 保留已存的，'' 清掉，非空文字就是新值。*Set 是读出来给界面看的，
  * 提交里带了也忽略。别的键：缺省或 null 保留已存的。
+ *
+ * 文件里的 ai 写坏了就没有 stored，这时拿文件里原样的 raw 当底。
  */
-export function mergeAi(body: unknown, stored: AiConfig | undefined): { config: AiConfig; problems: string[] } {
+export function mergeAi(
+  body: unknown,
+  stored: AiConfig | undefined,
+  raw?: unknown,
+): { config: AiConfig; problems: string[] } {
   if (!isObject(body)) return resolveAiConfig(body);
-  const base = stored ?? aiDefaults();
+  const base: Record<string, unknown> = stored ? { ...stored } : isObject(raw) ? raw : { ...aiDefaults() };
   const merged: Record<string, unknown> = { ...base };
   if (body.enabled !== undefined && body.enabled !== null) merged.enabled = body.enabled;
   for (const sec of ['vad', 'asr', 'text'] as const) {
@@ -203,7 +232,7 @@ export function mergeAi(body: unknown, stored: AiConfig | undefined): { config: 
       merged[sec] = sub;
       continue;
     }
-    const out: Record<string, unknown> = { ...base[sec] };
+    const out: Record<string, unknown> = isObject(base[sec]) ? { ...(base[sec] as Record<string, unknown>) } : {};
     for (const [k, v] of Object.entries(sub)) {
       if (k.endsWith('Set') || v === undefined || v === null) continue;
       out[k] = v;
@@ -213,9 +242,13 @@ export function mergeAi(body: unknown, stored: AiConfig | undefined): { config: 
   return resolveAiConfig(merged);
 }
 
-export function mergeMap(body: unknown, stored: MapConfig | undefined): { config: MapConfig; problems: string[] } {
+export function mergeMap(
+  body: unknown,
+  stored: MapConfig | undefined,
+  raw?: unknown,
+): { config: MapConfig; problems: string[] } {
   if (!isObject(body)) return resolveMapConfig(body);
-  const merged: Record<string, unknown> = { ...(stored ?? mapDefaults()) };
+  const merged: Record<string, unknown> = { ...(stored ?? (isObject(raw) ? raw : mapDefaults())) };
   for (const [k, v] of Object.entries(body)) {
     if (k.endsWith('Set') || v === undefined || v === null) continue;
     merged[k] = v;
@@ -230,6 +263,8 @@ export function settingsOf(config: Config, analog?: AnalogSettings): Settings {
   const { apiKey: asrKey, ...asr } = ai.asr;
   const { apiKey: textKey, ...text } = ai.text;
   return {
+    ...(config.aiProblem === undefined ? {} : { aiProblem: config.aiProblem }),
+    ...(config.mapProblem === undefined ? {} : { mapProblem: config.mapProblem }),
     station: config.station,
     channels: config.channels,
     queries: config.queries,
@@ -298,7 +333,8 @@ export function writeSettings(config: Config, next: Settings): void {
   const touchesAi = next.ai !== undefined && next.ai !== null;
   const touchesMap = next.map !== undefined && next.map !== null;
   if (touchesAi) {
-    const merged = mergeAi(next.ai, config.ai);
+    // 写坏的 ai 不在内存里，底是文件里原样的那一段，密钥才不会丢。
+    const merged = config.aiProblem === undefined ? mergeAi(next.ai, config.ai) : mergeAi(next.ai, undefined, raw.ai);
     if (merged.problems.length > 0) throw new Error(`ai 设置不对，没有落盘：${merged.problems.join('，')}`);
     const { asr, text, ...rest } = merged.config;
     // 密钥空着就不写这个键，文件里不留一个空串。
@@ -306,7 +342,7 @@ export function writeSettings(config: Config, next: Settings): void {
     raw.ai = { ...rest, asr: dropEmpty(asr), text: dropEmpty(text) };
   }
   if (touchesMap) {
-    const merged = mergeMap(next.map, config.map);
+    const merged = config.mapProblem === undefined ? mergeMap(next.map, config.map) : mergeMap(next.map, undefined, raw.map);
     if (merged.problems.length > 0) throw new Error(`map 设置不对，没有落盘：${merged.problems.join('，')}`);
     raw.map = Object.fromEntries(Object.entries(merged.config).filter(([, v]) => v !== ''));
   }
