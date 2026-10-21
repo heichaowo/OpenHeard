@@ -162,10 +162,9 @@ export default function Listen() {
   const searchListParams: ConversationsParams | null = searching ? { q: debouncedQ.trim() } : null
   const searchList = useConversationList(searchListParams, 15000, canInsert)
 
-  // 自己刚结算的对话 id。待确认走 store.pending，那一份刷新回来时认得出它们是
-  // 自己摘的，不当成「已变」。
-  const settling = useRef(new Set<string>())
-  const pendingLive = usePendingLive(pending, canInsert, settling)
+  // 待确认走 store.pending，自己结算掉的对话 id 记在 pendingLive 里，
+  // 那一份刷新回来时认得出它们是自己摘的，不当成「已变」。
+  const pendingLive = usePendingLive(pending, canInsert)
 
   const unloggedCount = useUnloggedCount(countKey)
   const meaninglessCount = useMeaninglessCount(countKey)
@@ -200,27 +199,27 @@ export default function Listen() {
 
   // 结算（入库/忽略/删除）之后重拉当前视图，各档各拉各的第一页，
   // 待确认走 store.pending 自己的轮询，store.refresh() 已经在 promote/ignore/
-  // ignoreMany 内部跑过一次，这里只把自己结算掉的那几段摘走。
+  // ignoreMany 内部跑过一次，摘行由 pendingLive 在那一份拉取回来时做。
   const settleView = async (ids: string[]) => {
     if (searching) {
       await searchList.settleRefresh(ids)
     } else if (tabList !== null) {
       await tabList.settleRefresh(ids)
-    } else {
-      pendingLive.drop(ids)
     }
     setCountKey((k) => k + 1)
   }
 
   // 做一件结算类的事，成功后把这几段从当前视图里摘掉。失败的话它们还在原处。
   const settle = async <R,>(ids: string[], act: () => Promise<R>): Promise<R> => {
-    for (const id of ids) settling.current.add(id)
+    pendingLive.hold(ids)
     try {
       const r = await act()
       await settleView(ids)
       return r
-    } finally {
-      for (const id of ids) settling.current.delete(id)
+    } catch (e) {
+      // 没结算成，它们还在队列里。成功的不在这里清：拉取结果还没提交上来。
+      pendingLive.release(ids)
+      throw e
     }
   }
 
