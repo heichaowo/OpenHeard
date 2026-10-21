@@ -20,5 +20,8 @@ export default defineConfig({
     include: ['../core/src/**/*.test.ts', 'src/**/*.test.{ts,tsx}'],
     environment: 'jsdom',
     setupFiles: ['./src/testSetup.ts'],
+    // 一个文件的第一条界面测试要替 antd 组件付首次加载的钱，单跑 1 到 2 秒。
+    // 机器一忙就过了缺省的 5 秒，CI 和本地都因此误报过。真卡死照样抓得到。
+    testTimeout: 15_000,
   },
 })
