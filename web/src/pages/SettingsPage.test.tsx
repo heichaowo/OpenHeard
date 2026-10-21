@@ -2,7 +2,7 @@ import { App } from 'antd'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Settings } from '../api'
+import type { Settings, SettingsBody } from '../api'
 import { Preferences } from '../Preferences'
 import { StoreContext } from '../store'
 import type { Store } from '../store'
@@ -20,8 +20,10 @@ vi.mock('../api', async (importOriginal) => {
 const store = (map: Store['map'] = { provider: 'none' }) => ({ refresh: vi.fn(), map, station: {} }) as unknown as Store
 
 /** 服务端存完回的样子：密钥不回，只回设了没有。 */
-const echo = (next: Settings): Settings => {
+const echo = (body: SettingsBody): Settings => {
   const had = (sent: string | undefined, before: boolean) => (sent === undefined ? before : sent !== '')
+  // 没发的那一段服务端不动，原样回。
+  const next = { ...body, ai: body.ai ?? current.ai, map: body.map ?? current.map }
   return {
     ...next,
     ai: {
@@ -41,7 +43,7 @@ let current: Settings
 const mount = (s: Settings, map?: Store['map']) => {
   current = s
   settings.mockResolvedValue(s)
-  saveSettings.mockImplementation(async (next: Settings) => echo(next))
+  saveSettings.mockImplementation(async (next: SettingsBody) => echo(next))
   return render(
     <Preferences>
       <App>
@@ -315,6 +317,8 @@ describe('SettingsPage 的两个开关', () => {
 
 const saveBtn = () => screen.getByRole('button', { name: /^保\s*存$/ })
 const sentBody = () => saveSettings.mock.calls[0]![0] as Settings
+/** 这几条要看 ai/map 里发了什么，所以先改一个这一段里的字段，让它算改过。 */
+const touchAi = async () => userEvent.type(await screen.findByLabelText('识别 模型名'), 'x')
 
 // 云端识别：key 已经存着。页面只知道设了没有。
 const cloud: Settings = {
@@ -368,8 +372,7 @@ describe('SettingsPage 的识别卡', () => {
   // 密钥框不是表单字段，原样 PUT 回去会把它清掉。
   it('没碰 key 框就保存：不带 apiKey，也不带 apiKeySet', async () => {
     mount(cloud)
-    await screen.findByLabelText('识别 key')
-    await userEvent.type(screen.getByLabelText('QTH'), '成都')
+    await touchAi()
     await userEvent.click(saveBtn())
 
     await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
@@ -378,8 +381,6 @@ describe('SettingsPage 的识别卡', () => {
     expect('apiKeySet' in asr).toBe(false)
     expect('apiKey' in sentBody().ai.text).toBe(false)
     expect('apiKeySet' in sentBody().ai.text).toBe(false)
-    expect('amapSecurityCode' in sentBody().map).toBe(false)
-    expect('amapSecurityCodeSet' in sentBody().map).toBe(false)
   })
 
   it('敲了一个字又删掉再保存：当作没碰，存着的 key 不清', async () => {
@@ -387,7 +388,7 @@ describe('SettingsPage 的识别卡', () => {
     const key = await screen.findByLabelText('识别 key')
     await userEvent.type(key, 'x')
     await userEvent.clear(key)
-    await userEvent.type(screen.getByLabelText('QTH'), '成都')
+    await touchAi()
     await userEvent.click(saveBtn())
 
     await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
@@ -424,6 +425,7 @@ describe('SettingsPage 的识别卡', () => {
     await screen.findByLabelText('识别 key')
     await userEvent.click(screen.getByText('清除'))
     await userEvent.click(screen.getByText('不清除了'))
+    await touchAi()
     await userEvent.click(saveBtn())
 
     await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
@@ -477,6 +479,94 @@ describe('SettingsPage 的识别卡', () => {
   })
 })
 
+describe('SettingsPage 只发改过的那一段', () => {
+  // 配置文件里 ai 或 map 写坏了，GET 回的是缺省值。整段发回去会把文件里的段和 key 换成缺省。
+  it('只改本台信息：body 里没有 ai 和 map', async () => {
+    mount(cloud)
+    await userEvent.type(await screen.findByLabelText('QTH'), '成都')
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(sentBody().station.myQth).toBe('成都')
+    expect('ai' in sentBody()).toBe(false)
+    expect('map' in sentBody()).toBe(false)
+  })
+
+  it('改了识别里的字段：只带 ai', async () => {
+    mount(cloud)
+    await touchAi()
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(sentBody().ai.asr.model).toBe('mimo-v2.5-asrx')
+    expect('map' in sentBody()).toBe(false)
+  })
+
+  it('只敲了识别的 key：带 ai，不带 map', async () => {
+    mount(cloud)
+    await userEvent.type(await screen.findByLabelText('识别 key'), 'sk-new')
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(sentBody().ai.asr.apiKey).toBe('sk-new')
+    expect('map' in sentBody()).toBe(false)
+  })
+
+  it('改了地图的选择：只带 map', async () => {
+    mount(base)
+    await userEvent.click(await screen.findByRole('radio', { name: 'OpenStreetMap' }))
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(sentBody().map.provider).toBe('osm')
+    expect('ai' in sentBody()).toBe(false)
+  })
+
+  it('只敲了高德安全密钥：带 map，不带 ai', async () => {
+    mount({ ...base, map: { provider: 'amap', amapKey: 'pubkey', amapSecurityCodeSet: false } })
+    await userEvent.type(await screen.findByLabelText('高德安全密钥'), 'secret123')
+    await userEvent.click(saveBtn())
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect(sentBody().map.amapSecurityCode).toBe('secret123')
+    expect('ai' in sentBody()).toBe(false)
+  })
+
+  it('存完之后再存别的：上一次改过的段不再重发', async () => {
+    mount(cloud)
+    await touchAi()
+    await userEvent.click(saveBtn())
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    saveSettings.mockClear()
+
+    await userEvent.type(screen.getByLabelText('QTH'), '成都')
+    await userEvent.click(saveBtn())
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
+    expect('ai' in sentBody()).toBe(false)
+  })
+
+  it('GET 说识别段有问题：识别卡里警告，写明存这一卡会换掉文件里的段', async () => {
+    mount({ ...base, aiProblem: 'ai.asr.provider 只能是 local、openai-transcriptions、chat-audio、off' })
+    const alert = (await screen.findAllByRole('alert')).find((a) => a.textContent?.includes('ai.asr.provider'))
+    expect(alert).toBeDefined()
+    expect(alert!.textContent).toMatch(/替换/)
+    expect(screen.queryByText(/map\./)).not.toBeInTheDocument()
+  })
+
+  it('GET 说地图段有问题：地图卡里警告', async () => {
+    mount({ ...base, mapProblem: 'map.amapSecurityCode 必填' })
+    const alert = (await screen.findAllByRole('alert')).find((a) => a.textContent?.includes('map.amapSecurityCode'))
+    expect(alert).toBeDefined()
+    expect(alert!.textContent).toMatch(/替换/)
+  })
+
+  it('没有问题就没有警告', async () => {
+    mount(base)
+    await screen.findByLabelText('QTH')
+    expect(screen.queryByText(/替换/)).not.toBeInTheDocument()
+  })
+})
+
 describe('SettingsPage 的地图卡', () => {
   it('三选一：高德、OpenStreetMap、不用地图', async () => {
     mount(base)
@@ -514,11 +604,11 @@ describe('SettingsPage 的地图卡', () => {
     mount(amap)
     expect(await screen.findByLabelText('高德 key')).toHaveValue('pubkey')
     expect(screen.getByLabelText('高德安全密钥')).toHaveValue('')
-    await userEvent.type(screen.getByLabelText('QTH'), '成都')
+    await userEvent.type(screen.getByLabelText('高德 key'), '2')
     await userEvent.click(saveBtn())
 
     await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
-    expect(sentBody().map).toEqual({ provider: 'amap', amapKey: 'pubkey' })
+    expect(sentBody().map).toEqual({ provider: 'amap', amapKey: 'pubkey2' })
   })
 
   it('安全密钥敲了字才发', async () => {
@@ -536,6 +626,7 @@ describe('SettingsPage 的地图卡', () => {
     const box = await screen.findByLabelText('高德安全密钥')
     await userEvent.type(box, 'a')
     await userEvent.clear(box)
+    await userEvent.type(screen.getByLabelText('高德 key'), '2')
     await userEvent.click(saveBtn())
     await waitFor(() => expect(saveSettings).toHaveBeenCalledOnce())
     expect('amapSecurityCode' in sentBody().map).toBe(false)

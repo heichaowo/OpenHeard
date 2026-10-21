@@ -1,4 +1,4 @@
-import { Card, Form, Input, InputNumber, Select, Space, Switch, Typography } from 'antd'
+import { Alert, Card, Form, Input, InputNumber, Select, Space, Switch, Typography } from 'antd'
 import type { FormInstance } from 'antd'
 import type { AsrProvider, TextProvider, VadProvider } from '../../api'
 import { SecretInput } from './secret'
@@ -99,8 +99,11 @@ export function AiCard({
   keysSet,
   secrets,
   onSecret,
+  problem,
 }: {
   form: FormInstance<FormValues>
+  /** 配置文件里 ai 段写坏了，坏在哪。 */
+  problem?: string
   /** 总开关此刻开着没有。 */
   on: boolean
   keysSet: { asr: boolean; text: boolean }
@@ -125,6 +128,15 @@ export function AiCard({
         </Space>
       }
     >
+      {problem !== undefined && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="配置文件里的 ai 段有问题，现在按关着处理"
+          description={`${problem}。下面是缺省值，不是文件里写的。保存这一卡会替换文件里的整个 ai 段，包括里面的 key。`}
+        />
+      )}
       {!on && (
         <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
           识别关着。打开后才能改，原来的设置都留着。

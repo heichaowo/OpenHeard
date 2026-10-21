@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   App,
   Button,
@@ -15,7 +15,7 @@ import {
 import type { FormInstance } from "antd";
 import { MAX_CHANNELS, MAX_SPAN_HZ, bandOf, planTuning } from "@core";
 import { api, errorText } from "../api";
-import type { Settings } from "../api";
+import type { Settings, SettingsBody } from "../api";
 import { AsyncContent } from "../components/AsyncContent";
 import { MapPickButton } from "../components/MapPickButton";
 import { PageHeader } from "../components/PageHeader";
@@ -23,7 +23,7 @@ import { useStore } from "../store";
 import { AiCard } from "./settings/AiCard";
 import { MapCard } from "./settings/MapCard";
 import { NO_SECRET, toBody, toForm } from "./settings/model";
-import type { FormValues, SecretState } from "./settings/model";
+import type { FormValues, SecretState, Touched } from "./settings/model";
 
 const filled = (v: unknown) =>
   v !== undefined &&
@@ -115,6 +115,8 @@ export default function SettingsPage() {
   const [secrets, setSecrets] = useState({ asr: NO_SECRET, text: NO_SECRET, amap: NO_SECRET });
   const setSecret = (k: "asr" | "text" | "amap", v: SecretState) =>
     setSecrets((m) => ({ ...m, [k]: v }));
+  // 人改过 ai 或 map 里的哪一段。没改的段不发，见 settings/model.ts 的 toBody。
+  const touched = useRef<Touched>({ ai: false, map: false });
   const [settings, setSettings] = useState<Settings | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
@@ -143,6 +145,7 @@ export default function SettingsPage() {
       const s = await api.settings();
       setSettings(s);
       form.setFieldsValue(toForm(s));
+      touched.current = { ai: false, map: false };
       setError(undefined);
     } catch (e) {
       setError(errorText(e));
@@ -162,9 +165,9 @@ export default function SettingsPage() {
       // 关着的那张卡，body 里 Form.Item 藏着没卸载：getFieldsValue(true) 照样
       // 把它的值带上，原样存回去。onFinish 给的 values 只有校验过的字段，不够全。
       const values = form.getFieldsValue(true) as FormValues;
-      let body: Settings;
+      let body: SettingsBody;
       try {
-        body = toBody(values, secrets);
+        body = toBody(values, secrets, touched.current);
       } catch {
         // 写错的 JSON 在输入框里会当场标红；走到这里是写错之后又把那一块收起来了。
         message.error("识别或提取的额外参数不是合法的 JSON");
@@ -173,6 +176,7 @@ export default function SettingsPage() {
       const saved = await api.saveSettings(body);
       setSettings(saved);
       form.setFieldsValue(toForm(saved));
+      touched.current = { ai: false, map: false };
       // 存下去的密钥框清空，页面上改显示「已设置」。
       setSecrets({ asr: NO_SECRET, text: NO_SECRET, amap: NO_SECRET });
       message.success("存好了，守护进程会自己跟上");
@@ -215,7 +219,10 @@ export default function SettingsPage() {
           // 信道表和查询表整体的规则挂在 Form.List 上，改某一行时不会自己重跑。
           // 不补这一下，名字重复要点了保存才看得到；开关一变，也要让旧的校验
           // 结果跟着重算（关掉就该把「至少要有一个信道」这类错误收回去）。
-          onValuesChange={(changed: Partial<Settings>) => {
+          onValuesChange={(changed: Partial<FormValues>) => {
+            // extra 是 ai 里额外参数的文本框。
+            if (changed.ai !== undefined || changed.extra !== undefined) touched.current.ai = true;
+            if (changed.map !== undefined) touched.current.map = true;
             if (
               changed.analog?.channels !== undefined ||
               changed.analog?.enabled !== undefined
@@ -368,6 +375,7 @@ export default function SettingsPage() {
             }}
             secrets={secrets}
             onSecret={setSecret}
+            problem={settings?.aiProblem}
           />
 
           <Card size="small" title="本台" style={{ marginBottom: 16 }}>
@@ -413,6 +421,7 @@ export default function SettingsPage() {
             codeSet={settings?.map.amapSecurityCodeSet === true}
             secret={secrets.amap}
             onSecret={(v) => setSecret("amap", v)}
+            problem={settings?.mapProblem}
           />
 
           <Card size="small" title="频谱表" style={{ marginBottom: 16 }}>

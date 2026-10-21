@@ -148,6 +148,16 @@ export interface Settings {
   brandmeisterEnabled?: boolean
   ai: AiSettings
   map: MapSettings
+  /** 配置文件里的 ai 段写坏了：GET 回的 ai 是缺省值，这里说坏在哪。存 ai 会把文件里的这一段换掉。 */
+  aiProblem?: string
+  /** 同上，map 段。 */
+  mapProblem?: string
+}
+
+/** PUT /api/settings 的 body：ai 和 map 没改就不发，服务端留着文件里的原样。 */
+export type SettingsBody = Omit<Settings, 'ai' | 'map' | 'aiProblem' | 'mapProblem'> & {
+  ai?: AiSettings
+  map?: MapSettings
 }
 
 /** 通联本身之外还带上它用到的哪几次发射，只有受保护的 /api/qsos 才给。
@@ -301,7 +311,7 @@ export const api = {
   recordings: () => call<string[]>('/recordings'),
 
   settings: () => call<Settings>('/settings'),
-  saveSettings: (next: Settings) =>
+  saveSettings: (next: SettingsBody) =>
     call<Settings>('/settings', { method: 'PUT', body: JSON.stringify(next) }),
 
   importAdif: (text: string) =>

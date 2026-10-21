@@ -1,4 +1,4 @@
-import { Card, Form, Input, Radio, Typography } from 'antd'
+import { Alert, Card, Form, Input, Radio, Typography } from 'antd'
 import type { FormInstance } from 'antd'
 import type { MapProvider } from '../../api'
 import { SecretInput } from './secret'
@@ -10,8 +10,11 @@ export function MapCard({
   codeSet,
   secret,
   onSecret,
+  problem,
 }: {
   form: FormInstance<FormValues>
+  /** 配置文件里 map 段写坏了，坏在哪。 */
+  problem?: string
   codeSet: boolean
   secret: SecretState
   onSecret: (s: SecretState) => void
@@ -19,6 +22,15 @@ export function MapCard({
   const provider = Form.useWatch(['map', 'provider'], form) as MapProvider | undefined
   return (
     <Card size="small" title="地图" style={{ marginBottom: 16 }}>
+      {problem !== undefined && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="配置文件里的 map 段有问题，现在按不用地图处理"
+          description={`${problem}。下面是缺省值，不是文件里写的。保存这一卡会替换文件里的整个 map 段，包括里面的 key。`}
+        />
+      )}
       <Typography.Paragraph type="secondary">
         填对方网格时可以在地图上点。网格按 WGS-84 算，高德给的坐标会先换回来再算。
       </Typography.Paragraph>
