@@ -3,6 +3,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { COOKIE, SESSION_DAYS, signSession, verifyPassword, verifySession } from './auth.ts';
@@ -28,6 +29,17 @@ interface IgnorePick {
   id: string;
   activityIds: string[];
 }
+
+/** 请求体不是合法 JSON 就是 undefined，调用方回自己的 422。JSON 的 null 照常返回。 */
+const readJson = (c: Context): Promise<unknown> => c.req.json().catch(() => undefined);
+
+/** 要的是对象：不是合法 JSON、null、数组、文字都是 undefined。 */
+const readJsonObject = async (c: Context): Promise<Record<string, unknown> | undefined> => {
+  const v = await readJson(c);
+  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+};
+
+const BAD_BODY = { error: '请求体要是 JSON 对象' };
 
 const isPick = (x: unknown): x is IgnorePick => {
   const p = x as Partial<IgnorePick> | null;
@@ -109,13 +121,13 @@ export function createApp(
       }
     })
     .post('/ai', async (c) => {
-      const body = await c.req.json();
+      const body = await readJson(c);
       if (!Array.isArray(body)) return c.json({ error: '要是 AiResult 数组' }, 422);
       return c.json(store.ingestAi(body));
     })
     // 识别工作线程自己的状态，只放内存。起不来的原因（缺模型、key 不对）不记在行上。
     .post('/ai/status', async (c) => {
-      const body = (await c.req.json()) as { ok?: unknown; message?: unknown } | null;
+      const body = await readJsonObject(c);
       if (typeof body?.ok !== 'boolean' || typeof body.message !== 'string') {
         return c.json({ error: '要是 {ok: boolean, message: string}' }, 422);
       }
@@ -225,8 +237,9 @@ export function createApp(
 
     .post('/conversations/promote', async (c) => {
       try {
-        const body = (await c.req.json()) as QsoDraft & { activityIds?: unknown };
-        const { activityIds, ...draft } = body;
+        const body = await readJsonObject(c);
+        if (body === undefined) return c.json(BAD_BODY, 422);
+        const { activityIds, ...draft } = body as unknown as QsoDraft & { activityIds?: unknown };
         if (!Array.isArray(activityIds) || !activityIds.every((id) => typeof id === 'string')) {
           return c.json({ error: 'activityIds 要是字符串数组' }, 422);
         }
@@ -238,7 +251,7 @@ export function createApp(
     })
 
     .post('/conversations/ignore', async (c) => {
-      const { picks } = (await c.req.json()) as { picks?: unknown };
+      const picks = (await readJsonObject(c))?.picks;
       if (!Array.isArray(picks) || !picks.every(isPick)) {
         return c.json({ error: 'picks 要是 {id, activityIds} 数组' }, 422);
       }
@@ -246,7 +259,7 @@ export function createApp(
     })
 
     .post('/conversations/delete', async (c) => {
-      const { picks } = (await c.req.json()) as { picks?: unknown };
+      const picks = (await readJsonObject(c))?.picks;
       if (!Array.isArray(picks) || !picks.every(isPick)) {
         return c.json({ error: 'picks 要是 {id, activityIds} 数组' }, 422);
       }
@@ -255,7 +268,7 @@ export function createApp(
 
     .post('/conversations/verdict', async (c) => {
       try {
-        const { activityIds, meaningless } = (await c.req.json()) as { activityIds?: unknown; meaningless?: unknown };
+        const { activityIds, meaningless } = (await readJsonObject(c)) ?? {};
         if (
           !Array.isArray(activityIds) ||
           !activityIds.every((id) => typeof id === 'string') ||
@@ -284,8 +297,9 @@ export function createApp(
 
     .post('/qsos', async (c) => {
       try {
-        const draft = (await c.req.json()) as QsoDraft;
-        return c.json(store.addQso(draft));
+        const draft = await readJsonObject(c);
+        if (draft === undefined) return c.json(BAD_BODY, 422);
+        return c.json(store.addQso(draft as unknown as QsoDraft));
       } catch (e) {
         const { status, body } = fail(e);
         return c.json(body, status);
@@ -294,8 +308,9 @@ export function createApp(
 
     .put('/qsos/:id', async (c) => {
       try {
-        const draft = (await c.req.json()) as QsoDraft;
-        return c.json(store.editQso(c.req.param('id'), draft));
+        const draft = await readJsonObject(c);
+        if (draft === undefined) return c.json(BAD_BODY, 422);
+        return c.json(store.editQso(c.req.param('id'), draft as unknown as QsoDraft));
       } catch (e) {
         const { status, body } = fail(e);
         return c.json(body, status);
@@ -310,7 +325,7 @@ export function createApp(
 
     .put('/settings', async (c) => {
       try {
-        return c.json(store.saveSettings(await c.req.json()));
+        return c.json(store.saveSettings(await readJson(c)));
       } catch (e) {
         const { status, body } = fail(e);
         return c.json(body, status);

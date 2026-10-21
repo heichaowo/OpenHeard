@@ -1017,6 +1017,44 @@ describe('登录限速', () => {
   });
 });
 
+// 不是 JSON 的请求体和 JSON 的 null 都是请求体格式不对，回 422，不是 500。
+describe('请求体不是合法 JSON', () => {
+  const bad = ['{not json', 'null', '[]', '"x"'];
+  const routes: [string, string, string][] = [
+    ['POST', '/api/conversations/promote', 'cookie'],
+    ['POST', '/api/conversations/ignore', 'cookie'],
+    ['POST', '/api/conversations/delete', 'cookie'],
+    ['POST', '/api/conversations/verdict', 'cookie'],
+    ['POST', '/api/qsos', 'cookie'],
+    ['PUT', '/api/qsos/x', 'cookie'],
+    ['PUT', '/api/settings', 'cookie'],
+    ['POST', '/api/ingest/ai', 'token'],
+    ['POST', '/api/ingest/ai/status', 'token'],
+  ];
+
+  for (const [method, path, auth] of routes) {
+    it(`${method} ${path} 回 422`, async () => {
+      const app = setup();
+      for (const body of bad) {
+        // /ingest/ai 要的是数组，[] 是合法的
+        if (path === '/api/ingest/ai' && body === '[]') continue;
+        const res = await app.fetch(
+          new Request(`http://local${path}`, {
+            method,
+            headers: {
+              'content-type': 'application/json',
+              ...(auth === 'cookie' ? { cookie: cookie() } : { authorization: `Bearer ${config.ingestToken}` }),
+            },
+            body,
+          }),
+        );
+        assert.equal(res.status, 422, `${body}`);
+        assert.ok(((await res.json()) as { error?: string }).error);
+      }
+    });
+  }
+});
+
 describe('没接住的异常', () => {
   it('回 JSON 而不是纯文本 500', async () => {
     const broken = {
