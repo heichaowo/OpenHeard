@@ -368,3 +368,35 @@ describe('模拟守听关着', () => {
     expect(radios).not.toHaveBeenCalled()
   })
 })
+
+// 1280 的视口里表格外框 1230 宽。右边固定的操作列压在表的最右 244 上，
+// 它左边的播放列要整个露在外面，不然胶囊被盖掉一截。表比外框宽多少，就盖掉多少。
+describe('桌面表格的列宽', () => {
+  it('1280 宽、带勾选列的未入库档：播放胶囊不被固定的操作列盖住', async () => {
+    const a = conv([act('a1', 0, { mine: true }), act('ax', 10, { callsign: 'BA1AA' })])
+    conversations.mockResolvedValue({ items: [a] })
+    const { container } = render(tree(store([]), '/heard?tab=unlogged'))
+    await screen.findByText('BA1AA')
+
+    const table = container.querySelector('.ant-table-content > table') as HTMLElement
+    // 展开列和勾选列的宽度在 antd 的样式表里（48、32），jsdom 读不到，这里补上。
+    const widths = [...table.querySelectorAll('colgroup col')].map((c) =>
+      c.className.includes('selection-col') ? 32 : c.className.includes('expand-icon-col') ? 48 : Number.parseFloat((c as HTMLElement).style.width),
+    )
+    const tableWidth = Number.parseFloat(table.style.width)
+    expect(Number.isNaN(tableWidth)).toBe(false)
+    // 没写宽度的那一列（信道）拿剩下的。
+    const fixed = widths.filter((w) => !Number.isNaN(w))
+    const flexible = tableWidth - fixed.reduce((n, w) => n + w, 0)
+    const all = widths.map((w) => (Number.isNaN(w) ? flexible : w))
+    expect(flexible).toBeGreaterThanOrEqual(90)
+
+    const wrapper = 1230
+    const actionWidth = all.at(-1)!
+    const playWidth = all.at(-2)!
+    const playRight = all.slice(0, -1).reduce((n, w) => n + w, 0)
+    // 播放格两边各 16 的内边距里可以被盖，胶囊本身不行。
+    expect(playRight - 16).toBeLessThanOrEqual(wrapper - actionWidth)
+    expect(playWidth).toBeGreaterThanOrEqual(150)
+  })
+})

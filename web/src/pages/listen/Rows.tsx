@@ -483,8 +483,8 @@ export function DesktopRows({
     { title: <TimeHeader />, key: 'startAt', render: (_, r) => time.at(r.conv.startAt), width: 184 },
     { title: '信道', key: 'channel', ellipsis: true, render: (_, r) => channelText(r.conv) },
     mode === 'meaningless'
-      ? { title: '原因', key: 'reason', ellipsis: true, width: 200, render: (_, r) => <ReasonCell vm={r} /> }
-      : { title: '呼号', key: 'call', ellipsis: true, width: 200, render: (_, r) => <CallCell vm={r} /> },
+      ? { title: '原因', key: 'reason', ellipsis: true, width: 170, render: (_, r) => <ReasonCell vm={r} /> }
+      : { title: '呼号', key: 'call', ellipsis: true, width: 170, render: (_, r) => <CallCell vm={r} /> },
     {
       title: '发射',
       key: 'activities',
@@ -512,7 +512,9 @@ export function DesktopRows({
       columns={columns}
       dataSource={rows}
       pagination={false}
-      scroll={{ x: 1300 }}
+      // 1280 的视口里外框 1230 宽，表比外框宽多少，固定在右边的操作列就多盖住播放列多少。
+      // 播放胶囊两边各 16 的内边距，所以表不能比 1246 宽。
+      scroll={{ x: 1240 }}
       rowSelection={
         picked
           ? {
