@@ -105,7 +105,7 @@ describe('新对话自己出现', () => {
     }
   })
 
-  it('开着确认框或者勾着选中的时候不插', async () => {
+  it('勾着选中的时候不插', async () => {
     const a = conv([act('a1', 0, { mine: true })])
     conversations.mockResolvedValue({ items: [a] })
     render(tree(store([]), '/heard?tab=unlogged'))
@@ -115,6 +115,25 @@ describe('新对话自己出现', () => {
     conversations.mockResolvedValue({ items: [u2, a] })
     poll()
     expect(await screen.findByText('有 1 段新的')).toBeInTheDocument()
+  })
+
+  it('行上的忽略确认框开着的时候不插，关掉之后下一轮才插', async () => {
+    conversations.mockResolvedValue({ items: [u1] })
+    render(tree(store([]), '/heard?tab=unlogged'))
+    await screen.findByText('BA1AA')
+    await userEvent.click(within(rowOf('BA1AA')).getByText(/^忽\s*略$/))
+    await screen.findByRole('button', { name: 'OK' })
+    goQuiet()
+
+    conversations.mockResolvedValue({ items: [u2, u1] })
+    poll()
+    expect(await screen.findByText('有 1 段新的')).toBeInTheDocument()
+    expect(screen.queryByText('BD7BBB')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    goQuiet()
+    poll()
+    expect(await screen.findByText('BD7BBB')).toBeInTheDocument()
   })
 
   it('列表是空的就直接显示拉到的', async () => {
@@ -273,7 +292,9 @@ describe('行要离开视图：先留在原处、按钮禁用，等人不在操�
 
     fireEvent.pointerDown(document.body)
     rerender(tree(store([a, b])))
-    expect(await screen.findByText('BD7BBB')).toBeInTheDocument()
+    const added = await screen.findByText('BD7BBB')
+    // 队尾：已有的那行在它前面。插到队首的话手指底下的行会被推走。
+    expect(screen.getByText('BA1AA').compareDocumentPosition(added) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('待确认里补进中间的一条：人在操作时攒着，提示条写补进来的', async () => {
