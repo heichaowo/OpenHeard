@@ -60,6 +60,8 @@ export default function MapPicker({
   const [el, setEl] = useState<HTMLDivElement | null>(null)
   const adapterRef = useRef<MapAdapter | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
+  // 加载失败的原话。高德换了 key 要刷新页面，只有这句说得清。
+  const [failReason, setFailReason] = useState<string | undefined>()
 
   const fieldValid = fieldGrid !== undefined && isValidGrid(fieldGrid)
   const [point, setPoint] = useState<LatLon | null>(() => (fieldValid ? gridCenter(fieldGrid) : null))
@@ -121,9 +123,11 @@ export default function MapPicker({
           )
         }
       },
-      () => {
+      (e: unknown) => {
         clearTimeout(timer)
-        if (!dead) setStatus('failed')
+        if (dead) return
+        setFailReason(e instanceof Error ? e.message : undefined)
+        setStatus('failed')
       },
     )
     return () => {
@@ -220,7 +224,9 @@ export default function MapPicker({
             type="warning"
             showIcon
             message="地图打不开，网格可以直接填"
-            description={provider === 'osm' ? 'OpenStreetMap 在国内可能连不上。可以在设置里换成高德。' : undefined}
+            description={
+              provider === 'osm' ? 'OpenStreetMap 在国内可能连不上。可以在设置里换成高德。' : failReason
+            }
           />
         ) : (
           <>

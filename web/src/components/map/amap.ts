@@ -81,17 +81,22 @@ const wgs = (ll: AmapLngLat): LatLon => {
 }
 
 let loading: Promise<AmapNamespace> | undefined
+/** 脚本是用哪个 key 加载的。key 写在脚本地址里，加载之后换不了。 */
+let loadedKey: string | undefined
 
 /**
  * 脚本只加载一次。失败了（断网、key 不对）清掉缓存，再打开选点时能重试：
  * 缓存着一个失败的 Promise，人换了网络也永远打不开。
- * 加载过之后换 key 要刷新页面，脚本里的 key 改不了。
+ * 加载过之后换 key 要刷新页面，脚本里的 key 改不了：换了就明说，不假装用上了新的。
+ * key 填错了的话高德有时照样给回完整的脚本，只是后面的请求都失败，所以失败了也不能当作没加载过。
  */
 export function loadAMap(key: string): Promise<AmapNamespace> {
+  if (loadedKey !== undefined && loadedKey !== key) return Promise.reject(new Error('改了高德 key，要刷新页面才能用新的'))
   if (window.AMap !== undefined) return Promise.resolve(window.AMap)
   if (loading !== undefined) return loading
   // 必须在脚本加载前设好。安全密钥留在 api 里，浏览器只知道代理的地址。
   window._AMapSecurityConfig = { serviceHost: `${location.origin}/_AMapService` }
+  loadedKey = key
   const script = document.createElement('script')
   script.async = true
   script.src = `https://webapi.amap.com/maps?v=2.0&key=${encodeURIComponent(key)}&plugin=AMap.AutoComplete,AMap.PlaceSearch,AMap.Geocoder`
@@ -101,6 +106,7 @@ export function loadAMap(key: string): Promise<AmapNamespace> {
   })
   loading.catch(() => {
     loading = undefined
+    loadedKey = undefined
     script.remove()
   })
   document.head.append(script)

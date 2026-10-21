@@ -302,6 +302,14 @@ describe('MapPicker 打不开', () => {
     expect(onPick).toHaveBeenCalledExactlyOnceWith({ grid: 'OM89EV', qth: undefined })
   })
 
+  it('高德加载失败：把原因写在警告里', async () => {
+    const f = fake()
+    f.factory.mockRejectedValueOnce(new Error('改了高德 key，要刷新页面才能用新的'))
+    mount(f, { provider: 'amap', amapKey: 'k' })
+    await screen.findByText(failure)
+    expect(screen.getByText('改了高德 key，要刷新页面才能用新的')).toBeInTheDocument()
+  })
+
   describe('一直转圈', () => {
     beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }))
     afterEach(() => vi.useRealTimers())

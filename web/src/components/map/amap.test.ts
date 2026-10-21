@@ -294,6 +294,19 @@ describe('loadAMap', () => {
     expect(await again).toBe(window.AMap)
   })
 
+  // key 写在脚本的地址里，加载过之后换不了。认不出来的话，换了 key 的人永远在用旧的。
+  it('加载过之后换 key：不假装用上了新的，要人刷新页面', async () => {
+    const p = loadAMap('old')
+    window.AMap = { tag: 3 } as unknown as AmapNamespace
+    scripts()[0]!.onload?.(new Event('load'))
+    await p
+
+    await expect(loadAMap('new')).rejects.toThrow('改了高德 key，要刷新页面才能用新的')
+    expect(scripts()).toHaveLength(1)
+    // 同一个 key 照常。
+    expect(await loadAMap('old')).toBe(window.AMap)
+  })
+
   it('脚本加载了却没有 AMap 也算失败', async () => {
     const p = loadAMap('k4')
     scripts()[0]!.onload?.(new Event('load'))
