@@ -296,6 +296,8 @@ export function startAi(
       } catch (e) {
         if (stopped) return pushed;
         if (!(e instanceof ItemError)) throw e;
+        // 批次进行中被人删了：api 的 todo 对没有 wav 的条目也是直接跳过。不扣着也不推。
+        if (!(await exists(join(cfg.recordingsDir, `${item.id}.wav`)))) continue;
         console.error(`识别失败 ${item.id}（${e.step}）：${e.message}`);
         const ms = Date.now() - started;
         const sus = suspects;

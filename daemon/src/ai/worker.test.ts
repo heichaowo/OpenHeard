@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, it, mock } from 'node:test';
 import type { AiConfig } from '../config.ts';
@@ -454,6 +454,41 @@ describe('两类错误', () => {
     await new Promise((r) => setTimeout(r, 450));
     assert.equal(t.api.state.posts.length, 0);
     assert.ok(t.api.todoCalls().length <= 6, `请求了 ${t.api.todoCalls().length} 次`);
+  });
+});
+
+describe('批次进行中录音被删了', () => {
+  // 收听页上删对话，wav 随之被删。同一条对话的几次发射在 todo 里挨着，
+  // 不能因为这个就把 worker 当成环境出了问题。
+  it('删掉的条目不记 error、不暂停，后面的接着做', async () => {
+    const t = await setup();
+    // whisper-cli 睡一会儿，给删文件留出时间；.txt 一并删掉它才会失败退出
+    writeWav(t.env, 'fm-1', '收到', { sleep: '0.4' });
+    writeWav(t.env, 'fm-2', '收到', { sleep: '0.4' });
+    writeWav(t.env, 'fm-3', '我是 BH1ABC');
+    t.api.state.todo = [todoItem('fm-1'), todoItem('fm-2'), todoItem('fm-3')];
+    t.start();
+    await until(() => loggedCalls(t.env).some((l) => l.startsWith('cli') && l.includes('fm-1')));
+    for (const id of ['fm-1', 'fm-2']) {
+      rmSync(join(t.env.recordings, `${id}.wav`));
+      rmSync(join(t.env.recordings, `${id}.wav.txt`));
+    }
+    await until(() => t.api.state.posts.length === 1);
+
+    assert.equal(t.api.state.posts[0]!.activityId, 'fm-3');
+    assert.equal(t.api.state.posts[0]!.error, undefined);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(t.api.state.posts.length, 1);
+    assert.ok(t.api.state.statuses.every((s) => s.ok), JSON.stringify(t.api.state.statuses));
+  });
+
+  it('文件还在的失败照旧记 error', async () => {
+    const t = await setup();
+    writeWav(t.env, 'fm-fail-1', '收到');
+    t.api.state.todo = [todoItem('fm-fail-1')];
+    t.start();
+    await until(() => t.api.state.posts.length === 1);
+    assert.ok(t.api.state.posts[0]!.error);
   });
 });
 
