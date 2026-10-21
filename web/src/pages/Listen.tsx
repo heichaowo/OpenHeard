@@ -214,6 +214,14 @@ export default function Listen() {
     pendingLive.hold(ids)
     try {
       const r = await act()
+      // 结算掉的对话，挑过的子集和勾选作废。余下拆出来的一段可能沿用同一个 id，
+      // 也可能改名搬走这份挑选，带着已经入库的几次，所以要在合并新结果之前清。
+      // 报了 missing 的没结算，原样留着。
+      const missing = typeof r === 'object' && r !== null && 'missing' in r ? (r.missing as string[]) : []
+      const done = ids.filter((id) => !missing.includes(id))
+      const keep = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => !done.includes(k)))
+      setSubset(keep)
+      setPicked(keep)
       await settleView(ids)
       return r
     } catch (e) {
@@ -349,9 +357,6 @@ export default function Listen() {
     try {
       const r = await settle(ids, () => deleteConversations(snapshot))
       const gone = ids.filter((id) => !r.missing.includes(id))
-      const drop = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => !gone.includes(k)))
-      setPicked(drop)
-      setSubset(drop)
       setExpanded((e) => e.filter((k) => !gone.includes(k)))
       message.success(`删掉了 ${r.deleted} 段` + (r.missing.length > 0 ? `，${r.missing.length} 段已经变了` : ''))
     } catch (e) {
