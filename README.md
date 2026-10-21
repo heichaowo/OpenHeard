@@ -33,9 +33,9 @@ Contacts are clustered into conversations using measured silence thresholds (120
 ## Architecture
 
 - **`api/`** — Hono backend over SQLite, REST endpoints for web and daemon
-- **`daemon/`** — Polling service for BrandMeister; SDR listener for analog 438.700
+- **`daemon/`** — Polling service for BrandMeister; SDR listener for analog 438.700; transcribes recordings (local whisper.cpp or a cloud API) to flag empty key-ups and suggest callsigns
 - **`web/`** — React 19 + Ant Design 6 admin interface
-  - Listening: confirm and review captured contacts
+  - Listening: confirm, ignore or delete captured conversations, with transcripts and AI suggestions
   - Log: search, ADIF import/export, QSL management
   - Entry: quick manual logging
   - Operations & Settings
@@ -94,7 +94,7 @@ Modified copies run as a network service must offer source to users.
 自动记录业余无线电通联的日志系统。支持 BrandMeister DMR 网络和模拟中继两个数据源。
 
 - **`api/`** — Hono 后端，使用 SQLite
-- **`daemon/`** — 轮询 BrandMeister，同时监听本地模拟信道 438.700
+- **`daemon/`** — 轮询 BrandMeister，同时监听本地模拟信道 438.700，并识别录音（本机 whisper.cpp 或云端接口），标出空按，提示对方呼号
 - **`web/`** — React 19 + Ant Design 6 管理界面
 - **`public/`** — 轻量级公开展示页
 - **`core/`** — 共享的业务逻辑
