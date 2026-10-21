@@ -79,10 +79,33 @@ export function buildOsm(init: AdapterInit) {
   return { adapter, tiles, map }
 }
 
-/** 第一批瓦片到了才算能用。国内连不上时一直不 resolve，由 MapPicker 的 10 秒超时兜。 */
+/**
+ * 第一块瓦片到了就算能用。不能等 load：Leaflet 在这一屏所有瓦片都结束时才触发它，
+ * 国内常见的是个别瓦片卡住，等它会把画了大半的地图判成打不开。
+ * 但 load 也会在瓦片全出错（连接被拒绝、域名解析不了）时触发，那时一块都没到，要判失败。
+ * 什么都没来的情况（一直转圈）不在这里管，由 MapPicker 的 10 秒超时兜。
+ */
+export function tilesUsable(tiles: L.TileLayer): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let any = false
+    tiles.on('tileload', () => {
+      any = true
+      resolve()
+    })
+    tiles.once('load', () => {
+      if (!any) reject(new Error('瓦片一块都没加载到'))
+    })
+  })
+}
+
 export function createOsm(init: AdapterInit): Promise<MapAdapter> {
   const { adapter, tiles } = buildOsm(init)
-  return new Promise((resolve) => {
-    tiles.once('load', () => resolve(adapter))
-  })
+  return tilesUsable(tiles).then(
+    () => adapter,
+    (e: unknown) => {
+      // 没人会拿到这个适配器，地图要自己拆掉。
+      adapter.destroy()
+      throw e
+    },
+  )
 }

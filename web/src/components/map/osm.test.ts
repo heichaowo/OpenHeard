@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import * as L from 'leaflet'
 import iconUrl from 'leaflet/dist/images/marker-icon.png'
 import { gridBounds } from '@core'
-import { buildOsm } from './osm'
+import { buildOsm, tilesUsable } from './osm'
 
 const mounted: HTMLElement[] = []
 const make = () => {
@@ -97,5 +97,50 @@ describe('OpenStreetMap 适配器', () => {
     })
     expect(left).toBe(0)
     adapter.destroy()
+  })
+})
+
+// Leaflet 的 load 在这一屏所有瓦片都结束时触发，出错的也算结束。
+describe('OpenStreetMap 什么时候算能用', () => {
+  const layer = () => new L.TileLayer('https://tile.example/{z}/{x}/{y}.png')
+  const settled = (p: Promise<void>) => {
+    const out: { v?: 'ok' | 'fail' } = {}
+    p.then(
+      () => (out.v = 'ok'),
+      () => (out.v = 'fail'),
+    )
+    return () => new Promise<typeof out.v>((r) => setTimeout(() => r(out.v), 0))
+  }
+
+  it('第一块瓦片到了就能用，不等其余的：有一块卡住不该让整张地图判成打不开', async () => {
+    const tiles = layer()
+    const state = settled(tilesUsable(tiles))
+    tiles.fire('tileload')
+    expect(await state()).toBe('ok')
+  })
+
+  it('这一屏的瓦片全出错就失败：连接被拒绝时 load 照样会来', async () => {
+    const tiles = layer()
+    const state = settled(tilesUsable(tiles))
+    tiles.fire('tileerror')
+    tiles.fire('tileerror')
+    tiles.fire('load')
+    expect(await state()).toBe('fail')
+  })
+
+  it('有的出错有的到了：能用', async () => {
+    const tiles = layer()
+    const state = settled(tilesUsable(tiles))
+    tiles.fire('tileerror')
+    tiles.fire('tileload')
+    tiles.fire('load')
+    expect(await state()).toBe('ok')
+  })
+
+  it('什么都没来：一直等，由 MapPicker 的 10 秒兜', async () => {
+    const tiles = layer()
+    const state = settled(tilesUsable(tiles))
+    tiles.fire('tileerror')
+    expect(await state()).toBeUndefined()
   })
 })
