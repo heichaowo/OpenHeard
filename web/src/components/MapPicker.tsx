@@ -167,7 +167,8 @@ export default function MapPicker({
     )
   }, [withQth, point, status])
   const qth = withQth && found?.key === pointKey ? found.qth : undefined
-  const qthPending = withQth && point !== null && found?.key !== pointKey
+  // 失败了就没有反查，复选框也藏起来了，不能让按钮永远等下去。
+  const qthPending = withQth && point !== null && status !== 'failed' && found?.key !== pointKey
 
   const search = async () => {
     const a = adapterRef.current
@@ -212,7 +213,8 @@ export default function MapPicker({
       footer={
         <Space>
           <Button onClick={onCancel}>取消</Button>
-          <Button type="primary" disabled={point === null} onClick={confirm}>
+          {/* 反查没回来就按，勾了的 QTH 会悄悄丢掉。等它回来，失败了也会放开。 */}
+          <Button type="primary" disabled={point === null || qthPending} loading={qthPending} onClick={confirm}>
             用这个网格
           </Button>
         </Space>

@@ -237,6 +237,45 @@ describe('MapPicker 的 QTH', () => {
     expect(onPick).toHaveBeenCalledExactlyOnceWith({ grid: 'OM89EV', qth: '深圳南山区' })
   })
 
+  // 反查还没回来就按，qth 是 undefined，表单里的 QTH 原样不动，勾了却什么都没填，没有一点声音。
+  it('反查还没回来：「用这个网格」先转圈禁用，回来之后才能按，QTH 跟着填回', async () => {
+    const f = fake()
+    let answer!: (q: string) => void
+    f.adapter.reverse.mockImplementationOnce(() => new Promise((r) => (answer = r)))
+    mount(f)
+    await ready(f)
+    f.click(BEIJING)
+    await userEvent.click(screen.getByRole('checkbox', { name: /同时填 QTH/ }))
+    await screen.findByText(/查地名/)
+    expect(useButton()).toBeDisabled()
+    expect(useButton()).toHaveClass('ant-btn-loading')
+
+    await act(async () => answer('北京东城'))
+    await waitFor(() => expect(useButton()).toBeEnabled())
+    await userEvent.click(useButton())
+    expect(onPick).toHaveBeenCalledExactlyOnceWith({ grid: 'OM89EV', qth: '北京东城' })
+  })
+
+  it('反查失败：按钮放开，没查到就不填 QTH，不会卡住', async () => {
+    const f = fake()
+    f.adapter.reverse.mockRejectedValueOnce(new Error('503'))
+    mount(f)
+    await ready(f)
+    f.click(BEIJING)
+    await userEvent.click(screen.getByRole('checkbox', { name: /同时填 QTH/ }))
+    await screen.findByText(/没查到/)
+    expect(useButton()).toBeEnabled()
+  })
+
+  it('没勾 QTH：「用这个网格」不转圈', async () => {
+    const f = fake()
+    mount(f)
+    await ready(f)
+    f.click(BEIJING)
+    expect(useButton()).toBeEnabled()
+    expect(useButton()).not.toHaveClass('ant-btn-loading')
+  })
+
   it('勾着的时候换点，反查跟着换；先发的晚回来，不盖掉后发的', async () => {
     const f = fake()
     let late!: (q: string) => void
