@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, readdirSync, statSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { watchAnalog } from './analog.ts';
+import { prerollKeepBlocks, watchAnalog } from './analog.ts';
 import type { AnalogConfig, RadioStatus } from './analog.ts';
 import { AUDIO_RATE } from './channelizer.ts';
 import { planTuning } from './core.ts';
@@ -23,9 +23,9 @@ function rng(seed: number) {
 
 /**
  * 一段合成的 rtl_sdr 输出。只有 438.500 上有载波，按 plan 一段一段开关，
- * 438.975 一直空着。
+ * 438.975 一直空着。weak 是弱载波，噪声落在开门门限和关门门限之间。
  */
-function iq(plan: [kind: 'noise' | 'carrier', seconds: number][]): Buffer {
+function iq(plan: [kind: 'noise' | 'weak' | 'carrier', seconds: number][]): Buffer {
   const tuning = planTuning([A, B]);
   assert.ok(tuning.ok);
   assert.equal(tuning.plan.sampleRate, RATE);
@@ -38,7 +38,7 @@ function iq(plan: [kind: 'noise' | 'carrier', seconds: number][]): Buffer {
     const n = Math.round(sec * RATE);
     for (let j = 0; j < n; j++, k++) {
       const ph = (2 * Math.PI * offset * k) / RATE + 3 * Math.sin((2 * Math.PI * 1000 * k) / RATE);
-      const amp = kind === 'carrier' ? 50 : 0;
+      const amp = kind === 'carrier' ? 50 : kind === 'weak' ? 2 : 0;
       out[2 * k] = Math.max(0, Math.min(255, Math.round(amp * Math.cos(ph) + r() * 20 + 127.5)));
       out[2 * k + 1] = Math.max(0, Math.min(255, Math.round(amp * Math.sin(ph) + r() * 20 + 127.5)));
     }
@@ -84,6 +84,29 @@ async function until(ok: () => boolean, ms = 10_000): Promise<void> {
 }
 
 const near = (a: number, b: number, tol: number) => Math.abs(a - b) <= tol;
+
+describe('prerollKeepBlocks', () => {
+  // 关门门限 98：噪声 105 是底噪，90 是载波，99 是弱载波抖到门限上面的那一块。
+  it('整段底噪只留最后一块', () => {
+    assert.equal(prerollKeepBlocks([105, 105, 105, 105], 98), 1);
+  });
+
+  it('末尾压着载波的块全留，再多留一块', () => {
+    assert.equal(prerollKeepBlocks([105, 105, 90, 90], 98), 3);
+  });
+
+  it('弱载波中途抖到门限上面，从第一块载波前一块留起', () => {
+    assert.equal(prerollKeepBlocks([105, 105, 90, 90, 99, 90], 98), 5);
+  });
+
+  it('一开头就是载波，全留', () => {
+    assert.equal(prerollKeepBlocks([90, 105, 90], 98), 3);
+  });
+
+  it('没有前导就没有要留的', () => {
+    assert.equal(prerollKeepBlocks([], 98), 0);
+  });
+});
 
 describe('watchAnalog', () => {
   // 一支接收机守两个信道：只有有载波的那个出事件，另一个一直静默。
@@ -153,6 +176,26 @@ describe('watchAnalog', () => {
       // 发射本身约 1 秒，前面最多多出两块（100 毫秒），不是 0.6 秒前导。
       assert.ok(n <= AUDIO_RATE * (e.durationS + 0.15), `录音 ${n} 个样点，发射 ${e.durationS} 秒`);
       assert.ok(n >= AUDIO_RATE * e.durationS, `录音 ${n} 个样点不该比发射还短`);
+    } finally {
+      radio.stop();
+    }
+  });
+
+  // 弱载波夹着一块底噪才等来强载波。从开门那一块往回数会停在这块底噪上，
+  // 把前面的弱载波丢掉。
+  it('前导里的弱载波中途抖回底噪，也整段留在录音里', async () => {
+    const rec = mkdtempSync(join(tmpdir(), 'openheard-rec-'));
+    const bin = fakeRtlSdr(iq([['noise', 1.5], ['weak', 0.3], ['noise', 0.05], ['carrier', 1], ['noise', 0.6]]));
+    const events: Activity[] = [];
+    let exited = false;
+    const radio = watchAnalog(cfg(bin, rec), (a) => events.push(a), () => {
+      exited = true;
+    });
+    try {
+      await until(() => exited && events.length >= 1);
+      const e = events[0]!;
+      const extraS = (statSync(join(rec, `${e.id}.wav`)).size - 44) / 2 / AUDIO_RATE - e.durationS;
+      assert.ok(extraS >= 0.3 && extraS <= 0.6, `录音比发射长 ${extraS} 秒，0.3 秒弱载波该在里面`);
     } finally {
       radio.stop();
     }

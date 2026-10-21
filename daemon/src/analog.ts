@@ -43,6 +43,19 @@ export interface AnalogConfig {
   rtlSdrPath: string;
 }
 
+/**
+ * 前导里要写进录音的块数，从最新的一块往前数。noiseDb 是前导每一块的噪声，旧的在前。
+ *
+ * 第一块噪声压到关门门限以下的块就是载波来的地方，从它前一块开始留，多留的这一块
+ * 给按下 PTT 那一下和紧跟着的 MDC。不从开门那一刻往回数：弱载波在门限上下抖，
+ * 往回数会停在抖上去的那一块，前面的弱信号就丢了。
+ */
+export function prerollKeepBlocks(noiseDb: number[], closeAboveDb: number): number {
+  const first = noiseDb.findIndex((n) => n < closeAboveDb);
+  const carrierAt = first === -1 ? noiseDb.length : first;
+  return noiseDb.length - Math.max(0, carrierAt - 1);
+}
+
 /** 幂等键要能重算，所以从信道和起始时刻推，不用随机数。 */
 const eventId = (channel: string, startAt: number) =>
   'fm-' + createHash('sha1').update(`${channel}|${startAt.toFixed(2)}`).digest('hex').slice(0, 16);
@@ -252,17 +265,13 @@ function listen(
   };
 
   /**
-   * 前导里载波是从哪个样点来的。从开门那一刻往回数，噪声一直压在关门门限以下的
-   * 那几块是载波，再多留一块给按下 PTT 那一下和紧跟着的 MDC。2026-10-21 量过
+   * 前导里从哪个样点开始写进录音，规则见 prerollKeepBlocks。2026-10-21 量过
    * 4 段录音，0.6 秒的前导里前 0.55 秒都是底噪。
    */
   const carrierStart = (len: number): number => {
     const closeAbove = detector.closeAboveDb;
     if (closeAbove === undefined) return 0;
-    let j = prerollNoise.length;
-    while (j > 0 && prerollNoise[j - 1]! < closeAbove) j--;
-    const keepBlocks = prerollNoise.length - Math.max(0, j - 1);
-    return Math.max(0, len - keepBlocks * blockN);
+    return Math.max(0, len - prerollKeepBlocks(prerollNoise, closeAbove) * blockN);
   };
 
   /**
