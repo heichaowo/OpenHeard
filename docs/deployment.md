@@ -203,7 +203,7 @@ Speech segment 1: start = 180.00, end = 250.00
 
 出错分两类，处理不同。
 
-**这一条录音的问题**，记成「识别失败」：读不了录音，提供方说这份输入不行（400、413、422），子进程在这个文件上失败，模型回的不是 JSON。每条最多试 3 次，两次之间至少隔 1 小时。同一步连着两条都失败时，当成下一类，不再记。
+**这一条录音的问题**，记成「识别失败」：读不了录音，提供方说这份输入不行（400、413、422），子进程在这个文件上失败，模型回的不是 JSON。每条最多试 3 次，两次之间至少隔 1 小时。同一步连着两条都失败时（中间没有成功过，跨批次也算），先当成下一类，第二条不记，状态和日志里写出两条的 id。等一会儿再做，先做别的录音来对照。别的录音在这一步通过了，环境没问题，这两条记成「识别失败」，队列接着往前走。别的录音也在这一步失败了，是环境的问题，什么都不记。
 
 **环境的问题**，不记在录音上：程序或模型没了，llama-server 90 秒内没就绪或者起来就退出，网络断了，超时，HTTP 401、403、404、429、5xx。这一条留着，等 60 秒再试，之后每次翻倍，最多 10 分钟。服务端给了 `Retry-After` 就按它等。运维页上写着原因。
 
@@ -486,7 +486,7 @@ Before it starts, the daemon checks that the programs and models of the enabled 
 
 Failures come in two kinds and are handled differently.
 
-**A problem with this recording** is recorded as "识别失败" (recognition failed): the recording cannot be read, the provider says this input is bad (400, 413, 422), a child process fails on this file, or the model's reply is not JSON. Each recording is tried at most 3 times, at least 1 hour apart. When two recordings in a row fail at the same step, it counts as the second kind and is not recorded.
+**A problem with this recording** is recorded as "识别失败" (recognition failed): the recording cannot be read, the provider says this input is bad (400, 413, 422), a child process fails on this file, or the model's reply is not JSON. Each recording is tried at most 3 times, at least 1 hour apart. When two recordings in a row fail at the same step (with no success between them, across batches too), it is first treated as the second kind: the second one is not recorded, and the status and the log name both ids. After a wait, other recordings go first as a check. If one of them passes that step, the environment is fine, both are recorded as "识别失败" and the queue moves on. If one of them fails at that step too, it is an environment problem and nothing is recorded.
 
 **A problem with the environment** is never recorded on the recording: a program or model is gone, llama-server is not ready within 90 seconds or exits on start, the network is down, a timeout, or HTTP 401, 403, 404, 429 or 5xx. The recording is kept and retried after 60 seconds, doubling each time up to 10 minutes. A `Retry-After` from the server is honoured. The ops page shows the reason.
 

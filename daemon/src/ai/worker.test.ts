@@ -337,6 +337,89 @@ describe('两类错误', () => {
     assert.ok(t.api.state.posts.every((p) => p.error !== undefined));
   });
 
+  // 两条坏的挨在一起，环境没问题：不能让它们挡住后面的整个队列。
+  it('相邻两条坏录音、环境正常：先退避，换别的条目验过环境之后，两条都记 error，队列往前走', async () => {
+    const t = await setup();
+    for (const id of ['fm-fail-a', 'fm-fail-b']) writeWav(t.env, id, '收到');
+    for (const id of ['fm-g1', 'fm-g2', 'fm-g3']) writeWav(t.env, id, '我是 BH1ABC');
+    t.api.state.todo = ['fm-fail-a', 'fm-fail-b', 'fm-g1', 'fm-g2', 'fm-g3'].map((id) => todoItem(id));
+    t.start();
+    await until(() => t.api.state.posts.length === 5);
+
+    const by = new Map(t.api.state.posts.map((p) => [p.activityId, p]));
+    assert.ok(by.get('fm-fail-a')!.error);
+    assert.ok(by.get('fm-fail-b')!.error);
+    for (const id of ['fm-g1', 'fm-g2', 'fm-g3']) assert.equal(by.get(id)!.error, undefined, id);
+    assert.equal(t.api.state.todo.length, 0);
+    // 暂停那一次的状态里点了两条的名，运维页上才知道是哪两条
+    const paused = t.api.state.statuses.find((s) => !s.ok)!;
+    assert.match(paused.message, /fm-fail-a/);
+    assert.match(paused.message, /fm-fail-b/);
+    await until(() => t.api.state.statuses.at(-1)!.ok);
+  });
+
+  it('环境真的坏了：换别的条目一试也失败，什么都不推，退避翻倍，状态里点名', async () => {
+    const t = await setup();
+    const ids = ['fm-fail-1', 'fm-fail-2', 'fm-fail-3', 'fm-fail-4'];
+    for (const id of ids) writeWav(t.env, id, '收到');
+    t.api.state.todo = ids.map((id) => todoItem(id));
+    t.start();
+    await until(() => t.api.todoCalls().length >= 4, 8000);
+
+    assert.equal(t.api.state.posts.length, 0);
+    assert.equal(t.api.state.todo.length, 4);
+    const msgs = t.api.state.statuses.filter((s) => !s.ok).map((s) => s.message);
+    assert.match(msgs[0]!, /fm-fail-1.*fm-fail-2|fm-fail-2.*fm-fail-1/);
+    // 第二轮是拿别的条目对照，对照的那条也点名
+    assert.ok(msgs.some((m) => /fm-fail-3/.test(m)), msgs.join('\n'));
+  });
+
+  // 线上一次来一条：跨批次也要认出「连着两条」。
+  it('一次一条的批次：第一条记 error，第二条在同一步失败就升级成环境的问题，不记', async () => {
+    const t = await setup();
+    for (const id of ['fm-fail-1', 'fm-fail-2']) writeWav(t.env, id, '收到');
+    t.api.state.todo = [todoItem('fm-fail-1')];
+    t.start();
+    await until(() => t.api.state.posts.length === 1);
+    assert.equal(t.api.state.posts[0]!.activityId, 'fm-fail-1');
+    assert.ok(t.api.state.posts[0]!.error);
+    assert.ok(t.api.state.statuses.every((s) => s.ok));
+
+    t.api.state.todo = [todoItem('fm-fail-2')];
+    await until(() => t.api.state.statuses.some((s) => !s.ok));
+    const paused = t.api.state.statuses.find((s) => !s.ok)!;
+    assert.match(paused.message, /fm-fail-1/);
+    assert.match(paused.message, /fm-fail-2/);
+    assert.equal(t.api.state.posts.length, 1);
+  });
+
+  it('隔了一条成功的，不算连着：两条失败都记 error', async () => {
+    const t = await setup();
+    for (const id of ['fm-fail-1', 'fm-fail-2']) writeWav(t.env, id, '收到');
+    writeWav(t.env, 'fm-ok', '我是 BH1ABC');
+    t.api.state.todo = [todoItem('fm-fail-1')];
+    t.start();
+    await until(() => t.api.state.posts.length === 1);
+    t.api.state.todo = [todoItem('fm-ok')];
+    await until(() => t.api.state.posts.length === 2);
+    t.api.state.todo = [todoItem('fm-fail-2')];
+    await until(() => t.api.state.posts.length === 3);
+    assert.ok(t.api.state.posts[2]!.error);
+    assert.ok(t.api.state.statuses.every((s) => s.ok));
+  });
+
+  it('同一条自己重试时又失败，不当成「连着两条」', async () => {
+    const t = await setup();
+    writeWav(t.env, 'fm-fail-1', '收到');
+    t.api.state.todo = [todoItem('fm-fail-1')];
+    t.start();
+    await until(() => t.api.state.posts.length === 1);
+    // api 过了一小时又把它给回来
+    t.api.state.todo = [todoItem('fm-fail-1')];
+    await until(() => t.api.state.posts.length === 2);
+    assert.ok(t.api.state.statuses.every((s) => s.ok));
+  });
+
   it('api 推送失败是环境的问题：退避后重做', async () => {
     const t = await setup();
     writeWav(t.env, 'fm-1', '我是 BH1ABC');

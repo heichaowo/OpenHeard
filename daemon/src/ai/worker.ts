@@ -119,11 +119,25 @@ export class Stats {
   }
 }
 
-/** 同一步连着两条失败，多半不是这两条的错。先扣着，等下一条的结果再定。 */
+/** 同一批里的失败先扣着，等下一条的结果再定，批末才推。 */
 interface Held {
   step: Step;
   result: AiResult;
   ms: number;
+}
+
+/**
+ * 同一步连着两条失败（中间没有成功过，跨批次也算）多半不是这两条的错，当成环境的问题，
+ * 两条都记成嫌疑。嫌疑不能永远挡住队列，也不能把环境的错记到录音头上，所以下一批
+ * 先做别的条目来对照：
+ * - 别的条目在这一步通过了：环境没问题，嫌疑条目再失败就记 error（verified）
+ * - 别的条目在这一步也失败了：确是环境的问题，退避，什么都不记，嫌疑作废
+ * - 批里只有嫌疑条目，没得对照：嫌疑条目再失败就记 error，队列也得往前走
+ */
+interface Suspects {
+  step: Step;
+  ids: Set<string>;
+  verified: boolean;
 }
 
 /**
@@ -149,6 +163,9 @@ export function startAi(
   let waiter: { done: () => void; interruptible: boolean } | undefined;
   let lastStatus: { ok: boolean; message: string; at: number } | undefined;
   let lastMissing = '';
+  /** 最近一条失败的录音，成功一条就清掉。跨批次留着：线上一次只来一条，批次内扣着认不出来。 */
+  let lastFail: { step: Step; id: string } | undefined;
+  let suspects: Suspects | undefined;
 
   /** 等一会儿。wake 只打断空闲的等待，退避和预检的等待只有 stop 能打断。 */
   const wait = (ms: number, interruptible: boolean) =>
@@ -175,8 +192,8 @@ export function startAi(
     await api.status(ok, message);
   };
 
-  /** 一条录音做到哪算哪，出错时已经做完的部分不丢。 */
-  async function processItem(item: TodoItem, out: AiResult): Promise<boolean> {
+  /** 一条录音做到哪算哪，出错时已经做完的部分不丢。done 记下通过了哪几步。 */
+  async function processItem(item: TodoItem, out: AiResult, done: Set<Step>): Promise<boolean> {
     if (!/^[\w.-]+$/.test(item.id)) throw new ItemError('asr', `录音 id 不合法：${item.id}`);
     const wav = join(cfg.recordingsDir, `${item.id}.wav`);
     let raw = item.transcript !== undefined && item.transcript !== '' ? item.transcript : undefined;
@@ -187,12 +204,14 @@ export function startAi(
     if (raw === undefined) {
       if (cfg.vad.provider === 'local' && hasSpeech === undefined) {
         hasSpeech = await detectSpeech(cfg.vad, wav, item.durationS);
+        done.add('vad');
         out.hasSpeech = hasSpeech;
         worked = true;
         if (!hasSpeech) return true;
       }
       if (cfg.asr.provider === 'off') return worked;
       raw = await transcribe(cfg.asr, wav);
+      done.add('asr');
       out.transcript = raw;
       out.asrModel = asrModelName(cfg.asr);
       worked = true;
@@ -216,6 +235,7 @@ export function startAi(
         localUrl,
         timing.textTimeoutMs,
       );
+      done.add('text');
       out.category = got.category;
       out.fields = got.fields;
       out.textModel = textModelName(cfg.text);
@@ -233,6 +253,7 @@ export function startAi(
     stats.add(result, ms);
     if (result.error === undefined) {
       backoffMs = 0;
+      lastFail = undefined;
       await report(true, '正常');
     }
   }
@@ -249,30 +270,72 @@ export function startAi(
       pushed += 1;
     };
 
-    for (const item of items) {
+    // 有嫌疑的先放后面，让别的条目先来对照环境
+    const probe = suspects;
+    const ordered =
+      probe === undefined
+        ? items
+        : [...items.filter((i) => !probe.ids.has(i.id)), ...items.filter((i) => probe.ids.has(i.id))];
+
+    for (const item of ordered) {
       if (stopped) return pushed;
       const started = Date.now();
       const out: AiResult = { activityId: item.id };
+      const done = new Set<Step>();
       try {
-        const worked = await processItem(item, out);
+        const worked = await processItem(item, out, done);
         if (stopped) return pushed;
         if (!worked) continue;
         await flush();
         await post(out, Date.now() - started);
         pushed += 1;
+        if (suspects !== undefined) {
+          // 别的条目通过了嫌疑的那一步：环境没问题
+          if (!suspects.ids.has(item.id) && done.has(suspects.step)) suspects.verified = true;
+        }
       } catch (e) {
         if (stopped) return pushed;
         if (!(e instanceof ItemError)) throw e;
-        if (held !== undefined && held.step === e.step) {
+        console.error(`识别失败 ${item.id}（${e.step}）：${e.message}`);
+        const ms = Date.now() - started;
+        const sus = suspects;
+        if (sus !== undefined && sus.step === e.step) {
+          if (sus.ids.has(item.id)) {
+            // 嫌疑条目又失败了，不管有没有对照过，都是它自己的问题，记下来让队列往前走。
+            // 不进 lastFail：几个嫌疑条目挨着失败不能再触发一次暂停。
+            await flush();
+            lastFail = undefined;
+            await post({ ...out, error: e.message }, ms);
+            pushed += 1;
+            continue;
+          }
+          if (!sus.verified) {
+            suspects = undefined;
+            lastFail = undefined;
+            held = undefined;
+            throw new WorkerError(
+              `${[...sus.ids].join('、')} 在 ${e.step} 上失败，换 ${item.id} 一试也失败，是环境的问题：${e.message}`,
+            );
+          }
+        }
+        const last = lastFail;
+        if (last !== undefined && last.step === e.step && last.id !== item.id) {
+          // 第一条要么扣在 held 里，要么上一批已经推了 error。这一条不推。
+          suspects = { step: e.step, ids: new Set([last.id, item.id]), verified: false };
           held = undefined;
-          throw new WorkerError(`连着两条录音在 ${e.step} 上失败，当成环境的问题：${e.message}`);
+          lastFail = undefined;
+          throw new WorkerError(
+            `连着两条录音在 ${e.step} 上失败，当成环境的问题，先做别的条目对照。嫌疑：${last.id}、${item.id}。${e.message}`,
+          );
         }
         await flush();
-        console.error(`识别失败 ${item.id}（${e.step}）：${e.message}`);
-        held = { step: e.step, result: { ...out, error: e.message }, ms: Date.now() - started };
+        held = { step: e.step, result: { ...out, error: e.message }, ms };
+        lastFail = { step: e.step, id: item.id };
       }
     }
     await flush();
+    // 嫌疑只管紧接着的这一批。做完了，不管对照上没有，都不再留着。
+    suspects = undefined;
     return pushed;
   }
 
