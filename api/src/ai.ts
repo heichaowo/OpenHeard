@@ -43,13 +43,16 @@ const clip = (v: unknown, max: number): string | undefined => {
   return s === '' ? undefined : s;
 };
 
+/** 「BG零」转写成「B七零」，提示词说过了模型还是会给 B70 加字母。中国没有 B70 这种呼号。 */
+const fixB70 = (call: string) => call.replace(/^B70([A-Z]{1,3})$/, 'BG0$1');
+
 function cleanFields(v: unknown): AiFields | undefined {
   if (!isObject(v)) return undefined;
   const out: AiFields = {};
   for (const k of ['call', 'calledCall'] as const) {
     const s = clip(v[k], 100);
     // 模型常把两边的呼号说反、也会编出不像呼号的东西，挡在入库之前。
-    if (s !== undefined && isValidCallsign(s)) out[k] = normalizeCallsign(s);
+    if (s !== undefined && isValidCallsign(s)) out[k] = fixB70(normalizeCallsign(s));
   }
   for (const k of ['qth', 'device', 'antenna', 'height'] as const) {
     const s = clip(v[k], 100);

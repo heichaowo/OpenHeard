@@ -75,6 +75,14 @@ describe('cleanAiResult', () => {
     assert.deepEqual(r.fields, { call: 'BD7ABC', rst: '57', power: '5W', qth: '海淀', height: '30米' });
   });
 
+  // MiMo 把「BG零」转写成「B七零」，模型照着提取出 B70DKZ。
+  it('B70 加字母改成 BG0，别的呼号不动', () => {
+    const call = (c: string) => cleanAiResult({ activityId: 'a', fields: { call: c } })!.fields!.call;
+    assert.equal(call('B70DKZ'), 'BG0DKZ');
+    assert.equal(call('b70 bm'), 'BG0BM');
+    for (const c of ['BG0DLC', 'B70', 'B70DKZ/P', 'BA7ABC', 'B701AB']) assert.equal(call(c), c);
+  });
+
   it('rst 和 power 不合格就丢，别的字段照留', () => {
     const r = cleanAiResult({ activityId: 'a', fields: { rst: '5个9', power: '五瓦', qth: '朝阳', device: 'UV-5R' } })!;
     assert.deepEqual(r.fields, { qth: '朝阳', device: 'UV-5R' });

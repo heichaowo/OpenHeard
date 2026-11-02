@@ -52,6 +52,8 @@ category 一定要有，三选一：
 
 呼号用 NATO 字母或中文口语读出来时，解码成大写、没有空格的呼号。「Bravo Golf Zero Charlie Golf」写成 BG0CG，「B G 零 C G」也写成 BG0CG。
 
+中国的呼号是 B、一个字母、一位数字，再加一到三个字母，例如 BG0CG、BH1ABC。转写常把「BG零」写成「B七零」或「B70」：「B七零DLC」「B70DLC」都写成 BG0DLC，不要写成 B70DLC 或 BH7DLC。
+
 示例：{"category":"qso","call":"BH1ABC","calledCall":"BG0CG","rst":"59","qth":"成都"}`;
 
 /** 告诉模型这是谁在说话、在哪个信道上：「本台」说的话，call 就是本台的呼号。 */
