@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Typography } from 'antd'
+import { Alert, Typography } from 'antd'
 import { api } from '../../api'
-import type { Radio } from '../../api'
+import type { Radio, RadiosResponse } from '../../api'
 import { useStore } from '../../store'
 
 const POLL_MS = 3000
@@ -25,6 +25,7 @@ export function LiveStrip() {
   const { analogEnabled } = useStore()
   // undefined 是第一次还没拉回来，[] 是拉回来了但一条都没有，两者说的话不一样。
   const [radios, setRadios] = useState<Radio[] | undefined>()
+  const [aiPaused, setAiPaused] = useState<RadiosResponse['aiPaused']>()
 
   useEffect(() => {
     if (!analogEnabled) return
@@ -32,7 +33,10 @@ export function LiveStrip() {
     const load = async () => {
       try {
         const r = await api.radios()
-        if (alive) setRadios(r.radios)
+        if (alive) {
+          setRadios(r.radios)
+          setAiPaused(r.aiPaused)
+        }
       } catch {
         // 掉一次拉不到，下一轮自己会再试。这条只读内存状态，不值得为它弹提示。
       }
@@ -58,28 +62,39 @@ export function LiveStrip() {
     )
   }
 
+  // 识别打开着却停了。运维页不常看，停了要在这里说出来。
+  const paused = aiPaused && (
+    <Alert type="warning" showIcon message={`识别停着：${aiPaused.message}`} description="到设置页的「识别」卡里改。" />
+  )
+
   // 守护进程没在跑、刚起来还在校准，或者 api 刚重启，都会是一条都没有。
   // 空着一个框看上去像页面坏了，说一句。
   if (radios === undefined) return <div className="live-strip" />
   if (radios.length === 0) {
     return (
-      <Typography.Text type="secondary" className="live-strip-off">
-        还没有电台状态，守护进程可能没在跑
-      </Typography.Text>
+      <>
+        <Typography.Text type="secondary" className="live-strip-off">
+          还没有电台状态，守护进程可能没在跑
+        </Typography.Text>
+        {paused}
+      </>
     )
   }
 
   return (
-    <div className="live-strip">
-      {radios.map((r) => {
-        const st = stateOf(r)
-        return (
-          <div key={`${r.freqMhz}|${r.channel}`} className="live-cell">
-            <span className="live-channel">{r.channel}</span>
-            <span className={st.cls}>{st.label}</span>
-          </div>
-        )
-      })}
-    </div>
+    <>
+      <div className="live-strip">
+        {radios.map((r) => {
+          const st = stateOf(r)
+          return (
+            <div key={`${r.freqMhz}|${r.channel}`} className="live-cell">
+              <span className="live-channel">{r.channel}</span>
+              <span className={st.cls}>{st.label}</span>
+            </div>
+          )
+        })}
+      </div>
+      {paused}
+    </>
   )
 }

@@ -694,6 +694,18 @@ describe('小结日志', () => {
     await until(() => logged.some((l) => l.startsWith('识别小结：处理 1 条')));
     await until(() => logged.some((l) => l.startsWith('识别小结：处理 0 条')));
   });
+
+  // 停着时写「处理 0 条」，看着像没有活，12 天没人察觉。
+  it('停着的那一段，小结写暂停的原因', async () => {
+    const t = await setup(undefined, undefined, { statsMs: 150 });
+    t.cfg.asr.modelPath = join(t.env.models, 'late.bin');
+    const logged: string[] = [];
+    mock.method(console, 'log', (...a: unknown[]) => logged.push(a.join(' ')));
+    mock.method(console, 'error', () => undefined);
+    t.start();
+    await until(() => logged.some((l) => l.startsWith('识别暂停：缺文件')));
+    assert.ok(!logged.some((l) => l.startsWith('识别小结')));
+  });
 });
 
 // 不用别的文件：这里只是确认 AiApi 拿的是 Bearer，不是别的凭据

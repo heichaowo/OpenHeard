@@ -8,13 +8,14 @@ import { StoreContext } from '../store'
 import type { Store } from '../store'
 import SettingsPage from './SettingsPage'
 
-const { settings, saveSettings } = vi.hoisted(() => ({
+const { settings, saveSettings, radios } = vi.hoisted(() => ({
   settings: vi.fn(),
   saveSettings: vi.fn(),
+  radios: vi.fn(),
 }))
 vi.mock('../api', async (importOriginal) => {
   const real = await importOriginal<typeof import('../api')>()
-  return { ...real, api: { ...real.api, settings, saveSettings } }
+  return { ...real, api: { ...real.api, settings, saveSettings, radios } }
 })
 
 const store = (map: Store['map'] = { provider: 'none' }) => ({ refresh: vi.fn(), map, station: {} }) as unknown as Store
@@ -91,9 +92,27 @@ const base: Settings = {
   map: { provider: 'none', amapKey: '', amapSecurityCodeSet: false },
 }
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  radios.mockResolvedValue({ analogEnabled: false, radios: [] })
+})
 
 describe('SettingsPage', () => {
+  // 识别停了 12 天没人察觉：运维页不常看，设置页的识别卡要自己说。
+  it('识别打开着却停了，识别卡上写守护进程报的原因', async () => {
+    radios.mockResolvedValue({ analogEnabled: true, radios: [], aiPaused: { message: '缺文件，识别没有开始：提取模型 x', at: 1 } })
+    mount({ ...base, ai: { ...aiDefaults, enabled: true } })
+    expect(await screen.findByText('识别停着')).toBeInTheDocument()
+    expect(screen.getByText('缺文件，识别没有开始：提取模型 x')).toBeInTheDocument()
+  })
+
+  it('识别没停，识别卡上没有这条提示', async () => {
+    mount({ ...base, ai: { ...aiDefaults, enabled: true } })
+    await screen.findByLabelText('QTH')
+    await waitFor(() => expect(radios).toHaveBeenCalled())
+    expect(screen.queryByText('识别停着')).not.toBeInTheDocument()
+  })
+
   // 没配过模拟守听的机器，那一栏整个空着是正常的，不能因此什么都存不了。
   it('没配模拟守听时，只改本台信息也存得下', async () => {
     mount(base)

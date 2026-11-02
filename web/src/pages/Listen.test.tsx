@@ -354,6 +354,17 @@ describe('直播条', () => {
     expect(screen.getByText('438.500 中继')).toBeInTheDocument()
   })
 
+  it('识别打开着却停了，直播条下面写原因和去哪改', async () => {
+    radios.mockResolvedValue({
+      analogEnabled: true,
+      radios: [{ freqMhz: 438.5, channel: '438.500 中继', open: false, fresh: true }],
+      aiPaused: { message: '缺文件，识别没有开始：提取模型 x', at: 1 },
+    })
+    render(tree(store([], { analogEnabled: true })))
+    expect(await screen.findByText('识别停着：缺文件，识别没有开始：提取模型 x')).toBeInTheDocument()
+    expect(screen.getByText(/设置页的「识别」卡/)).toBeInTheDocument()
+  })
+
   // 守护进程没在跑时一条状态都没有，空着一个框看上去像页面坏了。
   it('开着模拟守听却一条状态都没有，说守护进程可能没在跑', async () => {
     render(tree(store([], { analogEnabled: true })))

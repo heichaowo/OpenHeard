@@ -393,7 +393,9 @@ export function startAi(
   void loop;
 
   const statsTimer = setInterval(() => {
-    console.log(stats.line());
+    // 停着时「处理 0 条」像是没有活，要写为什么停。
+    const paused = lastStatus !== undefined && !lastStatus.ok && stats.processed + stats.errors === 0;
+    console.log(paused ? `识别暂停：${lastStatus!.message}` : stats.line());
     stats.reset();
   }, timing.statsMs);
   statsTimer.unref();

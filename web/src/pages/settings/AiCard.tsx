@@ -103,10 +103,13 @@ export function AiCard({
   secrets,
   onSecret,
   problem,
+  paused,
 }: {
   form: FormInstance<FormValues>
   /** 配置文件里 ai 段写坏了，坏在哪。 */
   problem?: string
+  /** 识别打开着，守护进程却报了暂停，报的原话。 */
+  paused?: string
   /** 总开关此刻开着没有。 */
   on: boolean
   keysSet: { asr: boolean; text: boolean }
@@ -139,6 +142,9 @@ export function AiCard({
           message="配置文件里的 ai 段有问题，现在按关着处理"
           description={`${problem}。下面是缺省值，不是文件里写的。保存这一卡会替换文件里的整个 ai 段，包括里面的 key。`}
         />
+      )}
+      {paused !== undefined && (
+        <Alert type="warning" showIcon style={{ marginBottom: 16 }} message="识别停着" description={paused} />
       )}
       {!on && (
         <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>

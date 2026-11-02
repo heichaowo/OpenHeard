@@ -118,6 +118,7 @@ export default function SettingsPage() {
   // 人改过 ai 或 map 里的哪一段。没改的段不发，见 settings/model.ts 的 toBody。
   const touched = useRef<Touched>({ ai: false, map: false });
   const [settings, setSettings] = useState<Settings | undefined>();
+  const [aiPaused, setAiPaused] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -144,6 +145,11 @@ export default function SettingsPage() {
     try {
       const s = await api.settings();
       setSettings(s);
+      // 识别停着的原因只在内存里，跟电台状态一起拿。拿不到不影响改设置。
+      api.radios().then(
+        (r) => setAiPaused(r.aiPaused?.message),
+        () => setAiPaused(undefined),
+      );
       form.setFieldsValue(toForm(s));
       touched.current = { ai: false, map: false };
       setError(undefined);
@@ -383,6 +389,7 @@ export default function SettingsPage() {
             secrets={secrets}
             onSecret={setSecret}
             problem={settings?.aiProblem}
+            paused={aiPaused}
           />
 
           <Card size="small" title="本台" style={{ marginBottom: 16 }}>

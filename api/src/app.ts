@@ -193,9 +193,15 @@ export function createApp(
     .get('/qsos/:id/history', (c) => c.json(store.qsoHistory(c.req.param('id'))))
 
     // 电台此刻的样子。关着的时候一律是空数组，和 /api/ops 那份用同一个函数判。
-    .get('/radios', (c) =>
-      c.json({ analogEnabled: store.switches().analogEnabled, radios: radiosOf(radio, store.switches().analogEnabled, nowS()) }),
-    )
+    // 识别停着也放这里：收听页本来就 3 秒拉一次，同样只读内存。
+    .get('/radios', (c) => {
+      const aiPaused = store.aiPaused();
+      return c.json({
+        analogEnabled: store.switches().analogEnabled,
+        radios: radiosOf(radio, store.switches().analogEnabled, nowS()),
+        ...(aiPaused === undefined ? {} : { aiPaused }),
+      });
+    })
 
     .get('/activities', (c) => {
       try {

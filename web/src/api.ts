@@ -293,6 +293,8 @@ export interface ConversationsResponse {
 export interface RadiosResponse {
   analogEnabled: boolean
   radios: Radio[]
+  /** 识别打开着、守护进程却报了暂停时才有。 */
+  aiPaused?: { message: string; at: number }
 }
 
 // 参数类型没有索引签名（ConversationsParams 逐个字段写死，不想为了这一个

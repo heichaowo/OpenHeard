@@ -521,6 +521,12 @@ export function createStore(db: DatabaseSync, config: Config) {
       aiWorker = { at: nowS(), ok, message: message.slice(0, 500) };
     },
 
+    /** 识别打开着，守护进程却报了暂停。收听页和设置页拿它挂提示。 */
+    aiPaused: (): { message: string; at: number } | undefined =>
+      config.ai?.enabled === true && aiWorker !== undefined && !aiWorker.ok
+        ? { message: aiWorker.message, at: aiWorker.at }
+        : undefined,
+
     /** api 起来时调一次：上次的错误多半是配置问题，清掉重做。 */
     resetAiErrors: (): number => resetAiErrors(db),
 

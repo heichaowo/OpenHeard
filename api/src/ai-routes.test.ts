@@ -282,6 +282,22 @@ describe('/api/ingest/ai', () => {
     assert.equal(ops.ai.worker.at >= NOW, true);
     assert.equal((await ingest(m, 'POST', '/api/ingest/ai/status', { ok: 'no' })).status, 422);
   });
+
+  it('/api/radios 的 aiPaused：识别开着又报了暂停才有，恢复了就没有', async () => {
+    const on = { enabled: true, vad: { provider: 'local' }, asr: { provider: 'local' }, text: { provider: 'off' } };
+    const radios = async (m: Made) => json<{ aiPaused?: { message: string; at: number } }>(await get(m, '/api/radios'));
+
+    const off = make();
+    await ingest(off, 'POST', '/api/ingest/ai/status', { ok: false, message: '缺文件' });
+    assert.equal((await radios(off)).aiPaused, undefined);
+
+    const m = make({ file: { ai: on } });
+    assert.equal((await radios(m)).aiPaused, undefined);
+    await ingest(m, 'POST', '/api/ingest/ai/status', { ok: false, message: '缺文件，识别没有开始：提取模型 x' });
+    assert.equal((await radios(m)).aiPaused?.message, '缺文件，识别没有开始：提取模型 x');
+    await ingest(m, 'POST', '/api/ingest/ai/status', { ok: true, message: '正常' });
+    assert.equal((await radios(m)).aiPaused, undefined);
+  });
 });
 
 describe('GET /api/ops 的 ai', () => {
