@@ -44,7 +44,7 @@ describe('MapPicker 的起点和标记', () => {
     mount(f)
     await ready(f)
     expect(f.factory.mock.calls[0]![1]).toMatchObject({ center: { lat: 35, lon: 104 }, zoom: 4 })
-    expect(f.adapter.setMarker).toHaveBeenLastCalledWith(null)
+    await waitFor(() => expect(f.adapter.setMarker).toHaveBeenLastCalledWith(null))
     expect(useButton()).toBeDisabled()
   })
 
@@ -53,7 +53,7 @@ describe('MapPicker 的起点和标记', () => {
     mount(f, { stationGrid: 'OM89EV' })
     await ready(f)
     expect(f.factory.mock.calls[0]![1].center).toEqual(gridCenter('OM89EV'))
-    expect(f.adapter.setMarker).toHaveBeenLastCalledWith(null)
+    await waitFor(() => expect(f.adapter.setMarker).toHaveBeenLastCalledWith(null))
     expect(useButton()).toBeDisabled()
   })
 

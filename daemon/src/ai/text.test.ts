@@ -54,6 +54,7 @@ describe('提示词', () => {
   // MiMo 常把「BG零」转写成「B七零」，提取出 B70DKZ、BH7FSX。
   it('系统提示说明「B七零」是「BG零」听错了', () => {
     assert.match(SYSTEM_PROMPT, /「B七零DLC」「B70DLC」都写成 BG0DLC/);
+    assert.match(SYSTEM_PROMPT, /第一个数字之前全是字母，数字只有一位，数字之后全是字母/);
   });
 
   it('用户消息说明谁在说、在哪个信道', () => {

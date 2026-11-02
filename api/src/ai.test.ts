@@ -76,11 +76,14 @@ describe('cleanAiResult', () => {
   });
 
   // MiMo 把「BG零」转写成「B七零」，模型照着提取出 B70DKZ。
-  it('B70 加字母改成 BG0，别的呼号不动', () => {
+  it('B70 加字母改成 BG0，改完不合中国呼号形状的丢掉，外国呼号不管', () => {
     const call = (c: string) => cleanAiResult({ activityId: 'a', fields: { call: c } })!.fields!.call;
     assert.equal(call('B70DKZ'), 'BG0DKZ');
     assert.equal(call('b70 bm'), 'BG0BM');
-    for (const c of ['BG0DLC', 'B70', 'B70DKZ/P', 'BA7ABC', 'B701AB']) assert.equal(call(c), c);
+    assert.equal(call('B70DKZ/P'), 'BG0DKZ/P');
+    for (const c of ['BG0DLC', 'BA0AI', 'BH1ABC', 'BY1PK', 'N1CEI', '9A1A', 'VP2E/BG0CG']) assert.equal(call(c), c);
+    // 第一个数字之前全是字母，数字只有一位，之后全是字母。
+    for (const c of ['BG01EBX', 'B70', 'B701AB', 'BA6', 'B19C', 'BZ01K']) assert.equal(call(c), undefined);
   });
 
   it('rst 和 power 不合格就丢，别的字段照留', () => {
